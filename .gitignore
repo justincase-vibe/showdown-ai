@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Node / server
+pokemon-showdown/node_modules/
+pokemon-showdown/dist/
+pokemon-showdown/build/
+pokemon-showdown/data/
+pokemon-showdown/databases/
+pokemon-showdown/logs/
+server.log
+
+# Data (too large for git)
+bot/data/
+
+# Misc
+*.log
+.DS_Store
+Thumbs.db
+pokemon-showdown/
+bot/replays/

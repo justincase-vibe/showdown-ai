@@ -1,0 +1,957 @@
+{
+ "gen6ou": [
+  {
+   "species": "Garchomp",
+   "item": "Life Orb",
+   "abilities": [
+    "Rough Skin"
+   ],
+   "moves": [
+    "Earthquake",
+    "Stone Edge",
+    "Fire Fang",
+    "Outrage"
+   ],
+   "nature": "Adamant",
+   "evs": [
+    0,
+    252,
+    0,
+    4,
+    0,
+    252
+   ],
+   "ability": "Rough Skin"
+  },
+  {
+   "species": "Landorus-T",
+   "item": "Life Orb",
+   "abilities": [
+    "Intimidate"
+   ],
+   "moves": [
+    "U-turn",
+    "Earth Power",
+    "Stealth Rock",
+    "Knock Off"
+   ],
+   "nature": "Careful",
+   "evs": [
+    0,
+    0,
+    0,
+    252,
+    4,
+    252
+   ],
+   "ability": "Intimidate"
+  },
+  {
+   "species": "Keldeo",
+   "item": "Life Orb",
+   "abilities": [
+    "Justified"
+   ],
+   "moves": [
+    "Secret Sword",
+    "Aqua Jet",
+    "Surf",
+    "Calm Mind"
+   ],
+   "nature": "Modest",
+   "evs": [
+    0,
+    0,
+    0,
+    252,
+    4,
+    252
+   ],
+   "ability": "Justified"
+  },
+  {
+   "species": "Talonflame",
+   "item": "Flame Orb",
+   "abilities": [
+    "Gale Wings"
+   ],
+   "moves": [
+    "Brave Bird",
+    "Acrobatics",
+    "Roost",
+    "Tailwind"
+   ],
+   "nature": "Adamant",
+   "evs": [
+    0,
+    252,
+    0,
+    0,
+    4,
+    252
+   ],
+   "ability": "Gale Wings"
+  },
+  {
+   "species": "Amoonguss",
+   "item": "Black Sludge",
+   "abilities": [
+    "Regenerator"
+   ],
+   "moves": [
+    "Spore",
+    "Giga Drain",
+    "Toxic",
+    "Synthesis"
+   ],
+   "nature": "Relaxed",
+   "evs": [
+    252,
+    0,
+    252,
+    0,
+    0,
+    4
+   ],
+   "ability": "Regenerator"
+  },
+  {
+   "species": "Clefable",
+   "item": "Leftovers",
+   "abilities": [
+    "Magic Guard"
+   ],
+   "moves": [
+    "Calm Mind",
+    "Moonblast",
+    "Soft-Boiled",
+    "Thunder Wave"
+   ],
+   "nature": "Modest",
+   "evs": [
+    252,
+    0,
+    0,
+    252,
+    4,
+    0
+   ],
+   "ability": "Magic Guard"
+  },
+  {
+   "species": "Ferrothorn",
+   "item": "Light Clay",
+   "abilities": [
+    "Iron Barbs"
+   ],
+   "moves": [
+    "Spikes",
+    "Leech Seed",
+    "Power Whip",
+    "Knock Off"
+   ],
+   "nature": "Relaxed",
+   "evs": [
+    252,
+    0,
+    252,
+    0,
+    0,
+    4
+   ],
+   "ability": "Iron Barbs"
+  },
+  {
+   "species": "Gliscor",
+   "item": "Toxic Orb",
+   "abilities": [
+    "Poison Heal"
+   ],
+   "moves": [
+    "Earthquake",
+    "Swords Dance",
+    "Acrobatics",
+    "Roost"
+   ],
+   "nature": "Adamant",
+   "evs": [
+    0,
+    252,
+    0,
+    0,
+    4,
+    252
+   ],
+   "ability": "Poison Heal"
+  },
+  {
+   "species": "Hippowdon",
+   "item": "Rocky Helmet",
+   "abilities": [
+    "Sand Force"
+   ],
+   "moves": [
+    "Earthquake",
+    "Stealth Rock",
+    "Slack Off",
+    "Roar"
+   ],
+   "nature": "Impish",
+   "evs": [
+    252,
+    0,
+    252,
+    0,
+    0,
+    4
+   ],
+   "ability": "Sand Force"
+  },
+  {
+   "species": "Rotom-Wash",
+   "item": "Leftovers",
+   "abilities": [
+    "Levitate",
+    "Water Absorb"
+   ],
+   "moves": [
+    "Thunderbolt",
+    "Hydro Pump",
+    "Will-O-Wisp",
+    "Volt Switch"
+   ],
+   "nature": "Modest",
+   "evs": [
+    0,
+    0,
+    0,
+    252,
+    4,
+    0
+   ],
+   "ability": "Levitate"
+  },
+  {
+   "species": "Kyurem",
+   "item": "Life Orb",
+   "abilities": [
+    "Pressure"
+   ],
+   "moves": [
+    "Ice Beam",
+    "Dragon Pulse",
+    "Earth Power",
+    "Roost"
+   ],
+   "nature": "Modest",
+   "evs": [
+    0,
+    0,
+    0,
+    252,
+    0,
+    252
+   ],
+   "ability": "Pressure"
+  },
+  {
+   "species": "Tornadus-T",
+   "item": "Life Orb",
+   "abilities": [
+    "Regenerator",
+    "Prankster"
+   ],
+   "moves": [
+    "U-turn",
+    "Taunt",
+    "Hurricane",
+    "Knock Off"
+   ],
+   "nature": "Timid",
+   "evs": [
+    0,
+    0,
+    0,
+    252,
+    0,
+    252
+   ],
+   "ability": "Regenerator"
+  },
+  {
+   "species": "Skarmory",
+   "item": "Leftovers",
+   "abilities": [
+    "Sturdy"
+   ],
+   "moves": [
+    "Spikes",
+    "Brave Bird",
+    "Roost",
+    "Whirlwind"
+   ],
+   "nature": "Impish",
+   "evs": [
+    252,
+    0,
+    252,
+    0,
+    0,
+    4
+   ],
+   "ability": "Sturdy"
+  },
+  {
+   "species": "Lucario",
+   "item": "Life Orb",
+   "abilities": [
+    "Justified",
+    "Adaptability"
+   ],
+   "moves": [
+    "Close Combat",
+    "Flash Cannon",
+    "Swords Dance",
+    "Extreme Speed"
+   ],
+   "nature": "Jolly",
+   "evs": [
+    0,
+    252,
+    0,
+    0,
+    0,
+    252
+   ],
+   "ability": "Justified"
+  },
+  {
+   "species": "Scizor",
+   "item": "Leftovers",
+   "abilities": [
+    "Technician"
+   ],
+   "moves": [
+    "U-turn",
+    "Roost",
+    "Swords Dance",
+    "Bullet Punch"
+   ],
+   "nature": "Adamant",
+   "evs": [
+    0,
+    252,
+    0,
+    0,
+    4,
+    252
+   ],
+   "ability": "Technician"
+  },
+  {
+   "species": "Milotic",
+   "item": "Leftovers",
+   "abilities": [
+    "Marvel Scale"
+   ],
+   "moves": [
+    "Scald",
+    "Ice Beam",
+    "Toxic",
+    "Recover"
+   ],
+   "nature": "Bold",
+   "evs": [
+    252,
+    0,
+    252,
+    0,
+    0,
+    4
+   ],
+   "ability": "Marvel Scale"
+  },
+  {
+   "species": "Gyarados",
+   "item": "Life Orb",
+   "abilities": [
+    "Intimidate"
+   ],
+   "moves": [
+    "Waterfall",
+    "Bounce",
+    "Dragon Dance",
+    "Ice Fang"
+   ],
+   "nature": "Jolly",
+   "evs": [
+    0,
+    252,
+    0,
+    0,
+    0,
+    252
+   ],
+   "ability": "Intimidate"
+  },
+  {
+   "species": "Slowbro",
+   "item": "Leftovers",
+   "abilities": [
+    "Regenerator",
+    "Own Tempo"
+   ],
+   "moves": [
+    "Scald",
+    "Ice Beam",
+    "Toxic",
+    "Calm Mind"
+   ],
+   "nature": "Bold",
+   "evs": [
+    252,
+    0,
+    252,
+    0,
+    0,
+    4
+   ],
+   "ability": "Regenerator"
+  },
+  {
+   "species": "Tyranitar",
+   "item": "Leftovers",
+   "abilities": [
+    "Sand Stream"
+   ],
+   "moves": [
+    "Crunch",
+    "Stone Edge",
+    "Earthquake",
+    "Dragon Dance"
+   ],
+   "nature": "Adamant",
+   "evs": [
+    0,
+    252,
+    0,
+    0,
+    4,
+    252
+   ],
+   "ability": "Sand Stream"
+  },
+  {
+   "species": "Suicune",
+   "item": "Leftovers",
+   "abilities": [
+    "Pressure"
+   ],
+   "moves": [
+    "Scald",
+    "Ice Beam",
+    "Toxic",
+    "Roar"
+   ],
+   "nature": "Bold",
+   "evs": [
+    252,
+    0,
+    0,
+    0,
+    252,
+    4
+   ],
+   "ability": "Pressure"
+  }
+ ],
+ "gen7ou": [
+  {
+   "species": "Garchomp",
+   "item": "Life Orb",
+   "abilities": [
+    "Rough Skin"
+   ],
+   "moves": [
+    "Earthquake",
+    "Stone Edge",
+    "Fire Fang",
+    "Outrage"
+   ],
+   "nature": "Adamant",
+   "evs": [
+    0,
+    252,
+    0,
+    4,
+    0,
+    252
+   ],
+   "ability": "Rough Skin"
+  },
+  {
+   "species": "Landorus-T",
+   "item": "Life Orb",
+   "abilities": [
+    "Intimidate"
+   ],
+   "moves": [
+    "U-turn",
+    "Earth Power",
+    "Stealth Rock",
+    "Knock Off"
+   ],
+   "nature": "Careful",
+   "evs": [
+    0,
+    0,
+    0,
+    252,
+    4,
+    252
+   ],
+   "ability": "Intimidate"
+  },
+  {
+   "species": "Keldeo",
+   "item": "Life Orb",
+   "abilities": [
+    "Justified"
+   ],
+   "moves": [
+    "Secret Sword",
+    "Aqua Jet",
+    "Surf",
+    "Calm Mind"
+   ],
+   "nature": "Modest",
+   "evs": [
+    0,
+    0,
+    0,
+    252,
+    4,
+    252
+   ],
+   "ability": "Justified"
+  },
+  {
+   "species": "Talonflame",
+   "item": "Flame Orb",
+   "abilities": [
+    "Gale Wings"
+   ],
+   "moves": [
+    "Brave Bird",
+    "Acrobatics",
+    "Roost",
+    "Defog"
+   ],
+   "nature": "Adamant",
+   "evs": [
+    0,
+    252,
+    0,
+    0,
+    4,
+    252
+   ],
+   "ability": "Gale Wings"
+  },
+  {
+   "species": "Amoonguss",
+   "item": "Black Sludge",
+   "abilities": [
+    "Regenerator"
+   ],
+   "moves": [
+    "Spore",
+    "Giga Drain",
+    "Toxic",
+    "Synthesis"
+   ],
+   "nature": "Relaxed",
+   "evs": [
+    252,
+    0,
+    252,
+    0,
+    0,
+    4
+   ],
+   "ability": "Regenerator"
+  },
+  {
+   "species": "Clefable",
+   "item": "Leftovers",
+   "abilities": [
+    "Magic Guard"
+   ],
+   "moves": [
+    "Calm Mind",
+    "Moonblast",
+    "Soft-Boiled",
+    "Thunder Wave"
+   ],
+   "nature": "Modest",
+   "evs": [
+    252,
+    0,
+    0,
+    252,
+    4,
+    0
+   ],
+   "ability": "Magic Guard"
+  },
+  {
+   "species": "Ferrothorn",
+   "item": "Light Clay",
+   "abilities": [
+    "Iron Barbs"
+   ],
+   "moves": [
+    "Spikes",
+    "Leech Seed",
+    "Power Whip",
+    "Knock Off"
+   ],
+   "nature": "Relaxed",
+   "evs": [
+    252,
+    0,
+    252,
+    0,
+    0,
+    4
+   ],
+   "ability": "Iron Barbs"
+  },
+  {
+   "species": "Gliscor",
+   "item": "Toxic Orb",
+   "abilities": [
+    "Poison Heal"
+   ],
+   "moves": [
+    "Earthquake",
+    "Swords Dance",
+    "Acrobatics",
+    "Roost"
+   ],
+   "nature": "Adamant",
+   "evs": [
+    0,
+    252,
+    0,
+    0,
+    4,
+    252
+   ],
+   "ability": "Poison Heal"
+  },
+  {
+   "species": "Hippowdon",
+   "item": "Rocky Helmet",
+   "abilities": [
+    "Sand Force"
+   ],
+   "moves": [
+    "Earthquake",
+    "Stealth Rock",
+    "Slack Off",
+    "Roar"
+   ],
+   "nature": "Impish",
+   "evs": [
+    252,
+    0,
+    252,
+    0,
+    0,
+    4
+   ],
+   "ability": "Sand Force"
+  },
+  {
+   "species": "Greninja",
+   "item": "Life Orb",
+   "abilities": [
+    "Protean"
+   ],
+   "moves": [
+    "Water Pulse",
+    "Dark Pulse",
+    "Ice Beam",
+    "Surf"
+   ],
+   "nature": "Timid",
+   "evs": [
+    0,
+    0,
+    0,
+    252,
+    0,
+    252
+   ],
+   "ability": "Protean"
+  },
+  {
+   "species": "Rotom-Wash",
+   "item": "Leftovers",
+   "abilities": [
+    "Levitate",
+    "Water Absorb"
+   ],
+   "moves": [
+    "Thunderbolt",
+    "Hydro Pump",
+    "Will-O-Wisp",
+    "Volt Switch"
+   ],
+   "nature": "Modest",
+   "evs": [
+    0,
+    0,
+    0,
+    252,
+    4,
+    0
+   ],
+   "ability": "Levitate"
+  },
+  {
+   "species": "Kyurem",
+   "item": "Life Orb",
+   "abilities": [
+    "Pressure"
+   ],
+   "moves": [
+    "Ice Beam",
+    "Dragon Pulse",
+    "Earth Power",
+    "Roost"
+   ],
+   "nature": "Modest",
+   "evs": [
+    0,
+    0,
+    0,
+    252,
+    0,
+    252
+   ],
+   "ability": "Pressure"
+  },
+  {
+   "species": "Tornadus-T",
+   "item": "Life Orb",
+   "abilities": [
+    "Regenerator",
+    "Prankster"
+   ],
+   "moves": [
+    "U-turn",
+    "Defog",
+    "Taunt",
+    "Hurricane"
+   ],
+   "nature": "Timid",
+   "evs": [
+    0,
+    0,
+    0,
+    252,
+    0,
+    252
+   ],
+   "ability": "Regenerator"
+  },
+  {
+   "species": "Skarmory",
+   "item": "Leftovers",
+   "abilities": [
+    "Sturdy"
+   ],
+   "moves": [
+    "Spikes",
+    "Brave Bird",
+    "Roost",
+    "Whirlwind"
+   ],
+   "nature": "Impish",
+   "evs": [
+    252,
+    0,
+    252,
+    0,
+    0,
+    4
+   ],
+   "ability": "Sturdy"
+  },
+  {
+   "species": "Lucario",
+   "item": "Life Orb",
+   "abilities": [
+    "Justified",
+    "Adaptability"
+   ],
+   "moves": [
+    "Close Combat",
+    "Flash Cannon",
+    "Swords Dance",
+    "Extreme Speed"
+   ],
+   "nature": "Jolly",
+   "evs": [
+    0,
+    252,
+    0,
+    0,
+    0,
+    252
+   ],
+   "ability": "Justified"
+  },
+  {
+   "species": "Scizor",
+   "item": "Leftovers",
+   "abilities": [
+    "Technician"
+   ],
+   "moves": [
+    "U-turn",
+    "Roost",
+    "Swords Dance",
+    "Bullet Punch"
+   ],
+   "nature": "Adamant",
+   "evs": [
+    0,
+    252,
+    0,
+    0,
+    4,
+    252
+   ],
+   "ability": "Technician"
+  },
+  {
+   "species": "Milotic",
+   "item": "Leftovers",
+   "abilities": [
+    "Marvel Scale"
+   ],
+   "moves": [
+    "Scald",
+    "Ice Beam",
+    "Toxic",
+    "Recover"
+   ],
+   "nature": "Bold",
+   "evs": [
+    252,
+    0,
+    252,
+    0,
+    0,
+    4
+   ],
+   "ability": "Marvel Scale"
+  },
+  {
+   "species": "Gyarados",
+   "item": "Life Orb",
+   "abilities": [
+    "Intimidate"
+   ],
+   "moves": [
+    "Waterfall",
+    "Bounce",
+    "Dragon Dance",
+    "Ice Fang"
+   ],
+   "nature": "Jolly",
+   "evs": [
+    0,
+    252,
+    0,
+    0,
+    0,
+    252
+   ],
+   "ability": "Intimidate"
+  },
+  {
+   "species": "Slowbro",
+   "item": "Leftovers",
+   "abilities": [
+    "Regenerator",
+    "Own Tempo"
+   ],
+   "moves": [
+    "Scald",
+    "Ice Beam",
+    "Toxic",
+    "Calm Mind"
+   ],
+   "nature": "Bold",
+   "evs": [
+    252,
+    0,
+    252,
+    0,
+    0,
+    4
+   ],
+   "ability": "Regenerator"
+  },
+  {
+   "species": "Tyranitar",
+   "item": "Leftovers",
+   "abilities": [
+    "Sand Stream"
+   ],
+   "moves": [
+    "Crunch",
+    "Stone Edge",
+    "Earthquake",
+    "Dragon Dance"
+   ],
+   "nature": "Adamant",
+   "evs": [
+    0,
+    252,
+    0,
+    0,
+    4,
+    252
+   ],
+   "ability": "Sand Stream"
+  },
+  {
+   "species": "Suicune",
+   "item": "Leftovers",
+   "abilities": [
+    "Pressure"
+   ],
+   "moves": [
+    "Scald",
+    "Ice Beam",
+    "Toxic",
+    "Roar"
+   ],
+   "nature": "Bold",
+   "evs": [
+    252,
+    0,
+    0,
+    0,
+    252,
+    4
+   ],
+   "ability": "Pressure"
+  }
+ ]
+}

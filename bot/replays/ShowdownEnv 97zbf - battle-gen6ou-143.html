@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<!-- version 1 -->
+<title>battle-gen6ou-143</title>
+<style>
+    html,
+    body {
+        font-family: Verdana, sans-serif;
+        font-size: 10pt;
+        margin: 0;
+        padding: 0;
+    }
+
+    body {
+        padding: 12px 0;
+    }
+
+    .battle-log {
+        font-family: Verdana, sans-serif;
+        font-size: 10pt;
+    }
+
+    .battle-log-inline {
+        border: 1px solid #AAAAAA;
+        background: #EEF2F5;
+        color: black;
+        max-width: 640px;
+        margin: 0 auto 80px;
+        padding-bottom: 5px;
+    }
+
+    .battle-log .inner {
+        padding: 4px 8px 0px 8px;
+    }
+
+    .battle-log .inner-preempt {
+        padding: 0 8px 4px 8px;
+    }
+
+    .battle-log .inner-after {
+        margin-top: 0.5em;
+    }
+
+    .battle-log h2 {
+        margin: 0.5em -8px;
+        padding: 4px 8px;
+        border: 1px solid #AAAAAA;
+        background: #E0E7EA;
+        border-left: 0;
+        border-right: 0;
+        font-family: Verdana, sans-serif;
+        font-size: 13pt;
+    }
+
+    .backprop {
+        top: 0;
+    }
+
+    .battle-log .chat {
+        vertical-align: middle;
+        padding: 3px 0 3px 0;
+        font-size: 8pt;
+    }
+
+    .battle-log .chat strong {
+        color: #40576A;
+    }
+
+    .battle-log .chat em {
+        padding: 1px 4px 1px 3px;
+        color: #000000;
+        font-style: normal;
+    }
+
+    .chat.mine {
+        background: rgba(0, 0, 0, 0.05);
+        margin-left: -8px;
+        margin-right: -8px;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    .spoiler {
+        color: #BBBBBB;
+        background: #BBBBBB;
+        padding: 0px 3px;
+    }
+
+    .spoiler:hover,
+    .spoiler:active,
+    .spoiler-shown {
+        color: #000000;
+        background: #E2E2E2;
+        padding: 0px 3px;
+    }
+
+    .spoiler a {
+        color: #BBBBBB;
+    }
+
+    .spoiler:hover a,
+    .spoiler:active a,
+    .spoiler-shown a {
+        color: #2288CC;
+    }
+
+    .chat code,
+    .chat .spoiler:hover code,
+    .chat .spoiler:active code,
+    .chat .spoiler-shown code {
+        border: 1px solid #C0C0C0;
+        background: #EEEEEE;
+        color: black;
+        padding: 0 2px;
+    }
+
+    .chat .spoiler code {
+        border: 1px solid #CCCCCC;
+        background: #CCCCCC;
+        color: #CCCCCC;
+    }
+
+    .battle-log .rated {
+        padding: 3px 4px;
+    }
+
+    .battle-log .rated strong {
+        color: white;
+        background: #89A;
+        padding: 1px 4px;
+        border-radius: 4px;
+    }
+
+    .spacer {
+        margin-top: 0.5em;
+    }
+
+    .message-announce {
+        background: #6688AA;
+        color: white;
+        padding: 1px 4px 2px;
+    }
+
+    .message-announce a,
+    .broadcast-green a,
+    .broadcast-blue a,
+    .broadcast-red a {
+        color: #DDEEFF;
+    }
+
+    .broadcast-green {
+        background-color: #559955;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .broadcast-blue {
+        background-color: #6688AA;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .infobox {
+        border: 1px solid #6688AA;
+        padding: 2px 4px;
+    }
+
+    .infobox-limited {
+        max-height: 200px;
+        overflow: auto;
+        overflow-x: hidden;
+    }
+
+    .broadcast-red {
+        background-color: #AA5544;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .message-learn-canlearn {
+        font-weight: bold;
+        color: #228822;
+        text-decoration: underline;
+    }
+
+    .message-learn-cannotlearn {
+        font-weight: bold;
+        color: #CC2222;
+        text-decoration: underline;
+    }
+
+    .message-effect-weak {
+        font-weight: bold;
+        color: #CC2222;
+    }
+
+    .message-effect-resist {
+        font-weight: bold;
+        color: #6688AA;
+    }
+
+    .message-effect-immune {
+        font-weight: bold;
+        color: #666666;
+    }
+
+    .message-learn-list {
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+
+    .message-throttle-notice,
+    .message-error {
+        color: #992222;
+    }
+
+    .message-overflow,
+    .chat small.message-overflow {
+        font-size: 0pt;
+    }
+
+    .message-overflow::before {
+        font-size: 9pt;
+        content: '...';
+    }
+
+    .subtle {
+        color: #3A4A66;
+    }
+</style>
+<div class="wrapper replay-wrapper" style="max-width:1180px;margin:0 auto">
+    <input type="hidden" name="replayid" value="unregisteredserver-gen8randombattle-320064" />
+    <div class="battle"></div>
+    <div class="battle-log"></div>
+    <div class="replay-controls"></div>
+    <div class="replay-controls-2"></div>
+    <h1 style="font-weight:normal;text-align:center"><strong>poke-env battle replay</strong><br />battle-gen6ou-143<br /><a
+            href="http://pokemonshowdown.com/users/randomplayer1" class="subtle" target="_blank">ShowdownEnv 97zbf</a>
+        vs. <a href="http://pokemonshowdown.com/users/randomplayer2" class="subtle"
+            target="_blank">ShowdownEnv 8gtr5</a></h1>
+    <script type="text/plain" class="battle-log-data">
+    >battle-gen6ou-143
+|init|battle
+|title|ShowdownEnv 97zbf vs. ShowdownEnv 8gtr5
+|j|☆ShowdownEnv 97zbf
+|j|☆ShowdownEnv 8gtr5
+|gametype|singles
+|player|p1|ShowdownEnv 97zbf|170|
+|player|p2|ShowdownEnv 8gtr5|101|
+|gen|6
+|tier|[Gen 6] OU
+|rule|HP Percentage Mod: HP is shown in percentages
+|rule|Endless Battle Clause: Forcing endless battles is banned
+|rule|Sleep Clause Mod: Limit one foe put to sleep
+|rule|Species Clause: Limit one of each Pokemon
+|rule|OHKO Clause: OHKO moves are banned
+|rule|Evasion Items Clause: Evasion items are banned
+|rule|Evasion Moves Clause: Evasion moves are banned
+|rule|Evasion Abilities Clause: Evasion abilities are banned
+|clearpoke
+|poke|p1|Gyarados, F|item
+|poke|p1|Keldeo|item
+|poke|p1|Lucario, M|item
+|poke|p1|Garchomp, F|item
+|poke|p1|Slowbro, M|item
+|poke|p1|Milotic, M|item
+|poke|p2|Tyranitar, F|item
+|poke|p2|Tornadus-Therian, M|item
+|poke|p2|Skarmory, M|item
+|poke|p2|Gliscor, F|item
+|poke|p2|Kyurem|item
+|poke|p2|Landorus-Therian, M|item
+|teampreview
+|
+|teamsize|p1|6
+|teamsize|p2|6
+|start
+|switch|p1a: Keldeo|Keldeo|323/323
+|switch|p2a: Landorus|Landorus-Therian, M|100/100
+|-ability|p2a: Landorus|Intimidate|boost
+|-unboost|p1a: Keldeo|atk|1
+|turn|1
+|
+|switch|p2a: Tyranitar|Tyranitar, F|100/100
+|-weather|Sandstorm|[from] ability: Sand Stream|[of] p2a: Tyranitar
+|move|p1a: Keldeo|Secret Sword|p2a: Tyranitar
+|-supereffective|p2a: Tyranitar
+|-damage|p2a: Tyranitar|0 fnt
+|faint|p2a: Tyranitar
+|-damage|p1a: Keldeo|291/323|[from] item: Life Orb
+|
+|-weather|Sandstorm|[upkeep]
+|-damage|p1a: Keldeo|271/323|[from] Sandstorm
+|upkeep
+|
+|switch|p2a: Kyurem|Kyurem|100/100
+|-ability|p2a: Kyurem|Pressure
+|turn|2
+|
+|switch|p1a: Slowbro|Slowbro, M|394/394
+|move|p2a: Kyurem|Roost||[still]
+|-fail|p2a: Kyurem|heal
+|
+|-weather|Sandstorm|[upkeep]
+|-damage|p2a: Kyurem|94/100|[from] Sandstorm
+|-damage|p1a: Slowbro|370/394|[from] Sandstorm
+|-heal|p1a: Slowbro|394/394|[from] item: Leftovers
+|upkeep
+|turn|3
+|
+|move|p2a: Kyurem|Dragon Pulse|p1a: Slowbro
+|-damage|p1a: Slowbro|135/394
+|-damage|p2a: Kyurem|84/100|[from] item: Life Orb
+|move|p1a: Slowbro|Calm Mind|p1a: Slowbro
+|-boost|p1a: Slowbro|spa|1
+|-boost|p1a: Slowbro|spd|1
+|
+|-weather|Sandstorm|[upkeep]
+|-damage|p2a: Kyurem|78/100|[from] Sandstorm
+|-damage|p1a: Slowbro|111/394|[from] Sandstorm
+|-heal|p1a: Slowbro|135/394|[from] item: Leftovers
+|upkeep
+|turn|4
+|
+|switch|p1a: Garchomp|Garchomp, F|357/357
+|move|p2a: Kyurem|Ice Beam|p1a: Garchomp
+|-supereffective|p1a: Garchomp
+|-damage|p1a: Garchomp|0 fnt
+|faint|p1a: Garchomp
+|-damage|p2a: Kyurem|68/100|[from] item: Life Orb
+|
+|-weather|Sandstorm|[upkeep]
+|-damage|p2a: Kyurem|62/100|[from] Sandstorm
+|upkeep
+|
+|switch|p1a: Gyarados|Gyarados, F|331/331
+|-ability|p1a: Gyarados|Intimidate|boost
+|-unboost|p2a: Kyurem|atk|1
+|turn|5
+|
+|switch|p2a: Tornadus|Tornadus-Therian, M|100/100
+|move|p1a: Gyarados|Bounce||[still]
+|-prepare|p1a: Gyarados|Bounce
+|
+|-weather|none
+|upkeep
+|turn|6
+|
+|move|p2a: Tornadus|U-turn|p1a: Gyarados|[miss]
+|-miss|p2a: Tornadus|p1a: Gyarados
+|move|p1a: Gyarados|Bounce|p2a: Tornadus|[from] lockedmove
+|-damage|p2a: Tornadus|17/100
+|-damage|p1a: Gyarados|298/331|[from] item: Life Orb
+|
+|upkeep
+|turn|7
+|
+|switch|p1a: Lucario|Lucario, M|281/281
+|move|p2a: Tornadus|Hurricane|p1a: Lucario
+|-damage|p1a: Lucario|0 fnt
+|faint|p1a: Lucario
+|-damage|p2a: Tornadus|7/100|[from] item: Life Orb
+|
+|upkeep
+|
+|switch|p1a: Milotic|Milotic, M|394/394
+|turn|8
+|
+|move|p2a: Tornadus|Hurricane|p1a: Milotic
+|-damage|p1a: Milotic|199/394
+|-start|p1a: Milotic|confusion
+|-damage|p2a: Tornadus|0 fnt|[from] item: Life Orb
+|faint|p2a: Tornadus
+|-activate|p1a: Milotic|confusion
+|-damage|p1a: Milotic|182/394|[from] confusion
+|
+|-heal|p1a: Milotic|206/394|[from] item: Leftovers
+|upkeep
+|
+|switch|p2a: Gliscor|Gliscor, F|100/100
+|turn|9
+|
+|switch|p2a: Kyurem|Kyurem|62/100
+|-ability|p2a: Kyurem|Pressure
+|-activate|p1a: Milotic|confusion
+|-damage|p1a: Milotic|190/394|[from] confusion
+|
+|-heal|p1a: Milotic|214/394|[from] item: Leftovers
+|upkeep
+|turn|10
+|
+|switch|p2a: Gliscor|Gliscor, F|100/100
+|-activate|p1a: Milotic|confusion
+|-damage|p1a: Milotic|198/394|[from] confusion
+|
+|-heal|p1a: Milotic|222/394|[from] item: Leftovers
+|-status|p2a: Gliscor|tox|[from] item: Toxic Orb
+|upkeep
+|turn|11
+|
+|switch|p1a: Slowbro|Slowbro, M|266/394
+|move|p2a: Gliscor|Earthquake|p1a: Slowbro
+|-damage|p1a: Slowbro|166/394
+|
+|-heal|p1a: Slowbro|190/394|[from] item: Leftovers
+|upkeep
+|turn|12
+|
+|switch|p1a: Gyarados|Gyarados, F|298/331
+|-ability|p1a: Gyarados|Intimidate|boost
+|-unboost|p2a: Gliscor|atk|1
+|move|p2a: Gliscor|Earthquake|p1a: Gyarados
+|-immune|p1a: Gyarados
+|
+|upkeep
+|turn|13
+|
+|move|p2a: Gliscor|Roost||[still]
+|-fail|p2a: Gliscor|heal
+|move|p1a: Gyarados|Waterfall|p2a: Gliscor
+|-supereffective|p2a: Gliscor
+|-damage|p2a: Gliscor|6/100 tox
+|-damage|p1a: Gyarados|265/331|[from] item: Life Orb
+|
+|-heal|p2a: Gliscor|18/100 tox|[from] ability: Poison Heal
+|upkeep
+|turn|14
+|
+|switch|p2a: Landorus|Landorus-Therian, M|100/100
+|-ability|p2a: Landorus|Intimidate|boost
+|-unboost|p1a: Gyarados|atk|1
+|move|p1a: Gyarados|Waterfall|p2a: Landorus
+|-supereffective|p2a: Landorus
+|-damage|p2a: Landorus|14/100
+|-damage|p1a: Gyarados|232/331|[from] item: Life Orb
+|
+|upkeep
+|turn|15
+|
+|switch|p1a: Slowbro|Slowbro, M|321/394
+|switch|p2a: Skarmory|Skarmory, M|100/100
+|
+|-heal|p1a: Slowbro|345/394|[from] item: Leftovers
+|upkeep
+|turn|16
+|
+|move|p2a: Skarmory|Spikes|p1a: Slowbro
+|-sidestart|p1: ShowdownEnv 97zbf|Spikes
+|move|p1a: Slowbro|Ice Beam|p2a: Skarmory
+|-damage|p2a: Skarmory|74/100
+|
+|-heal|p2a: Skarmory|80/100|[from] item: Leftovers
+|-heal|p1a: Slowbro|369/394|[from] item: Leftovers
+|upkeep
+|turn|17
+|
+|switch|p1a: Gyarados|Gyarados, F|232/331
+|-ability|p1a: Gyarados|Intimidate|boost
+|-unboost|p2a: Skarmory|atk|1
+|move|p2a: Skarmory|Spikes|p1a: Gyarados
+|-sidestart|p1: ShowdownEnv 97zbf|Spikes
+|
+|-heal|p2a: Skarmory|86/100|[from] item: Leftovers
+|upkeep
+|turn|18
+|
+|switch|p2a: Gliscor|Gliscor, F|18/100 tox
+|move|p1a: Gyarados|Dragon Dance|p1a: Gyarados
+|-boost|p1a: Gyarados|atk|1
+|-boost|p1a: Gyarados|spe|1
+|
+|-heal|p2a: Gliscor|30/100 tox|[from] ability: Poison Heal
+|upkeep
+|turn|19
+|
+|switch|p1a: Keldeo|Keldeo|271/323
+|-damage|p1a: Keldeo|218/323|[from] Spikes
+|switch|p2a: Kyurem|Kyurem|62/100
+|-ability|p2a: Kyurem|Pressure
+|
+|upkeep
+|turn|20
+|
+|switch|p1a: Gyarados|Gyarados, F|232/331
+|-ability|p1a: Gyarados|Intimidate|boost
+|-unboost|p2a: Kyurem|atk|1
+|switch|p2a: Landorus|Landorus-Therian, M|14/100
+|-ability|p2a: Landorus|Intimidate|boost
+|-unboost|p1a: Gyarados|atk|1
+|
+|upkeep
+|turn|21
+|
+|switch|p1a: Milotic|Milotic, M|222/394
+|-damage|p1a: Milotic|157/394|[from] Spikes
+|move|p2a: Landorus|U-turn|p1a: Milotic
+|-damage|p1a: Milotic|67/394
+|-damage|p2a: Landorus|4/100|[from] item: Life Orb
+|
+|switch|p2a: Skarmory|Skarmory, M|86/100|[from] U-turn
+|
+|-heal|p1a: Milotic|91/394|[from] item: Leftovers
+|-heal|p2a: Skarmory|92/100|[from] item: Leftovers
+|upkeep
+|turn|22
+|
+|switch|p1a: Gyarados|Gyarados, F|232/331
+|-ability|p1a: Gyarados|Intimidate|boost
+|-unboost|p2a: Skarmory|atk|1
+|switch|p2a: Gliscor|Gliscor, F|30/100 tox
+|
+|-heal|p2a: Gliscor|43/100 tox|[from] ability: Poison Heal
+|upkeep
+|turn|23
+|
+|switch|p1a: Keldeo|Keldeo|218/323
+|-damage|p1a: Keldeo|165/323|[from] Spikes
+|move|p2a: Gliscor|Swords Dance|p2a: Gliscor
+|-boost|p2a: Gliscor|atk|2
+|
+|-heal|p2a: Gliscor|55/100 tox|[from] ability: Poison Heal
+|upkeep
+|turn|24
+|
+|move|p1a: Keldeo|Secret Sword|p2a: Gliscor
+|-resisted|p2a: Gliscor
+|-damage|p2a: Gliscor|27/100 tox
+|-damage|p1a: Keldeo|133/323|[from] item: Life Orb
+|move|p2a: Gliscor|Acrobatics|p1a: Keldeo
+|-supereffective|p1a: Keldeo
+|-damage|p1a: Keldeo|0 fnt
+|faint|p1a: Keldeo
+|
+|-heal|p2a: Gliscor|39/100 tox|[from] ability: Poison Heal
+|upkeep
+|
+|switch|p1a: Gyarados|Gyarados, F|232/331
+|-ability|p1a: Gyarados|Intimidate|boost
+|-unboost|p2a: Gliscor|atk|1
+|turn|25
+|
+|move|p2a: Gliscor|Swords Dance|p2a: Gliscor
+|-boost|p2a: Gliscor|atk|2
+|move|p1a: Gyarados|Ice Fang|p2a: Gliscor
+|-supereffective|p2a: Gliscor
+|-damage|p2a: Gliscor|0 fnt
+|faint|p2a: Gliscor
+|-damage|p1a: Gyarados|199/331|[from] item: Life Orb
+|
+|upkeep
+|
+|switch|p2a: Skarmory|Skarmory, M|92/100
+|turn|26
+|
+|switch|p2a: Landorus|Landorus-Therian, M|4/100
+|-ability|p2a: Landorus|Intimidate|boost
+|-unboost|p1a: Gyarados|atk|1
+|move|p1a: Gyarados|Ice Fang|p2a: Landorus
+|-supereffective|p2a: Landorus
+|-damage|p2a: Landorus|0 fnt
+|faint|p2a: Landorus
+|-damage|p1a: Gyarados|166/331|[from] item: Life Orb
+|
+|upkeep
+|
+|switch|p2a: Kyurem|Kyurem|62/100
+|-ability|p2a: Kyurem|Pressure
+|turn|27
+|
+|switch|p1a: Slowbro|Slowbro, M|394/394
+|-damage|p1a: Slowbro|329/394|[from] Spikes
+|move|p2a: Kyurem|Earth Power|p1a: Slowbro
+|-damage|p1a: Slowbro|159/394
+|-unboost|p1a: Slowbro|spd|1
+|-damage|p2a: Kyurem|52/100|[from] item: Life Orb
+|
+|-heal|p1a: Slowbro|183/394|[from] item: Leftovers
+|upkeep
+|turn|28
+|
+|switch|p1a: Gyarados|Gyarados, F|166/331
+|-ability|p1a: Gyarados|Intimidate|boost
+|-unboost|p2a: Kyurem|atk|1
+|move|p2a: Kyurem|Earth Power|p1a: Gyarados
+|-immune|p1a: Gyarados
+|
+|upkeep
+|turn|29
+|
+|move|p2a: Kyurem|Earth Power|p1a: Gyarados
+|-immune|p1a: Gyarados
+|move|p1a: Gyarados|Ice Fang|p2a: Kyurem
+|-crit|p2a: Kyurem
+|-damage|p2a: Kyurem|11/100
+|-damage|p1a: Gyarados|133/331|[from] item: Life Orb
+|
+|upkeep
+|turn|30
+|
+|move|p2a: Kyurem|Roost|p2a: Kyurem
+|-heal|p2a: Kyurem|61/100
+|-singleturn|p2a: Kyurem|move: Roost
+|move|p1a: Gyarados|Waterfall|p2a: Kyurem
+|-resisted|p2a: Kyurem
+|-damage|p2a: Kyurem|35/100
+|-damage|p1a: Gyarados|100/331|[from] item: Life Orb
+|
+|upkeep
+|turn|31
+|
+|switch|p1a: Milotic|Milotic, M|91/394
+|-damage|p1a: Milotic|26/394|[from] Spikes
+|move|p2a: Kyurem|Earth Power|p1a: Milotic
+|-damage|p1a: Milotic|0 fnt
+|faint|p1a: Milotic
+|-damage|p2a: Kyurem|25/100|[from] item: Life Orb
+|
+|upkeep
+|
+|switch|p1a: Slowbro|Slowbro, M|314/394
+|-damage|p1a: Slowbro|249/394|[from] Spikes
+|turn|32
+|
+|move|p2a: Kyurem|Roost|p2a: Kyurem
+|-heal|p2a: Kyurem|75/100
+|-singleturn|p2a: Kyurem|move: Roost
+|move|p1a: Slowbro|Ice Beam|p2a: Kyurem
+|-damage|p2a: Kyurem|54/100
+|
+|-heal|p1a: Slowbro|273/394|[from] item: Leftovers
+|upkeep
+|turn|33
+|
+|move|p2a: Kyurem|Earth Power|p1a: Slowbro
+|-damage|p1a: Slowbro|77/394
+|-damage|p2a: Kyurem|44/100|[from] item: Life Orb
+|move|p1a: Slowbro|Calm Mind|p1a: Slowbro
+|-boost|p1a: Slowbro|spa|1
+|-boost|p1a: Slowbro|spd|1
+|
+|-heal|p1a: Slowbro|101/394|[from] item: Leftovers
+|upkeep
+|turn|34
+|
+|move|p2a: Kyurem|Roost|p2a: Kyurem
+|-heal|p2a: Kyurem|94/100
+|-singleturn|p2a: Kyurem|move: Roost
+|move|p1a: Slowbro|Ice Beam|p2a: Kyurem
+|-damage|p2a: Kyurem|66/100
+|
+|-heal|p1a: Slowbro|125/394|[from] item: Leftovers
+|upkeep
+|turn|35
+|
+|move|p2a: Kyurem|Roost|p2a: Kyurem
+|-heal|p2a: Kyurem|100/100
+|-singleturn|p2a: Kyurem|move: Roost
+|move|p1a: Slowbro|Calm Mind|p1a: Slowbro
+|-boost|p1a: Slowbro|spa|1
+|-boost|p1a: Slowbro|spd|1
+|
+|-heal|p1a: Slowbro|149/394|[from] item: Leftovers
+|upkeep
+|turn|36
+|
+|move|p2a: Kyurem|Dragon Pulse|p1a: Slowbro
+|-damage|p1a: Slowbro|28/394
+|-damage|p2a: Kyurem|91/100|[from] item: Life Orb
+|move|p1a: Slowbro|Toxic|p2a: Kyurem
+|-status|p2a: Kyurem|tox
+|
+|-heal|p1a: Slowbro|52/394|[from] item: Leftovers
+|-damage|p2a: Kyurem|84/100 tox|[from] psn
+|upkeep
+|turn|37
+|
+|switch|p2a: Skarmory|Skarmory, M|92/100
+|move|p1a: Slowbro|Toxic|p2a: Skarmory
+|-immune|p2a: Skarmory
+|
+|-heal|p2a: Skarmory|98/100|[from] item: Leftovers
+|-heal|p1a: Slowbro|76/394|[from] item: Leftovers
+|upkeep
+|turn|38
+|
+|move|p2a: Skarmory|Spikes|p1a: Slowbro
+|-sidestart|p1: ShowdownEnv 97zbf|Spikes
+|move|p1a: Slowbro|Toxic|p2a: Skarmory
+|-immune|p2a: Skarmory
+|
+|-heal|p2a: Skarmory|100/100|[from] item: Leftovers
+|-heal|p1a: Slowbro|100/394|[from] item: Leftovers
+|upkeep
+|turn|39
+|
+|switch|p2a: Kyurem|Kyurem|84/100 tox
+|-ability|p2a: Kyurem|Pressure
+|move|p1a: Slowbro|Scald|p2a: Kyurem
+|-resisted|p2a: Kyurem
+|-damage|p2a: Kyurem|61/100 tox
+|
+|-heal|p1a: Slowbro|124/394|[from] item: Leftovers
+|-damage|p2a: Kyurem|54/100 tox|[from] psn
+|upkeep
+|turn|40
+|
+|switch|p2a: Skarmory|Skarmory, M|100/100
+|move|p1a: Slowbro|Scald|p2a: Skarmory
+|-damage|p2a: Skarmory|25/100
+|
+|-heal|p2a: Skarmory|31/100|[from] item: Leftovers
+|-heal|p1a: Slowbro|148/394|[from] item: Leftovers
+|upkeep
+|turn|41
+|
+|switch|p1a: Gyarados|Gyarados, F|100/331
+|-ability|p1a: Gyarados|Intimidate|boost
+|-unboost|p2a: Skarmory|atk|1
+|move|p2a: Skarmory|Brave Bird|p1a: Gyarados
+|-damage|p1a: Gyarados|10/331
+|-damage|p2a: Skarmory|22/100|[from] Recoil
+|
+|-heal|p2a: Skarmory|28/100|[from] item: Leftovers
+|upkeep
+|turn|42
+|
+|switch|p1a: Slowbro|Slowbro, M|279/394
+|-damage|p1a: Slowbro|181/394|[from] Spikes
+|move|p2a: Skarmory|Brave Bird|p1a: Slowbro
+|-damage|p1a: Slowbro|132/394
+|-damage|p2a: Skarmory|23/100|[from] Recoil
+|
+|-heal|p2a: Skarmory|29/100|[from] item: Leftovers
+|-heal|p1a: Slowbro|156/394|[from] item: Leftovers
+|upkeep
+|turn|43
+|
+|switch|p1a: Gyarados|Gyarados, F|10/331
+|-ability|p1a: Gyarados|Intimidate|boost
+|-unboost|p2a: Skarmory|atk|1
+|move|p2a: Skarmory|Roost|p2a: Skarmory
+|-heal|p2a: Skarmory|79/100
+|-singleturn|p2a: Skarmory|move: Roost
+|
+|-heal|p2a: Skarmory|85/100|[from] item: Leftovers
+|upkeep
+|turn|44
+|
+|move|p1a: Gyarados|Bounce||[still]
+|-prepare|p1a: Gyarados|Bounce
+|move|p2a: Skarmory|Brave Bird|p1a: Gyarados|[miss]
+|-miss|p2a: Skarmory|p1a: Gyarados
+|
+|-heal|p2a: Skarmory|91/100|[from] item: Leftovers
+|upkeep
+|turn|45
+|
+|move|p1a: Gyarados|Bounce|p2a: Skarmory|[from] lockedmove
+|-resisted|p2a: Skarmory
+|-damage|p2a: Skarmory|74/100
+|-status|p2a: Skarmory|par
+|-damage|p1a: Gyarados|0 fnt|[from] item: Life Orb
+|faint|p1a: Gyarados
+|move|p2a: Skarmory|Spikes||[still]
+|-fail|p2a: Skarmory
+|
+|-heal|p2a: Skarmory|80/100 par|[from] item: Leftovers
+|upkeep
+|
+|switch|p1a: Slowbro|Slowbro, M|287/394
+|-damage|p1a: Slowbro|189/394|[from] Spikes
+|turn|46
+|
+|move|p1a: Slowbro|Toxic||[still]
+|-fail|p1a: Slowbro
+|move|p2a: Skarmory|Roost|p2a: Skarmory
+|-heal|p2a: Skarmory|100/100 par
+|-singleturn|p2a: Skarmory|move: Roost
+|
+|-heal|p1a: Slowbro|213/394|[from] item: Leftovers
+|upkeep
+|turn|47
+|
+|move|p1a: Slowbro|Toxic||[still]
+|-fail|p1a: Slowbro
+|move|p2a: Skarmory|Roost||[still]
+|-fail|p2a: Skarmory|heal
+|
+|-heal|p1a: Slowbro|237/394|[from] item: Leftovers
+|upkeep
+|turn|48
+|
+|move|p1a: Slowbro|Scald|p2a: Skarmory
+|-damage|p2a: Skarmory|60/100 par
+|move|p2a: Skarmory|Spikes||[still]
+|-fail|p2a: Skarmory
+|
+|-heal|p1a: Slowbro|261/394|[from] item: Leftovers
+|-heal|p2a: Skarmory|66/100 par|[from] item: Leftovers
+|upkeep
+|turn|49
+|
+|move|p1a: Slowbro|Scald|p2a: Skarmory
+|-damage|p2a: Skarmory|30/100 par
+|move|p2a: Skarmory|Roost|p2a: Skarmory
+|-heal|p2a: Skarmory|80/100 par
+|-singleturn|p2a: Skarmory|move: Roost
+|
+|-heal|p1a: Slowbro|285/394|[from] item: Leftovers
+|-heal|p2a: Skarmory|86/100 par|[from] item: Leftovers
+|upkeep
+|turn|50
+|
+|move|p1a: Slowbro|Scald|p2a: Skarmory
+|-damage|p2a: Skarmory|50/100 par
+|move|p2a: Skarmory|Brave Bird|p1a: Slowbro
+|-damage|p1a: Slowbro|242/394
+|-damage|p2a: Skarmory|46/100 par|[from] Recoil
+|
+|-heal|p1a: Slowbro|266/394|[from] item: Leftovers
+|-heal|p2a: Skarmory|52/100 par|[from] item: Leftovers
+|upkeep
+|turn|51
+|
+|move|p1a: Slowbro|Toxic|p2a: Skarmory|[miss]
+|-miss|p1a: Slowbro|p2a: Skarmory
+|move|p2a: Skarmory|Whirlwind||[still]
+|-fail|p2a: Skarmory
+|
+|-heal|p1a: Slowbro|290/394|[from] item: Leftovers
+|-heal|p2a: Skarmory|58/100 par|[from] item: Leftovers
+|upkeep
+|turn|52
+|
+|move|p1a: Slowbro|Scald|p2a: Skarmory
+|-damage|p2a: Skarmory|18/100 par
+|move|p2a: Skarmory|Brave Bird|p1a: Slowbro
+|-damage|p1a: Slowbro|250/394
+|-damage|p2a: Skarmory|14/100 par|[from] Recoil
+|
+|-heal|p1a: Slowbro|274/394|[from] item: Leftovers
+|-heal|p2a: Skarmory|20/100 par|[from] item: Leftovers
+|upkeep
+|turn|53
+|
+|move|p1a: Slowbro|Toxic||[still]
+|-fail|p1a: Slowbro
+|move|p2a: Skarmory|Whirlwind||[still]
+|-fail|p2a: Skarmory
+|
+|-heal|p1a: Slowbro|298/394|[from] item: Leftovers
+|-heal|p2a: Skarmory|26/100 par|[from] item: Leftovers
+|upkeep
+|turn|54
+|
+|move|p1a: Slowbro|Ice Beam|p2a: Skarmory
+|-damage|p2a: Skarmory|0 fnt
+|faint|p2a: Skarmory
+|
+|-heal|p1a: Slowbro|322/394|[from] item: Leftovers
+|upkeep
+|
+|switch|p2a: Kyurem|Kyurem|54/100 tox
+|-ability|p2a: Kyurem|Pressure
+|turn|55
+|
+|move|p2a: Kyurem|Roost|p2a: Kyurem
+|-heal|p2a: Kyurem|100/100 tox
+|-singleturn|p2a: Kyurem|move: Roost
+|move|p1a: Slowbro|Scald|p2a: Kyurem
+|-resisted|p2a: Kyurem
+|-damage|p2a: Kyurem|88/100 tox
+|
+|-heal|p1a: Slowbro|346/394|[from] item: Leftovers
+|-damage|p2a: Kyurem|82/100 tox|[from] psn
+|upkeep
+|turn|56
+|
+|move|p2a: Kyurem|Ice Beam|p1a: Slowbro
+|-resisted|p1a: Slowbro
+|-damage|p1a: Slowbro|206/394
+|-damage|p2a: Kyurem|72/100 tox|[from] item: Life Orb
+|move|p1a: Slowbro|Calm Mind|p1a: Slowbro
+|-boost|p1a: Slowbro|spa|1
+|-boost|p1a: Slowbro|spd|1
+|
+|-heal|p1a: Slowbro|230/394|[from] item: Leftovers
+|-damage|p2a: Kyurem|60/100 tox|[from] psn
+|upkeep
+|turn|57
+|
+|move|p2a: Kyurem|Ice Beam|p1a: Slowbro
+|-resisted|p1a: Slowbro
+|-damage|p1a: Slowbro|144/394
+|-damage|p2a: Kyurem|50/100 tox|[from] item: Life Orb
+|move|p1a: Slowbro|Ice Beam|p2a: Kyurem
+|-damage|p2a: Kyurem|21/100 tox
+|
+|-heal|p1a: Slowbro|168/394|[from] item: Leftovers
+|-damage|p2a: Kyurem|3/100 tox|[from] psn
+|upkeep
+|turn|58
+|
+|move|p2a: Kyurem|Roost|p2a: Kyurem
+|-heal|p2a: Kyurem|53/100 tox
+|-singleturn|p2a: Kyurem|move: Roost
+|move|p1a: Slowbro|Ice Beam|p2a: Kyurem
+|-damage|p2a: Kyurem|25/100 tox
+|
+|-heal|p1a: Slowbro|192/394|[from] item: Leftovers
+|-damage|p2a: Kyurem|0 fnt|[from] psn
+|faint|p2a: Kyurem
+|
+|win|ShowdownEnv 97zbf
+    </script>
+</div>
+
+<div class="battle-log battle-log-inline" style="display:none"></div>
+
+<script>
+    let daily = Math.floor(Date.now() / 1000 / 60 / 60 / 24); document.write('<script src="https://play.pokemonshowdown.com/js/replay-embed.js?version' + daily + '"></' + 'script>');
+</script>
+
+<p style="text-align:center"> Replay created by <a href="https://github.com/hsahovic/poke-env">poke-env</a>, with code from <a
+        href="https://github.com/smogon/pokemon-showdown"> pokemon-showdown</a>. If something goes wrong, don't hesitate
+    to open an <a href="https://github.com/hsahovic/poke-env/issues">issue!</a></p>
