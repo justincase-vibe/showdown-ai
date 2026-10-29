@@ -113,6 +113,7 @@ _BOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # bot/
 if _BOT_DIR not in sys.path:
     sys.path.insert(0, _BOT_DIR)
 from reveal import ZMOVE_TO_BASE, GMAX_MOVES  # noqa: E402
+from action_space import get_action_space  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Parser
@@ -151,6 +152,8 @@ class BattleLogParser:
         self._last_move: Dict[str, Optional[dict]] = {"p1": None, "p2": None}
         # Ratings from log
         self._ratings: Dict[str, float] = {}
+        # Global move-identity action space (single source of truth for action ids).
+        self._as = get_action_space()
 
     def parse(self, log: str) -> ParsedBattle:
         self.b.raw_log = log
@@ -341,7 +344,7 @@ class BattleLogParser:
         self.b.decisions.append(Decision(
             turn=self._turn,
             actor=role,
-            action_idx=slot,  # switch to slot
+            action_idx=(self._as.switch_id(slot) if slot is not None else 0),  # switch to slot
             action_desc=f"switch → slot {slot} ({species})",
             raw=f"switch:{slot}",
         ))
@@ -404,7 +407,7 @@ class BattleLogParser:
         decision = Decision(
             turn=self._turn,
             actor=role,
-            action_idx=self._move_to_action(move_idx, gimmick, self.b.gen),
+            action_idx=self._move_to_action(move_name, gimmick, self.b.gen),
             action_desc=f"move:{move_name} (slot {move_idx}, gimmick={gimmick or 'none'})",
             raw=f"move:{move_name}",
         )
@@ -415,6 +418,7 @@ class BattleLogParser:
             "decision": decision,
             "move_event": me,
             "move_idx": move_idx,
+            "move_name": move_name,
             "gimmick": gimmick,
             "turn": self._turn,
         }
@@ -480,7 +484,7 @@ class BattleLogParser:
             return
         ref["gimmick"] = gimmick
         ref["move_event"].gimmick = gimmick
-        ref["decision"].action_idx = self._move_to_action(ref["move_idx"], gimmick, self.b.gen)
+        ref["decision"].action_idx = self._move_to_action(ref["move_name"], gimmick, self.b.gen)
         ref["decision"].action_desc = (
             f"move:{ref['move_event'].move_name} "
             f"(slot {ref['move_idx']}, gimmick={gimmick})"
@@ -528,25 +532,26 @@ class BattleLogParser:
                 return -1
         return -1
 
-    def _move_to_action(self, move_idx: int, gimmick: str, gen: int) -> int:
-        """Map (move_idx, gimmick) → unified 26-action index.
-        
-        Gimmick availability by gen:
-          Gen 6: Mega (10-13)
-          Gen 7: Mega (10-13) + Z (14-17)
-          Gen 8: Dynamax (18-21)
-          Gen 9: Tera (22-25)
+    def _move_to_action(self, move_name: str, gimmick: str, gen: int) -> int:
+        """Map (move name, gimmick) → global move-identity action id (0..N_ACTIONS-1).
+
+        The action is the move by *identity* (name), not a slot -- this removes the
+        train/live mismatch where the same slot index meant a different move in reveal
+        order vs. moveset order. Gimmicks follow the agreed layout: Z-moves and G-Max
+        moves are distinct moves in the MOVE band; mega / tera (and a non-G-Max dynamax)
+        are mon-level TRANSFORM actions (the accompanying move is a step-time detail in
+        env.py). Falls back to the move's identity id.
         """
-        if gimmick == "mega" and gen in (6, 7):
-            return 10 + move_idx
-        elif gimmick == "z" and gen == 7:
-            return 14 + move_idx
-        elif gimmick == "dynamax" and gen == 8:
-            return 18 + move_idx
-        elif gimmick == "tera" and gen == 9:
-            return 22 + move_idx
-        else:
-            return 6 + move_idx
+        as_ = self._as
+        if gimmick == "mega":
+            return as_.transform("mega")
+        if gimmick == "tera":
+            return as_.transform("tera")
+        if gimmick == "dynamax" and as_.move_gimmick(move_name) != "dynamax":
+            return as_.transform("dynamax")
+        # plain move, Z-move, or G-Max move -> the move's identity id.
+        mid = as_.move_id(move_name)
+        return mid if mid is not None else 0
 
     def _finalize(self) -> None:
         self.b.total_turns = self._turn
