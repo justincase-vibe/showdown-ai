@@ -6,12 +6,12 @@ Takes the JSONL files produced by ``fetch.py`` and turns each raw ``log``
   * metadata (format, players, ratings, winner, gen)
   * team composition per player (species in slot order)
   * per-turn event stream (moves, switches, damage, status, faints, hazards)
-  * **action mapping**: each player decision → unified 26-action index
+  * **action mapping**: each player decision → global move-identity action id (0..962)
 
-The action mapping uses *move-reveal order*: the first distinct move a Pokémon
-uses in the battle is "move 0", the second is "move 1", etc. This matches how
-``obs.py`` encodes revealed moves, so (state, action) pairs are self-consistent
-for behavioral cloning.
+The action is a move *by identity* (name), not a slot: plain/Z/G-Max moves map to their
+move id, switches to the slot id, and mega/dynamax/tera to the gimmick id. This is the
+same 963-space the policy and live env use (``action_space.py``), so (state, action)
+pairs are self-consistent for behavioral cloning and warm-start PPO.
 
 Usage:
     python bot/datamine/parse.py --input bot/data/replays/gen8ru.jsonl --max 50

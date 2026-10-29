@@ -8,9 +8,9 @@ and its ``SingleAgentWrapper`` crashes. This class fills exactly that gap on top
   * ``embed_battle`` -> our fixed-length feature vector (see ``obs.py``).
   * ``calc_reward``  -> +1 win / -1 loss / 0 otherwise (the paper's reward).
   * ``observation_spaces`` / ``action_spaces`` assigned so the Gym contract is valid.
-  * **Unified action space** (26) with action masks padded per-generation, so a SINGLE
-    shared policy can play gen6 (14 valid actions), gen7 (18), etc. -- the legal actions
-    for a gen are always a *prefix* of the unified space, so masking is exact.
+  * **Unified move-identity action space** (963) -- move ids + 6 switches + 3 gimmick
+    transforms -- with per-situation boolean masks, so a SINGLE shared policy plays
+    gen6-9. Actions are a move *by identity* (not a slot), so train and live never drift.
 
 The class intentionally keeps poke-env's PettingZoo two-agent (``A``/``B``) stepping so
 we reuse its correct battle/order/queue machinery. The self-play training loop (train.py)

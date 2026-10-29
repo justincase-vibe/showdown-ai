@@ -1,10 +1,11 @@
 """Compact, correct masked PPO for a discrete action space with per-step action masks.
 
 Why custom (instead of Stable-Baselines3 as-is): SB3 has no first-class action masking,
-and our single shared policy spans gens whose legal actions are a *prefix* of a unified
-26-action space. Masking must be applied both at *rollout* (sampling) and at *training*
-(recomputing log-probs from stored masks). This ~150-line PPO does exactly that and is
-device-agnostic (CPU for smoke tests, CUDA for real training).
+and our single shared policy spans gens 6-9 in a unified 963-action *move-identity* space
+(move ids + 6 switches + 3 gimmick transforms). Masking must be applied both at *rollout*
+(sampling) and at *training* (recomputing log-probs from stored masks). The legal set per
+situation is small (~4 moves + a few switches + <=1 transform) though the space is 963.
+This ~150-line PPO does exactly that and is device-agnostic (CPU/CUDA).
 
 Reward is the paper's scheme: +1 win / -1 loss, delivered as the terminal transition of
 an episode. GAE is computed per completed episode (terminal bootstrap = 0).

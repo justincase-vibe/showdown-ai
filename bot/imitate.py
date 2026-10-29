@@ -36,11 +36,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from obs import OBS_DIM
 from state_from_log import StateReconstructor
 from datamine.parse import BattleLogParser
+from action_space import get_action_space  # single source of truth for the action count
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-UNIFIED_ACTION_SIZE = 26
+# Move-identity action space (963): one policy across gens 6-9. parse.py emits action
+# ids in exactly this space, so the imitation actor head must be this wide.
+UNIFIED_ACTION_SIZE = get_action_space().N_ACTIONS
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "replays")
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DATASET_PATH = os.path.join(CACHE_DIR, "imitation_dataset.npz")
