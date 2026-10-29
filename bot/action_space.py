@@ -69,6 +69,20 @@ N_SWITCH = 6
 TRANSFORMS: Sequence[str] = ("mega", "dynamax", "tera")
 N_TRANSFORM = len(TRANSFORMS)
 
+# --- moveset-shape summary (gen-agnostic "what could this species do" prior) ---
+_MOVE_TYPES: Sequence[str] = (
+    "normal", "fire", "water", "electric", "grass", "ice", "fighting", "poison",
+    "ground", "flying", "psychic", "bug", "rock", "ghost", "dragon", "dark",
+    "steel", "fairy",
+)
+_N_SHAPE_TYPES = len(_MOVE_TYPES)
+_N_SHAPE_CAPS = 5  # has-priority, has-recovery, has-status, has-hazard, has-setup
+SHAPE_DIM = _N_SHAPE_TYPES + 2 + _N_SHAPE_CAPS + 1  # 18 + phys/spec + caps + count
+_HAZARD_MOVES: FrozenSet[str] = frozenset(
+    {"stealthrock", "spikes", "toxicspikes"}
+)
+_TYPE_IDX = {t: i for i, t in enumerate(_MOVE_TYPES)}
+
 
 def canon_move(name: Optional[str]) -> Optional[str]:
     """Canonical move id: lowercase, alnum only. ``"Bolt Strike"`` -> ``"boltstrike"``."""
@@ -165,11 +179,14 @@ class ActionSpace:
         return self._species_key.get(c) if c else None
 
     @lru_cache(maxsize=None)
-    def legal_moves(self, species: str, gen: int) -> FrozenSet[str]:
+    def legal_moves(self, species: str, gen: int,
+                    methods: Optional[FrozenSet[str]] = None) -> FrozenSet[str]:
         """All moves ``species`` can hold in ``gen`` (canonical names).
 
         A move is legal iff it appears in the species' learnset with at least one tag of
-        the form ``<gen><method>`` where method is not ``-`` (illegal marker).
+        the form ``<gen><method>`` where method is not ``-`` (illegal marker). If
+        ``methods`` is given (e.g. ``frozenset({'L','E'})``), only those acquisition
+        methods count (L=level-up, E=egg, T=tutor, M=machine, S=special).
         """
         key = self._species_key.get(canon_species(species))
         out: set = set()
@@ -185,9 +202,67 @@ class ActionSpace:
                 continue
             for t in tags:
                 if isinstance(t, str) and t.startswith(prefix) and len(t) > 1 and t[1] != "-":
-                    out.add(c)
-                    break
+                    if methods is None or t[1] in methods:
+                        out.add(c)
+                        break
         return frozenset(out)
+
+    @lru_cache(maxsize=None)
+    def natural_moves(self, species: str) -> FrozenSet[str]:
+        """Level-up + egg moves across gens -- the species' *natural* profile, excluding
+        artificial tutors/machines that would make every species look like it can do
+        everything. Used for the moveset-shape prior."""
+        out: set = set()
+        for g in GENS:
+            out |= self.legal_moves(species, g, methods=frozenset({"L", "E"}))
+        return frozenset(out)
+
+    @lru_cache(maxsize=None)
+    def moveset_shape(self, species: str) -> tuple:
+        """Gen-agnostic capability summary of a species' full move potential (SHAPE_DIM).
+
+        This is the "what could this species do" prior the observation needs so the net
+        can reason about hidden/unknown moves (e.g. a Garchomp lead implies a physical
+        dragon + hazard/choice profile). Computed over the union of the species' legal
+        moves across gens 6-9, so it never needs the live generation.
+        """
+        legal = set(self.natural_moves(species))
+        if not legal:
+            return tuple(0.0 for _ in range(SHAPE_DIM))
+        type_cov = [0.0] * _N_SHAPE_TYPES
+        phys = spec = other = 0
+        cap_priority = cap_recover = cap_status = cap_hazard = cap_setup = 0
+        for mv in legal:
+            p = self._move_props.get(mv, {})
+            if not isinstance(p, dict):
+                continue
+            t = p.get("type")
+            ti = _TYPE_IDX.get((t or "").lower())
+            if ti is not None:
+                type_cov[ti] += 1.0
+            cat = (p.get("category") or "").lower()
+            if cat == "physical":
+                phys += 1
+            elif cat == "special":
+                spec += 1
+            else:
+                other += 1
+            if (p.get("priority") or 0) > 0:
+                cap_priority = 1
+            if p.get("drain") or p.get("heal"):
+                cap_recover = 1
+            if p.get("status") or p.get("volatileStatus"):
+                cap_status = 1
+            if mv in _HAZARD_MOVES:
+                cap_hazard = 1
+            if p.get("selfBoost") or p.get("boosts"):
+                cap_setup = 1
+        dmg = max(phys + spec, 1)
+        vec: List[float] = [1.0 if x > 0 else 0.0 for x in type_cov]
+        vec += [phys / dmg, spec / dmg]
+        vec += [cap_priority, cap_recover, cap_status, cap_hazard, cap_setup]
+        vec += [min(len(legal), 32) / 32.0]
+        return tuple(vec[:SHAPE_DIM])
 
     # ----------------------------------------------------------------- props
     def move_props(self, name: Optional[str]) -> dict:

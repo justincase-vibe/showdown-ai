@@ -25,6 +25,7 @@ exact contract.
 from __future__ import annotations
 
 import hashlib
+import math
 from typing import List, Optional
 
 import numpy as np
@@ -32,6 +33,11 @@ import numpy as np
 from poke_env.battle import AbstractBattle, Pokemon, PokemonType, Status, Weather
 from poke_env.battle.side_condition import SideCondition
 from poke_env.battle.move_category import MoveCategory
+
+# Move-identity action space (single source of truth for the 963-action layout and the
+# per-species capability prior). Imported lazily-instantiated: the 3.9 MB learnset load
+# only happens on the first get_action_space() call, inside _moveset_shape/_move_identity.
+from action_space import get_action_space as _get_action_space, SHAPE_DIM as _SHAPE_DIM
 
 try:  # volatile-effect cues (one-hot over a curated subset)
     from poke_env.battle.effect import Effect
@@ -134,6 +140,11 @@ N_CUE_EFFECTS = len(CUE_EFFECTS)
 # semantics" upgrade -- with no external table.
 N_MOVE_SEM = 8
 
+# Move-identity positional encoding: [x, sin(px), cos(px), sin(2px)], x = move_id / N_MOVES.
+# Ties each *revealed* move to its slot in the 963-action space, so the policy can map
+# "the move I see here" -> "the action that fires it" without a hard-coded per-gen table.
+N_MOVE_ID = 4
+
 N_MOVES = 4
 N_TEAM_SLOTS = 6
 
@@ -146,7 +157,7 @@ N_HASH_PROBES = 4  # multi-probe hashing: fewer collisions than a single bucket
 # ---------------------------------------------------------------------------
 # Block sizes (single source of truth for OBS_DIM)
 # ---------------------------------------------------------------------------
-MOVE_BLOCK = N_TYPES + N_CAT + N_MOVE_SEM + 1  # type, category, semantics, pp-fraction
+MOVE_BLOCK = N_TYPES + N_CAT + N_MOVE_SEM + N_MOVE_ID + 1  # type, cat, sem, identity, pp
 
 # Active-mon cues: recharge, protect, tera, dancing, + curated cue effects.
 _ACTIVE_CUES = 4 + N_CUE_EFFECTS  # = 16
@@ -165,6 +176,7 @@ _ACTIVE = (
     + N_ITEM_HASH  # opponent hidden item -> consistent "unknown" hash
     + N_MOVES * MOVE_BLOCK
     + _ACTIVE_CUES
+    + _SHAPE_DIM  # moveset-shape prior (species capability)
 )
 
 _OWN_SLOT = 1 + 1 + N_STATUS + N_SPECIES_HASH  # fainted, hp, status, identity
@@ -316,8 +328,42 @@ def _moves(mon: Optional[Pokemon]):
     return mvs[:N_MOVES]
 
 
+def _move_identity(m) -> List[float]:
+    """Positional encoding of a move's identity in the 963-action space.
+
+    ``x = move_id / N_MOVES`` in [0,1); encoded as [x, sin(px), cos(px), sin(2px)] so the
+    policy can learn "this revealed move -> that action slot". Unknown/absent -> 0s.
+    Uses the action_space's N_MOVES (954), NOT obs's N_MOVES (4 moves per mon).
+    """
+    if m is None:
+        return [0.0] * N_MOVE_ID
+    for attr in ("id", "name"):
+        raw = _safe(lambda a=attr: getattr(m, a, None))
+        if not raw:
+            continue
+        mid = _get_action_space().move_id(raw)
+        if mid is not None:
+            x = mid / _get_action_space().N_MOVES
+            return [x, math.sin(math.pi * x), math.cos(math.pi * x), math.sin(2.0 * math.pi * x)]
+    return [0.0] * N_MOVE_ID
+
+
+def _moveset_shape(mon: Optional[Pokemon]) -> List[float]:
+    """Species capability prior (SHAPE_DIM) -- 'what could this species do'. Known for
+    both sides once the species is revealed; 0s for an unknown/absent species."""
+    if mon is None:
+        return [0.0] * _SHAPE_DIM
+    sp = _safe(lambda: mon.species)
+    if not sp:
+        return [0.0] * _SHAPE_DIM
+    try:
+        return list(_get_action_space().moveset_shape(sp))
+    except Exception:
+        return [0.0] * _SHAPE_DIM
+
+
 def _move_vec(mon: Optional[Pokemon], idx: int, include_pp: bool) -> List[float]:
-    n = N_TYPES + N_CAT + N_MOVE_SEM + (1 if include_pp else 0)
+    n = N_TYPES + N_CAT + N_MOVE_SEM + N_MOVE_ID + (1 if include_pp else 0)
     mvs = _moves(mon)
     if idx >= len(mvs) or mvs[idx] is None:
         return [0.0] * n
@@ -356,6 +402,9 @@ def _move_vec(mon: Optional[Pokemon], idx: int, include_pp: bool) -> List[float]
         1.0 if _safe(lambda: m.status) is not None else 0.0,
         1.0 if _safe(lambda: m.volatile_status) is not None else 0.0,
     ]
+
+    # identity: tie this revealed move to its slot in the 963-action space
+    out += _move_identity(m)
 
     # pp fraction (own mon only; opponent hidden -> 0)
     if include_pp:
@@ -423,6 +472,7 @@ def _active_block(mon: Optional[Pokemon], include_pp: bool) -> List[float]:
     f += _hash_vec(_safe(lambda: mon.item), N_ITEM_HASH)
     f += _moves_vec(mon, include_pp)
     f += _cues_vec(mon)
+    f += _moveset_shape(mon)
     return f
 
 
