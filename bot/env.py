@@ -19,6 +19,7 @@ drives it directly.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Optional, Tuple, Union
 
 import numpy as np
@@ -303,7 +304,22 @@ class TraineeEnv:
         self.last_opp_rew: float = 0.0
 
     def reset(self) -> np.ndarray:
-        obs, _ = self.env.reset()
+        try:
+            obs, _ = self.env.reset()
+        except asyncio.TimeoutError as exc:
+            # poke-env's ``"Agent is not challenging"`` timeout is almost always a
+            # *misleading* message: the challenge never completes because the server
+            # REJECTED the team (e.g. a random bag drew two of the same species ->
+            # Species Clause) and bounced it. Surface the real cause so it is not
+            # mistaken for a torch/asyncio/threading bug.
+            raise RuntimeError(
+                "reset() timed out waiting for the battle to start. This is usually "
+                "NOT a networking/asyncio problem -- the server rejected the team at "
+                "battle start (check the poke_env WARNING for a message like "
+                "'Your team was rejected ... Species Clause'). For random-bag teams, "
+                "ensure the pool is deduplicated by species (teams.load_verified_pool "
+                "does this). Re-raising the original timeout for the stack trace."
+            ) from exc
         self.last_obs = obs[self.a1]["observation"]
         self.last_mask = obs[self.a1]["action_mask"]
         self.obs2 = obs[self.a2]["observation"]

@@ -146,6 +146,7 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
 
 - ✅ Server runs locally (port 8000); throttle **ON** (bounded); simulator = 16.
 - ✅ Random‑vs‑random battles start/finish reliably (gen6ou / gen7ou / gen7randombattle).
+- ✅ **"Agent is not challenging" timeout — FIXED (was a red‑herring "torch bug").** Real cause: duplicate‑species random bags got rejected by the server (Species Clause). `load_verified_pool` now dedupes by species; `train.py --smoke` PASSES (CPU); see Morning‑decision #7.
 - ✅ Team pools server‑verified (gen6ou, gen7ou).
 - ✅ Env + PPO scaffolding (`env.py`, `obs.py`, `policy.py`, `train.py`); `np.int64` action fix.
 - ✅ Throughput measured; concurrency + design decisions locked (see §2–§6).
@@ -274,6 +275,7 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
 4. **Learnset gap** (e.g. U‑turn/Garchomp) — ✅ **FIXED.** Legal set = `legal_moves(species, gen) ∪ dataset_moves[species]` (moves the data actually used), + always‑allow the replay action. Applied in `imitate.py` (train) and `eval_imitation.py`.
 5. **OBS_DIM 248/244** — ✅ **keep as‑is + documented** (`_ACTIVE_OWN`=248 / `_ACTIVE_OPP`=244 in `obs.py`). Not re‑encoded (would invalidate the trained weights).
 6. **Both‑sides self‑play** — **implemented** (`--opponent live` is now the **default**): one shared policy plays P1 and P2, both transitions train the model (zero‑sum). `random`/`frozen` remain P1‑only baselines. See §8 flag #4.
+7. **"torch breaks poke_env" — ❌ RED HERRING, root cause found + fixed.** The `asyncio.TimeoutError: Agent is not challenging` at `env.reset()` was **never a torch/asyncio/threading bug.** It is a **misleading poke‑env message** that really means *the server rejected the team at battle start* (the challenge never completes). **Proven:** DEBUG log showed `|popup|Your team was rejected … You have more than one Landorus`; `import torch + create policy + a *legal* team (StrongTeamBuilder)` resets fine in ~4 s. The real bug: the **`flat` team pools contain duplicate species** (they are the concatenation of every mon from every coherent team), so **`RandomTeamBuilder`** (which `train.py --smoke` and the `--team-mode random` baseline use) could sample two of the same species → **Species Clause violation** → team bounced → timeout. **Fix:** `teams.load_verified_pool` now **dedupes by species** (`_dedupe_by_species`), so any random bag is a legal team; all 12 formats re‑verified legal via the server oracle. Also added a defensive `RuntimeError` in `TraineeEnv.reset` that surfaces "team rejected, not a networking bug" instead of the raw timeout. `train.py --smoke` now **PASSES** (CPU). **The torch/poke_env "separate processes" rewrite is NOT needed.**
 
 ## 9b. Launch the GPU self‑play (you run it, when the GPU is free)
 
