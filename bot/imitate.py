@@ -132,12 +132,6 @@ def precompute_dataset(
         species:   np.str_    [N]  species the decision is made with ("" if unknown)
         gens:      np.int8    [N]  generation of the battle (for the legal-move prior)
     """
-    all_states: List[np.ndarray] = []
-    all_actions: List[int] = []
-    all_weights: List[float] = []
-    all_species: List[str] = []
-    all_gens: List[int] = []
-
     files = sorted(
         f for f in os.listdir(data_dir) if f.endswith(".jsonl")
     )
@@ -145,8 +139,45 @@ def precompute_dataset(
     if verbose:
         print(f"Precomputing dataset from {len(files)} files...")
 
+    # ---- Pass A (cheap, parser-only): count total P1 decisions = upper bound N ----
+    # We need N up front so we can pre-allocate the states buffer ONCE and fill it in
+    # place. The old list-append + np.stack approach double-allocates (~7.5 GB peak for
+    # this dataset) which OOMs on an 8 GB-free box. Pre-allocating avoids that.
+    n_max = 0
+    n_battles_a = 0
+    for fname in files:
+        if max_battles and n_battles_a >= max_battles:
+            break
+        with open(os.path.join(data_dir, fname), encoding="utf-8") as f:
+            for line in f:
+                if max_battles and n_battles_a >= max_battles:
+                    break
+                rec = json.loads(line)
+                try:
+                    parsed = BattleLogParser(battle_id="x", formatid=fname).parse(rec["log"])
+                    n_max += sum(1 for d in parsed.decisions if d.actor == "p1")
+                except Exception:
+                    pass
+                n_battles_a += 1
+    if n_max == 0:
+        raise RuntimeError("No data extracted! Check data directory.")
+    if verbose:
+        print(f"  Upper-bound samples: {n_max} (from {n_battles_a} battles); pre-allocating...")
+
+    # ---- Pre-allocate once (single 3.7 GB allocation, no double-allocation) ----
+    states = np.zeros((n_max, OBS_DIM), dtype=np.float32)
+    actions = np.zeros(n_max, dtype=np.int64)
+    weights = np.zeros(n_max, dtype=np.float32)
+    species = np.empty(n_max, dtype="U32")
+    species[:] = ""
+    gens = np.zeros(n_max, dtype=np.int8)
+
+    # ---- Pass B (expensive): reconstruct + parse, fill the buffers in place ----
+    pos = 0
     total_battles = 0
     for fname in files:
+        if max_battles and total_battles >= max_battles:
+            break
         fpath = os.path.join(data_dir, fname)
         battles_in_file = 0
 
@@ -177,7 +208,7 @@ def precompute_dataset(
                 # Reconstruct states
                 try:
                     recon = StateReconstructor(log, gen)
-                    states = recon.all_states()
+                    st_list = recon.all_states()
                 except Exception as e:
                     if verbose:
                         print(f"  WARN: {battle_id}: {e}")
@@ -194,31 +225,33 @@ def precompute_dataset(
                     continue
 
                 # Match states to actions (both in P1 decision order)
-                n_pairs = min(len(states), len(p1_decisions))
+                n_pairs = min(len(st_list), len(p1_decisions))
                 if n_pairs == 0:
                     continue
 
-                for i in range(n_pairs):
-                    all_states.append(states[i])
-                    all_actions.append(p1_decisions[i].action_idx)
-                    all_weights.append(weight)
-                    all_species.append(p1_decisions[i].species)
-                    all_gens.append(gen)
+                states[pos:pos + n_pairs] = np.asarray(st_list[:n_pairs], dtype=np.float32)
+                actions[pos:pos + n_pairs] = [d.action_idx for d in p1_decisions[:n_pairs]]
+                weights[pos:pos + n_pairs] = weight
+                species[pos:pos + n_pairs] = [d.species for d in p1_decisions[:n_pairs]]
+                gens[pos:pos + n_pairs] = gen
+                pos += n_pairs
 
                 battles_in_file += 1
                 total_battles += 1
 
         if verbose:
-            print(f"  {fname}: {battles_in_file} battles, {battles_in_file * 30} est. decisions")
+            print(f"  {fname}: {battles_in_file} battles")
 
-    if not all_states:
+    if pos == 0:
         raise RuntimeError("No data extracted! Check data directory.")
 
-    states = np.stack(all_states, axis=0).astype(np.float32)
-    actions = np.array(all_actions, dtype=np.int64)
-    weights = np.array(all_weights, dtype=np.float32)
-    species = np.array(all_species, dtype="U")
-    gens = np.array(all_gens, dtype=np.int8)
+    # Slice to the actually-used count (n_pairs can be < P1-decisions when the
+    # reconstructor yields fewer states).
+    states = states[:pos]
+    actions = actions[:pos]
+    weights = weights[:pos]
+    species = species[:pos]
+    gens = gens[:pos]
 
     if verbose:
         n_with_sp = int((species != "").sum())

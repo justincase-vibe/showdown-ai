@@ -183,8 +183,38 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
   re_picks exercised) and `verify_env.py --formats gen7ou,gen6ou --battles 1` ALL PASSED.
   **Known gap (flag):** opponent‑side transitions are not stored (frozen/live opponents act
   but never learn) — self‑play currently trains only the trainee side.
-- ⬜ LATER: build other 10 team pools; Part 2 drafting value head; doubles; **search+RL
-  (MCTS / PIMC)** as an amplifier on top of the learned policy+value.
+- ✅ **(5) Imitation pre-training COMPLETE** (CPU — GPU reserved for PPO per the scaling
+  decision). **1,045,840 samples × 892 dims** across all 15 formats (30k battles); 97.1% of
+  samples carry a known species; 91.3% resolve a non-empty legal‑move prior. Trained 10
+  epochs (batch 256, lr 3e‑4, **ε=0.05** legal‑move prior, weighted CE with (elo/1200)² ×
+  format weight). ~90 s/epoch on CPU.
+  **Eval (`eval_imitation.py`):** masked top‑1 (top‑1 is a *legal* move) **≈ 75%**, raw
+  top‑1 56–59%, **illegal‑argmax ≈ 23%**, conditional‑on‑legal 57%.
+  **A/B:** ε=0.05 beats ε=0.10 on *every* metric (75.1% / 22.8% illegal vs 72.6% / 25.3%) →
+  **0.05 is the default.**
+  **Memory fix:** `precompute_dataset` now pre‑allocates the states buffer once and fills it
+  in place (was list‑append + `np.stack` = ~7.5 GB double‑allocation, which OOMs on this
+  8‑GB‑free box). Pre‑allocation peaks ~4 GB. Dataset = 105 MB npz.
+  **Models:** `bot/data/imitation_actor.pt` (ε=0.05, **the one to use**),
+  `bot/data/imitation_actor_eps010.pt` (A/B artifact).
+  **NEXT: (6) concurrent self‑play PPO (warm‑started from the imitation actor) → (7) eval.**
+- 🚩 **Flagged for review (decisions I made / gaps you should weigh in on):**
+  1. **~23% illegal‑argmax is a real limit of label‑smoothing, not a bug.** The prior
+     (5% mass spread over legal moves) can't fully override the net's learned bias toward
+     globally‑common moves (e.g. U‑turn). Harmless in *live* play — `env.py` hard‑masks to
+     the true moveset — but it means the imitation actor alone is not fully prior‑compliant.
+     **Option (your call):** hard‑mask the imitation loss to the legal set (drop illegal
+     logits to −inf) instead of / in addition to label smoothing → illegal rate → ~0.
+  2. **Learnset data gap:** some genuinely‑legal moves are missing from poke‑env's curated
+     learnset (e.g. **U‑turn for Garchomp**), so they read as "illegal" to the prior AND to
+     the eval mask. This inflates the illegal rate and weakens the prior for those species.
+     Augmenting the prior with "moves the dataset actually used per species" would fix it.
+  3. **Self‑play PPO device:** the scaling decision says GPU‑on‑GO, but the GPU is ~90% used
+     by agent inference and RAM is only 8 GB free. A 10k‑game self‑play on **CPU** is the
+     safe default (bounded, matches the "never fry the hardware" rule) but is **slow**
+     (PPO updates on CPU). **Your call: CPU (safe/slow) vs GPU (fast, on explicit GO)?**
+  4. **Imitation is P1‑only** (expert side). Opponent‑side decisions exist in the data and
+     could be added as a second supervised head — not done (keeps scope tight).
 
 ## 9. Open decisions
 
