@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from env import ShowdownEnv, TraineeEnv, UNIFIED_ACTION_SIZE  # noqa: E402
 from obs import OBS_DIM  # noqa: E402
 from policy import MaskedPPO  # noqa: E402
-from teams import RandomTeamBuilder  # noqa: E402
+from teams import RandomTeamBuilder, StrongTeamBuilder  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -65,15 +65,19 @@ def build_envs(
     num_envs: int,
     seed: int,
     save_replays: Optional[str],
+    team_mode: str = "strong",
 ) -> List[TraineeEnv]:
     counts = apportion(num_envs, weights)
     envs: List[TraineeEnv] = []
     idx = 0
     for fmt, c in zip(formats, counts):
         for _ in range(c):
-            team = None if "randombattle" in fmt else RandomTeamBuilder(
-                battle_format=fmt, seed=seed + idx
-            )
+            if "randombattle" in fmt:
+                team = None
+            elif team_mode == "random":
+                team = RandomTeamBuilder(battle_format=fmt, seed=seed + idx)
+            else:
+                team = StrongTeamBuilder(battle_format=fmt, seed=seed + idx)
             env = ShowdownEnv(
                 battle_format=fmt,
                 team=team,
@@ -125,7 +129,8 @@ def run(args) -> None:
         formats, weights, args.num_envs, args.opponent, args.buffer_size, args.max_battles, args.device,
     )
 
-    envs = build_envs(formats, weights, args.num_envs, args.seed, args.replays)
+    envs = build_envs(formats, weights, args.num_envs, args.seed, args.replays,
+                      team_mode=args.team_mode)
     fmt_of = {e.id: e.fmt for e in envs}
 
     policy = MaskedPPO(
@@ -361,6 +366,8 @@ def main() -> None:
     p.add_argument("--formats", default="gen7ou,gen7randombattle")
     p.add_argument("--weights", default="0.5,0.5")
     p.add_argument("--num-envs", type=int, default=4)
+    p.add_argument("--team-mode", choices=["strong", "random"], default="strong",
+                   help="strong=coherent curated teams (default); random=weak bag baseline")
     p.add_argument("--opponent", choices=["random", "frozen", "live"], default="live",
                    help="random/frozen = P1-only learning; live = SHARED policy plays "
                         "both sides and both transitions train the model (default)")

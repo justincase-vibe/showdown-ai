@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from env import ShowdownEnv, TraineeEnv, UNIFIED_ACTION_SIZE  # noqa: E402
 from obs import OBS_DIM  # noqa: E402
-from teams import RandomTeamBuilder  # noqa: E402
+from teams import RandomTeamBuilder, StrongTeamBuilder  # noqa: E402
 
 
 def random_action(mask: np.ndarray) -> int:
@@ -35,10 +35,13 @@ def random_action(mask: np.ndarray) -> int:
     return int(np.random.choice(legal))
 
 
-def play_one(fmt: str, replays: str) -> dict:
-    team = None if "randombattle" in fmt else RandomTeamBuilder(
-        battle_format=fmt, seed=np.random.randint(10**6)
-    )
+def play_one(fmt: str, replays: str, team_mode: str = "strong") -> dict:
+    if "randombattle" in fmt:
+        team = None
+    elif team_mode == "random":
+        team = RandomTeamBuilder(battle_format=fmt, seed=np.random.randint(10**6))
+    else:
+        team = StrongTeamBuilder(battle_format=fmt, seed=np.random.randint(10**6))
     env = ShowdownEnv(
         battle_format=fmt,
         team=team,
@@ -79,6 +82,7 @@ def play_one(fmt: str, replays: str) -> dict:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--formats", default="gen7ou,gen7randombattle,gen6ou")
+    p.add_argument("--team-mode", choices=["strong", "random"], default="strong")
     p.add_argument("--battles", type=int, default=2)
     p.add_argument("--replays", default=os.path.join(os.path.dirname(__file__), "replays"))
     args = p.parse_args()
@@ -91,7 +95,7 @@ def main() -> None:
     for fmt in fmts:
         for i in range(args.battles):
             t0 = time.time()
-            r = play_one(fmt, args.replays)
+            r = play_one(fmt, args.replays, args.team_mode)
             r["dt"] = round(time.time() - t0, 1)
             ok = r.pop("ok") and r["finished"] and r["terminal_reward"] in (1.0, -1.0)
             all_ok = all_ok and ok

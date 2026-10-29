@@ -132,12 +132,10 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
 
 ## 7. Data tasks
 
-- **Team pools** (`bot/team_pools.json`): have **gen6ou (20) + gen7ou (21)**, all server‑verified.
-  🚧 **CURRENT BLOCKER:** only these 2 formats can run self‑play today — `teams.py`'s `RandomTeamBuilder`
-  **raises** for any format without a pool. **Build the other 10** (gen6uu/gen6ru/gen7uu/gen7ru/gen8ou/gen8uu/
-  gen8ru/gen9ou/gen9uu/gen9ru): scrape Smogon sets → validate via `teamgen.py`'s server oracle
-  (`pokemon-showdown validate-team`) → keep only legal (some sets may be outdated/banned after the metagame
-  ended). This unblocks full 12‑format self‑play.
+- **Team pools** (`bot/team_pools.json`): **✅ RESOLVED — all 12 formats** (gen6‑9 × OU/UU/RU) now have **coherent, server‑verified teams** (the real 6 that go together), built from **Smogon's council sample teams** (via the crob.at JSON mirror) + a few community teams to top up, each team validated by the local server's own TeamValidator (`pokemon-showdown validate-team`) so every stored team is guaranteed runnable.
+  `teams.py` now has **`StrongTeamBuilder`** (one coherent team — the self‑play default) alongside **`RandomTeamBuilder`** (weak random‑bag baseline, kept for the synergy‑contrast tool). Self‑play uses `--team-mode strong` (default); `--team-mode random` for the weak baseline.
+  - **⚠️ Count reality (data ceiling, not a bug):** Smogon only publishes a handful of curated sample teams per tier, so the "20‑25 strong teams/format" target is met for **gen6ou (19), gen7ou (23), gen8ou (21), gen9ou (25)** but only partially for the smaller tiers: **gen6ru (3), gen6uu (4), gen7ru (5), gen7uu (12), gen8ru (15), gen8uu (14), gen9ru (6), gen9uu (4)**. All are legal + coherent; there simply aren't more Smogon samples to draw from.
+  - **Decision needed:** accept fewer‑per‑format (self‑play still works fine — it does today), **or** top up the short tiers with synthesized legal teams (type/role‑balanced, weaker) to reach 20. **Default kept: real teams only (no synthesis)** — quality over quantity, per the "strong teams" goal.
 - **Datamine top‑tier replays (RU→OU + random battles)** — for imitation + eval. **Owner:
   assistant. NEXT (later).** Avenues: Showdown ladder/battle API, community replay dumps.
 - **Smogon sets** — for our own team gen + (optional) strong‑set imitation. Not an opponent prior.
@@ -281,8 +279,7 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
 
 > Throttle stays **ON** (~10 battles/min, ≤16 concurrent). Battle generation is **CPU‑only**;
 > the GPU is used only for PPO updates. Do not run while this agent is using the GPU for inference.
-> Only **gen6ou / gen7ou** have team pools today (§7 blocker) — expand `--formats` once the other
-> 10 pools are built.
+> **All 12 formats now have team pools** (§7 RESOLVED) — pick any subset of gen6/7/8/9 × OU/UU/RU for `--formats` (smaller tiers carry 3–15 curated teams, larger 19–25).
 
 **Preflight (device‑aware; default `--smoke` is CPU and safe, `--device cuda` sanity‑checks the GPU):**
 ```
@@ -306,7 +303,7 @@ python bot/train.py --formats gen6ou,gen7ou --weights 0.5,0.5 --num-envs 16 --op
 | `bot/policy.py` | `MaskedPPO` (masked actor‑critic PPO + GAE). |
 | `bot/train.py` | Self‑play loop (**→ concurrent 4‑proc per §6**). |
 | `bot/teams.py` / `bot/teamgen.py` | Team pools + server‑verified pool builder. |
-| `bot/team_pools.json` | Verified legal pools (gen6ou, gen7ou → expand to 12). |
+| `bot/team_pools.json` | Verified coherent team pools (all 12 formats: gen6–9 × OU/UU/RU). |
 | `bot/verify_env.py` | Torch‑free pipeline check. |
 | `bot/datamine/fetch.py` | Download top‑ELO battles from HF (per format). |
 | `bot/datamine/parse.py` | Parse Showdown logs → structured decisions (move‑identity, 0..962). |
