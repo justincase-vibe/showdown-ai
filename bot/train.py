@@ -4,10 +4,13 @@ Runs N concurrent battles across a *mix of formats* (e.g. gen7ou + gen7randombat
 collects transitions into a PPO buffer, updates the shared policy on the chosen device,
 and tracks rolling win-rate per format. The opponent is pluggable:
 
-  * ``random`` -- a random-legal-move baseline (sanity check / curriculum floor).
-  * ``frozen`` -- a periodically-updated copy of the trainee (default self-play; a loss
-                  on one side is a win on the other, so the target is always ~matched).
-  * ``live``   -- the trainee itself (both sides always current).
+  * ``random`` -- a random-legal-move baseline (sanity check / curriculum floor). Only
+                  the trainee (P1) learns; P2 is a noise floor.
+  * ``frozen`` -- a periodically-updated copy of the trainee (P1 learns; P2 is a lagging
+                  target, not stored).
+  * ``live``   -- the trainee itself plays BOTH sides (default). A loss on one side is a
+                  win on the other; BOTH sides' transitions update the SAME shared policy
+                  (zero-sum reward). This is the "both sides train the model" mode.
 
 Everything here is device-agnostic. Run the CPU smoke test first (no GPU needed):
 
@@ -86,6 +89,28 @@ def build_envs(
 # --------------------------------------------------------------------------- #
 # Main training loop
 # --------------------------------------------------------------------------- #
+def _store_opponent_side(e: "TraineeEnv", policy: "MaskedPPO", opponent, done: bool) -> None:
+    """Both-sides self-play: store the opponent's (P2) transition when the opponent IS
+    the shared training policy (``--opponent live``). P2's (obs, action, logprob, value)
+    come from the state P2 decided from (captured in TraineeEnv.step); the reward is
+    P2's zero-sum reward (``rew[a2]`` = -P1's at a terminal win/loss). Stored under a
+    distinct env id so P1 and P2 are separate trajectories for per-episode GAE. No-op
+    when the opponent is not the shared policy (random / frozen) or P2 had nothing to
+    decide (a Showdown 'wait' request).
+    """
+    if opponent is not policy:
+        return
+    lo = e.last_opp
+    if not lo or not lo.get("made"):
+        return
+    o2, a2, m2 = lo.get("obs"), lo.get("a"), lo.get("mask")
+    if o2 is None or a2 is None or m2 is None or int(np.sum(m2)) == 0:
+        return
+    policy.store(
+        e.id + 1_000_000, o2, a2, lo.get("lp", 0.0), e.last_opp_rew, done, m2, lo.get("v", 0.0)
+    )
+
+
 def run(args) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     log = logging.getLogger("train")
@@ -209,6 +234,9 @@ def run(args) -> None:
                     assert 0 <= a < UNIFIED_ACTION_SIZE and mask[a] == 1, f"illegal action {a}"
                     new_obs, r, done = e.step(a, opponent)
                     policy.store(e.id, obs, a, lp, r, done, mask, v)
+                # Both-sides self-play: also store the opponent's transition when the
+                # opponent is the shared policy (--opponent live); no-op otherwise.
+                _store_opponent_side(e, policy, opponent, done)
                 transitions += 1
                 if done:
                     battles_done += 1
@@ -254,14 +282,26 @@ def run(args) -> None:
 # Smoke test: prove the whole pipeline works on CPU, no heavy training
 # --------------------------------------------------------------------------- #
 def smoke(args) -> None:
-    """Prove the full pipeline works on CPU with no heavy training: env + teams +
-    masked policy + one PPO update, across an OU format and a random-battle format."""
+    """Prove the full pipeline works with no heavy training: env + teams +
+    masked policy + one PPO update, across an OU format and a random-battle format.
+
+    Device-aware: default is CPU (safe -- never contends with a GPU in use). Pass
+    ``--smoke --device cuda`` for a quick GPU preflight (a few CUDA act() + one CUDA
+    PPO update + GPU memory report) before launching the long run.
+    """
     logging.basicConfig(level=logging.WARNING)
-    print("=== SMOKE TEST (CPU) ===")
+    device = args.device if args.device in ("cpu", "cuda") else "cpu"
+    print(f"=== SMOKE TEST ({device.upper()}) ===")
     print(f"OBS_DIM={OBS_DIM}  ACTIONS={UNIFIED_ACTION_SIZE}")
+    if device == "cuda":
+        if not torch.cuda.is_available():
+            raise SystemExit("CUDA requested but torch.cuda.is_available() is False -- "
+                             "check the driver / that the GPU is not fully held by another process.")
+        print(f"  GPU: {torch.cuda.get_device_name(0)} "
+              f"| free/total = {torch.cuda.mem_get_info(0)[0]/1e9:.1f}/{torch.cuda.mem_get_info(0)[1]/1e9:.1f} GB")
 
     policy = MaskedPPO(obs_dim=OBS_DIM, n_actions=UNIFIED_ACTION_SIZE,
-                       hidden=(64, 64), device="cpu", seed=0)
+                       hidden=(64, 64), device=device, seed=0)
 
     # --- OU format: teams come from our pool ---
     env = ShowdownEnv(
@@ -321,7 +361,9 @@ def main() -> None:
     p.add_argument("--formats", default="gen7ou,gen7randombattle")
     p.add_argument("--weights", default="0.5,0.5")
     p.add_argument("--num-envs", type=int, default=4)
-    p.add_argument("--opponent", choices=["random", "frozen", "live"], default="frozen")
+    p.add_argument("--opponent", choices=["random", "frozen", "live"], default="live",
+                   help="random/frozen = P1-only learning; live = SHARED policy plays "
+                        "both sides and both transitions train the model (default)")
     p.add_argument("--buffer-size", type=int, default=2048)
     p.add_argument("--max-battles", type=int, default=200)
     p.add_argument("--ppo-epochs", type=int, default=4)

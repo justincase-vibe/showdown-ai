@@ -101,7 +101,7 @@ the structure**. Both are covered above.
 - **+ random battles** (separate track) — keeps the bot from overfitting to "random‑battle
   movesets are normal."
 - **Singles (1v1).** Doubles (2v2) is a separate future track (positioning, spread moves).
-- **Opponent modes:** `frozen` self‑play (default), `random` (baseline), `live`.
+- **Opponent modes:** `live` self‑play (default — a **shared** policy plays both sides, so both transitions train the model), `frozen` (P1‑only, lagging copy), `random` (P1‑only baseline).
 - **Weights:** default **equal** across active formats (bias later).
 
 ## 6. Throughput & logistics (MEASURED + DECIDED)
@@ -133,7 +133,11 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
 ## 7. Data tasks
 
 - **Team pools** (`bot/team_pools.json`): have **gen6ou (20) + gen7ou (21)**, all server‑verified.
-  **Build the other 10** via `teamgen.py` (server‑validator as legality oracle) or Smogon sets.
+  🚧 **CURRENT BLOCKER:** only these 2 formats can run self‑play today — `teams.py`'s `RandomTeamBuilder`
+  **raises** for any format without a pool. **Build the other 10** (gen6uu/gen6ru/gen7uu/gen7ru/gen8ou/gen8uu/
+  gen8ru/gen9ou/gen9uu/gen9ru): scrape Smogon sets → validate via `teamgen.py`'s server oracle
+  (`pokemon-showdown validate-team`) → keep only legal (some sets may be outdated/banned after the metagame
+  ended). This unblocks full 12‑format self‑play.
 - **Datamine top‑tier replays (RU→OU + random battles)** — for imitation + eval. **Owner:
   assistant. NEXT (later).** Avenues: Showdown ladder/battle API, community replay dumps.
 - **Smogon sets** — for our own team gen + (optional) strong‑set imitation. Not an opponent prior.
@@ -222,28 +226,38 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
      the true moveset — but it means the imitation actor alone is not fully prior‑compliant.
      **Option (your call):** hard‑mask the imitation loss to the legal set (drop illegal
      logits to −inf) instead of / in addition to label smoothing → illegal rate → ~0.
-  2. **✅ RESOLVED — Learnset data gap:** legal set augmented with `dataset_moves[species]`
-     (moves the data actually used). Some genuinely‑legal moves were missing from poke‑env's curated
-     learnset (e.g. **U‑turn for Garchomp**), so they read as "illegal" to the prior AND to
-     the eval mask. This inflates the illegal rate and weakens the prior for those species.
-     Augmenting the prior with "moves the dataset actually used per species" would fix it.
+  2. **✅ RESOLVED — Learnset/forme data gap (two‑part fix).**
+     (a) **Forme‑union:** `action_space.py` now unions a species' own learnset key with its base‑species
+     key (e.g. `Blastoise‑Mega`→`Blastoise`, `Charizard‑Mega‑X`→`Charizard`, `Rotom‑Heat`→`Rotom`,
+     `Arceus‑Fire`→`Arceus`). Root cause: poke‑env's `learnset.json` is incomplete *both ways* (some
+     forme keys exist but list no moves; others are absent), so "exact‑match‑first" still dropped moves.
+     This cut the replay "gap" (moves the data used that the legal set excluded) **18.94% → 12.21%**
+     (200k sample); masked eval held at **85.2%** (no regression).
+     (b) **Residual 12.2%** = genuine poke‑env base‑species incompleteness (Ferrothorn/Leech Seed,
+     Smeargle/Baton Pass, Blissey/Seismic Toss only‑gen3, Vaporeon/Heal Bell no‑gen8, Mamoswine/Icicle
+     Crash only‑gen6). Covered by the `dataset_moves[species]` union in the imitation prior — do **not**
+     hack `legal_moves` to ignore gen to "close" this (would break its gen contract).
   3. **✅ RESOLVED — Self‑play PPO device = GPU** (your choice). `train.py --device cuda`.
      The scaling decision said GPU‑on‑GO, but the GPU is ~90% used
      by agent inference and RAM is only 8 GB free. A 10k‑game self‑play on **CPU** is the
      safe default (bounded, matches the "never fry the hardware" rule) but is **slow**
      (PPO updates on CPU). **Your call: CPU (safe/slow) vs GPU (fast, on explicit GO)?**
-  4. **Imitation is P1‑only** (expert side). Opponent‑side decisions exist in the data and
-     could be added as a second supervised head — not done (keeps scope tight).
+  4. **✅ RESOLVED — both‑sides self‑play (shared policy).** The opponent was P1‑only before
+     (it acted but never learned). `--opponent live` (now the **default**) shares one policy across both sides:
+     `env.py` exposes `last_opp` (P2 state + decision + zero‑sum reward) and `train.py:_store_opponent_side`
+     stores P2's transition under a distinct env id (`e.id + 1_000_000`) → a separate trajectory for
+     per‑episode GAE. **Verified:** real gen7ou battle → P1 46 + P2 50 decisions → buffer 105 rows →
+     PPO update clean; real `run()` loop 4 battles / 4 updates green. `random`/`frozen` remain P1‑only
+     baselines. **Caveat:** with a shared policy the win‑rate hovers ~50/50 (same net both sides + first‑move
+     edge) — the learning signal is the win/lose reward on both sides, not the win‑rate.
 
-  5. **OBS_DIM layout nuance (keep as‑is vs. re‑encode) — your call.** The opponent‑active
-     block is **N_MOVES (4) dims shorter** than the own‑active block because the opponent's
-     per‑move PP slot is hidden. Measured: own_active = **248**, opp_active = **244**, so the team
-     block starts at **492** (not the `_ACTIVE*2 = 496` the constants imply), with **4 trailing
-     zero‑pad** to reach `OBS_DIM = 892`. It is **self‑consistent** (training and live use identical
-     `embed_battle` code), so it does **not** break the current model — but the `_ACTIVE`
-     constant/comments are misleading and it is a latent maintenance hazard. I did **not** change it
-     (re‑encoding would invalidate the trained imitation model). **Option:** keep as‑is + fix the
-     comments (safe, recommended) vs. re‑encode to equal widths + retrain imitation.
+  5. **📌 NOTED (Decision 5) — OBS_DIM 248/244, keep as‑is.** The opponent‑active block is
+     **N_MOVES (4) dims shorter** than the own‑active block because the opponent's per‑move PP slot is
+     hidden (measured: own_active **248**, opp_active **244**, so the team block starts at **492**).
+     It is **self‑consistent** (training and live use identical `embed_battle`), so it does **not** break
+     the current model. **Decision: keep as‑is** for now (no re‑encode — that would invalidate the
+     trained imitation warm‑start). The correct *eventual* fix is a **symmetric 248/248 re‑encode**
+     (re‑build `OBS_DIM` + retrain the imitation actor) — do later, after the team‑pool blocker.
 
 ## 9. Open decisions
 
@@ -253,11 +267,34 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
 - **Format weights:** equal now, or bias toward specific tiers/gens.
 
 ### ✅ Morning decisions — RESOLVED (2026‑10‑29)
-1. **Self‑play device** — ✅ **GPU** (your choice). `train.py --device cuda`; warm‑start from the imitation actor. I prepare, **you launch**.
+1. **Self‑play device** — **GPU** (your choice). I prepared the device‑aware preflight
+   (`train.py --smoke --device cuda` — prints GPU name + free/total GB; the default `--smoke` is CPU
+   so it never contends) + the full launch command in **§9b**. I **do not** launch it — **you do**,
+   when the GPU is free.
 2. **Overnight 10k self‑play** — ⏳ **you run it** (agent does not launch it; I'm using the GPU for inference). Command in my report.
 3. **~23% illegal‑argmax** — ✅ **FIXED + verified.** Hard legal‑mask in the imitation loss (default ON) + a corrected *masked* eval metric. The scary "71.7% illegal" was a **raw‑unmasked‑argmax artifact**, NOT a live defect (the legal mask is always applied at live time). Correct **masked top‑1: new 85.2% vs old 75.6%**; switch/transform imitation jumped to 100%.
 4. **Learnset gap** (e.g. U‑turn/Garchomp) — ✅ **FIXED.** Legal set = `legal_moves(species, gen) ∪ dataset_moves[species]` (moves the data actually used), + always‑allow the replay action. Applied in `imitate.py` (train) and `eval_imitation.py`.
 5. **OBS_DIM 248/244** — ✅ **keep as‑is + documented** (`_ACTIVE_OWN`=248 / `_ACTIVE_OPP`=244 in `obs.py`). Not re‑encoded (would invalidate the trained weights).
+6. **Both‑sides self‑play** — **implemented** (`--opponent live` is now the **default**): one shared policy plays P1 and P2, both transitions train the model (zero‑sum). `random`/`frozen` remain P1‑only baselines. See §8 flag #4.
+
+## 9b. Launch the GPU self‑play (you run it, when the GPU is free)
+
+> Throttle stays **ON** (~10 battles/min, ≤16 concurrent). Battle generation is **CPU‑only**;
+> the GPU is used only for PPO updates. Do not run while this agent is using the GPU for inference.
+> Only **gen6ou / gen7ou** have team pools today (§7 blocker) — expand `--formats` once the other
+> 10 pools are built.
+
+**Preflight (device‑aware; default `--smoke` is CPU and safe, `--device cuda` sanity‑checks the GPU):**
+```
+python bot/train.py --smoke --device cuda
+```
+
+**Full both‑sides self‑play run (warm‑started from the imitation actor):**
+```
+python bot/train.py --formats gen6ou,gen7ou --weights 0.5,0.5 --num-envs 16 --opponent live --buffer-size 4096 --ppo-epochs 4 --minibatch 128 --lr 3e-4 --max-battles 10000 --device cuda --init-actor bot/data/imitation_actor.pt
+```
+
+---
 
 ## 10. Key files
 

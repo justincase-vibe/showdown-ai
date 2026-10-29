@@ -297,6 +297,10 @@ class TraineeEnv:
         self.mask2: Optional[np.ndarray] = None
         self.done = True
         self.re_picks = 0  # actions re-validated against live valid_orders (stale-mask guard)
+        # Both-sides self-play: P2's decision, captured in step() so a SHARED policy
+        # can learn from the opponent side too (zero-sum reward). See _opp_decision.
+        self.last_opp: Optional[dict] = None
+        self.last_opp_rew: float = 0.0
 
     def reset(self) -> np.ndarray:
         obs, _ = self.env.reset()
@@ -316,6 +320,12 @@ class TraineeEnv:
         # CRITICAL: our actions live in the 963-space (move-identity); poke-env expects
         # its own slot-based ints. Translate *before* env.step -- passing a raw 963 id
         # straight through would index the wrong move (or a switch/transform) silently.
+        #
+        # Both-sides: capture P2's decision (state it decided from + action/logprob/value)
+        # BEFORE the post-step overwrite of self.obs2/self.mask2 below.
+        obs2_pre = self.obs2
+        mask2_pre = self.mask2
+        a2 = lp2 = v2 = None
         actions = {}
         if env.agent1_to_move:
             if env.battle1.wait:
@@ -327,8 +337,9 @@ class TraineeEnv:
             if env.battle2.wait:
                 actions[self.a2] = np.int64(-2)
             else:
-                a2 = self._valid_action(self._opp_action(opponent), env.battle2, self.mask2)
-                actions[self.a2] = np.int64(_to_pe_action(a2, env.battle2))
+                a2, lp2, v2 = self._opp_decision(opponent)
+                a2v = self._valid_action(a2, env.battle2, self.mask2)
+                actions[self.a2] = np.int64(_to_pe_action(a2v, env.battle2))
         actions.setdefault(self.a1, np.int64(-2))
         actions.setdefault(self.a2, np.int64(-2))
 
@@ -338,8 +349,20 @@ class TraineeEnv:
         self.obs2 = new_obs[self.a2]["observation"]
         self.mask2 = new_obs[self.a2]["action_mask"]
         reward = float(rew[self.a1])
+        reward2 = float(rew[self.a2])  # zero-sum: = -reward at a terminal win/loss
         done = bool(term[self.a1]) or bool(trunc[self.a1])
         self.done = done
+        # Expose P2's decision so a shared policy can learn BOTH sides. obs2_pre is the
+        # state P2 decided from (pre-step); reward2 is P2's zero-sum reward.
+        self.last_opp = {
+            "a": int(a2) if a2 is not None else None,
+            "lp": float(lp2) if lp2 is not None else 0.0,
+            "v": float(v2) if v2 is not None else 0.0,
+            "obs": obs2_pre,
+            "mask": mask2_pre,
+            "made": a2 is not None,
+        }
+        self.last_opp_rew = reward2
         return self.last_obs, reward, done
 
     def _valid_action(self, action: int, battle: Any, mask: Optional[np.ndarray]) -> int:
@@ -372,19 +395,23 @@ class TraineeEnv:
             self.re_picks += 1
             return 0
 
-    def _opp_action(self, opponent) -> int:
-        # An all-zero mask is a Showdown 'wait' request: the opponent has nothing
-        # to decide this turn and poke-env ignores the order, so return a dummy
-        # WITHOUT consulting a policy (MaskedPPO.act rightly refuses empty masks).
+    def _opp_decision(self, opponent) -> Tuple[int, float, float]:
+        """Opponent (P2) decision -> ``(action, logprob, value)``.
+
+        Returns the policy's full decision (so a shared self-play policy can learn from
+        P2's transition) or a dummy for the 'random' baseline. An all-zero mask is a
+        Showdown 'wait' request: nothing to decide this turn, so return a dummy WITHOUT
+        consulting a policy (MaskedPPO.act rightly refuses empty masks).
+        """
         if self.mask2 is not None and int(np.sum(self.mask2)) == 0:
-            return 0
+            return 0, 0.0, 0.0
         if opponent is None or opponent == "random":
             legal = np.flatnonzero(self.mask2)
             if len(legal) == 0:
                 legal = np.array([0])
-            return int(np.random.choice(legal))
-        a, _, _ = opponent.act(self.obs2, self.mask2)
-        return int(a)
+            return int(np.random.choice(legal)), 0.0, 0.0
+        a, lp, v = opponent.act(self.obs2, self.mask2)
+        return int(a), float(lp), float(v)
 
     def close(self):
         try:

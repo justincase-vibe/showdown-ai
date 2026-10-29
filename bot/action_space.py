@@ -136,6 +136,11 @@ class ActionSpace:
         with open(os.path.join(static_dir, "learnset.json"), encoding="utf-8") as fh:
             self._learnset_raw = json.load(fh)
         self._species_key = {canon_species(k): k for k in self._learnset_raw.keys()}
+        # Longest-first canonical keys for the forme->base prefix fallback
+        # (see _species_key_candidates): 'Blastoise-Mega' -> 'Blastoise', etc.
+        self._canon_keys_by_len_desc = sorted(
+            self._species_key.keys(), key=len, reverse=True
+        )
 
         # ---- Z-move -> base move. reveal.py's curated map is the single source of
         #      truth (the move files do NOT carry a usable Z->base link). Canonicalize
@@ -175,8 +180,31 @@ class ActionSpace:
 
     # ------------------------------------------------------------- legality
     def species_key(self, name: Optional[str]) -> Optional[str]:
+        keys = self._species_key_candidates(name)
+        return keys[0] if keys else None
+
+    def _species_key_candidates(self, name: Optional[str]) -> List[str]:
+        """learnset.json keys that apply to ``name``: its exact key (if the forme/variant
+        is its own entry -- e.g. ``Rotom-Heat``, ``Arceus-Fire``, ``Landorus-Therian``)
+        AND/OR its base key (the longest proper-prefix key), e.g. ``Blastoise-Mega`` ->
+        ``Blastoise``, ``Charizard-Mega-X`` -> ``Charizard``, ``Silvally-Ghost`` ->
+        ``Silvally``. poke-env's learnset is incomplete in both directions -- some forme
+        entries exist but list no moves (``rotomheat``) while others are absent entirely
+        (``blastoisemega``) -- so callers union every candidate at lookup time.
+        """
         c = canon_species(name)
-        return self._species_key.get(c) if c else None
+        if not c:
+            return []
+        out: List[str] = []
+        if c in self._species_key:
+            out.append(self._species_key[c])
+        for kc in self._canon_keys_by_len_desc:
+            if kc != c and c.startswith(kc):
+                base = self._species_key[kc]
+                if base not in out:
+                    out.append(base)
+                break
+        return out
 
     @lru_cache(maxsize=None)
     def legal_moves(self, species: str, gen: int,
@@ -188,23 +216,27 @@ class ActionSpace:
         ``methods`` is given (e.g. ``frozenset({'L','E'})``), only those acquisition
         methods count (L=level-up, E=egg, T=tutor, M=machine, S=special).
         """
-        key = self._species_key.get(canon_species(species))
-        out: set = set()
-        if key is None or gen not in GENS:
+        # NOTE: forme/variant species resolve to every applicable key (own + base) and
+        # the learnsets are unioned, so incomplete poke-env entries do not drop legal
+        # moves (see _species_key_candidates).
+        keys = self._species_key_candidates(species)
+        if not keys or gen not in GENS:
             return frozenset()
-        entry = self._learnset_raw.get(key, {}).get("learnset", {})
+        out: set = set()
         prefix = str(gen)
-        for mv, tags in entry.items():
-            c = canon_move(mv)
-            if c is None or c not in self.move_to_id:
-                continue
-            if not isinstance(tags, list):
-                continue
-            for t in tags:
-                if isinstance(t, str) and t.startswith(prefix) and len(t) > 1 and t[1] != "-":
-                    if methods is None or t[1] in methods:
-                        out.add(c)
-                        break
+        for key in keys:
+            entry = self._learnset_raw.get(key, {}).get("learnset", {})
+            for mv, tags in entry.items():
+                c = canon_move(mv)
+                if c is None or c not in self.move_to_id:
+                    continue
+                if not isinstance(tags, list):
+                    continue
+                for t in tags:
+                    if isinstance(t, str) and t.startswith(prefix) and len(t) > 1 and t[1] != "-":
+                        if methods is None or t[1] in methods:
+                            out.add(c)
+                            break
         return frozenset(out)
 
     @lru_cache(maxsize=None)

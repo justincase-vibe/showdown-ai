@@ -247,10 +247,10 @@ class MaskedPPO:
                 vloss = nn.functional.mse_loss(v, ret[idx])
                 loss = -surr.mean() + self.vf_coef * vloss - self.ent_coef * ent.mean()
                 loss.backward()
-                stats["policy_loss"] += float(-surr.mean())
-                stats["value_loss"] += float(vloss)
-                stats["entropy"] += float(ent.mean())
-                stats["clip_frac"] += float(((ratio - 1.0).abs() > self.clip).float().mean())
+                stats["policy_loss"] += (-surr.mean()).item()
+                stats["value_loss"] += vloss.item()
+                stats["entropy"] += ent.mean().item()
+                stats["clip_frac"] += ((ratio - 1.0).abs() > self.clip).float().mean().item()
                 nmb += 1
             nn.utils.clip_grad_norm_(
                 list(self.actor.parameters()) + list(self.critic.parameters()),
