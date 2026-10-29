@@ -28,11 +28,13 @@ from poke_env.environment.singles_env import SinglesEnv
 from poke_env.ps_client import LocalhostServerConfiguration, ServerConfiguration
 from poke_env.teambuilder import Teambuilder
 
+from action_space import get_action_space, canon_move, TRANSFORMS
 from obs import OBS_DIM, embed_battle as _embed_raw
 from state_from_log import reconstruct_current_state as _reconstruct_current
 
-# Covers gen6(14) .. gen9(26); gen-specific legal actions are a prefix of this space.
-UNIFIED_ACTION_SIZE = 26
+# Unified *move-identity* action space (one policy across gens 6-9):
+#   MOVE 0..N-1 | SWITCH N..N+5 | TRANSFORM N+6..N+8 (mega/dynamax/tera) -> N_ACTIONS total.
+UNIFIED_ACTION_SIZE = get_action_space().N_ACTIONS
 
 
 class ShowdownEnv(SinglesEnv):
@@ -113,18 +115,129 @@ class ShowdownEnv(SinglesEnv):
 
     # ------------------------------------------------------- unified action mask
     @staticmethod
-    def get_action_mask(battle: Any) -> list:
-        mask = SinglesEnv.get_action_mask(battle)
-        if len(mask) < UNIFIED_ACTION_SIZE:
-            mask = mask + [0] * (UNIFIED_ACTION_SIZE - len(mask))
-        elif len(mask) > UNIFIED_ACTION_SIZE:
-            mask = mask[:UNIFIED_ACTION_SIZE]
+    def get_action_mask(battle: Any) -> np.ndarray:
+        """963-space legal-action mask (move-identity).
+
+        Mirrors poke-env's legality (available_moves / available_switches / can_mega / can_tera)
+        but emits actions as *move identities* rather than slots, so training and live play
+        never drift (the whole point of the redesign). Gimmicks are single TRANSFORM actions;
+        the paired move is chosen at step-time (v1 simplification).
+        """
+        as_ = get_action_space()
+        mask = np.zeros(as_.N_ACTIONS, dtype=bool)
+        if getattr(battle, "_wait", False):
+            return mask
+        active = getattr(battle, "active_pokemon", None)
+        force_switch = bool(getattr(battle, "force_switch", False))
+        try:
+            team = list((getattr(battle, "team", None) or {}).values())
+        except Exception:
+            team = []
+
+        if active is not None and not force_switch:
+            # --- moves (identity) ---
+            try:
+                known = list(active.moves.values())[:4]
+                avail = {getattr(m, "id", None)
+                         for m in (getattr(battle, "available_moves", None) or [])}
+            except Exception:
+                known, avail = [], set()
+            for m in known:
+                mid = getattr(m, "id", None)
+                if mid is None:
+                    continue
+                if avail and mid not in avail:
+                    continue  # move currently restricted (Encore, etc.)
+                i = as_.move_id(mid)
+                if i is not None:
+                    mask[i] = True
+            # --- transforms (mega / dynamax / tera) ---
+            if getattr(battle, "can_mega_evolve", False):
+                t = as_.transform("mega")
+                if t is not None:
+                    mask[t] = True
+            if getattr(battle, "can_dynamax", False):
+                t = as_.transform("dynamax")
+                if t is not None:
+                    mask[t] = True
+            if getattr(battle, "can_tera", False):
+                t = as_.transform("tera")
+                if t is not None:
+                    mask[t] = True
+
+        # --- switches (alive + available; always allowed unless trapped) ---
+        if not bool(getattr(battle, "trapped", False)):
+            try:
+                avail_sw = [getattr(p, "base_species", None)
+                            for p in (getattr(battle, "available_switches", None) or [])]
+            except Exception:
+                avail_sw = []
+            for slot, mon in enumerate(team):
+                bs = getattr(mon, "base_species", None)
+                if bs is None:
+                    continue
+                if avail_sw and bs not in avail_sw:
+                    continue
+                sid = as_.switch_id(slot)
+                if sid is not None:
+                    mask[sid] = True
         return mask
 
     @staticmethod
     def get_action_space_size(gen: int) -> int:
-        # Keep the per-gen helper intact for introspection, but the *space* is unified.
         return UNIFIED_ACTION_SIZE
+
+
+# ---------------------------------------------------------------------------
+# 963-space (move-identity) action  ->  poke-env slot-based int
+# ---------------------------------------------------------------------------
+def _find_move_idx(battle, name) -> int:
+    """Index of ``name`` (canonical) in the active mon's known moves (<=4), else -1."""
+    c = canon_move(name)
+    if c is None:
+        return -1
+    active = getattr(battle, "active_pokemon", None)
+    if active is None:
+        return -1
+    try:
+        known = list(active.moves.values())[:4]
+    except Exception:
+        return -1
+    for i, m in enumerate(known):
+        if canon_move(getattr(m, "id", None)) == c:
+            return i
+    for i, m in enumerate(known):
+        if canon_move(getattr(m, "name", None)) == c:
+            return i
+    return -1
+
+
+def _to_pe_action(my_action: int, battle) -> int:
+    """Translate a move-identity action to poke-env's int, before ``env.step``.
+
+    My space:   MOVE 0..N-1 | SWITCH N..N+5 | TRANSFORM N+6..N+8 (mega/dynamax/tera)
+    poke-env:   0..5 switch | 6..9 move | 10..13 mega | 14..17 z | 18..21 dynamax | 22..25 tera
+
+    A gimmick (transform) is paired with the first known move (v1: the "which move" signal
+    is dropped for mega/tera/dynamax, per the approved design). poke-env validates the
+    resulting order against ``valid_orders`` (strict=False -> falls back to a random move),
+    so a stale identity can never crash a battle.
+    """
+    if my_action < 0:
+        return my_action  # -2 default / -1 forfeit pass straight through
+    as_ = get_action_space()
+    band = as_.band(my_action)
+    if band == "switch":
+        return my_action - as_.SWITCH_BASE  # 0..5
+    if band == "transform":
+        kind = TRANSFORMS[my_action - as_.TRANSFORM_BASE]
+        base = {"mega": 10, "dynamax": 18, "tera": 22}[kind]
+        return base + 0  # pair with the first known move
+    # MOVE band (v1: plain moves; Z / G-Max identities are reserved for v2)
+    move_name = as_.id_to_move[my_action]
+    idx = _find_move_idx(battle, move_name)
+    idx = 0 if idx < 0 else idx
+    return 6 + (idx % 4)
 
 
 # ---------------------------------------------------------------------------
@@ -159,14 +272,19 @@ class TraineeEnv:
 
     def step(self, a1_action: int, opponent) -> Tuple[np.ndarray, float, bool]:
         env = self.env
-        # poke-env's action_to_order calls ``action.item()``, so it needs a numpy
-        # scalar, not a plain Python int (a plain int raises AttributeError, which
-        # its ``except ValueError`` does NOT catch).
+        # poke-env's action_to_order calls ``action.item()``, so it needs a numpy scalar,
+        # not a plain Python int (a plain int raises AttributeError, which its
+        # ``except ValueError`` does NOT catch).
+        #
+        # CRITICAL: our actions live in the 963-space (move-identity); poke-env expects
+        # its own slot-based ints. Translate *before* env.step -- passing a raw 963 id
+        # straight through would index the wrong move (or a switch/transform) silently.
         actions = {}
         if env.agent1_to_move:
-            actions[self.a1] = np.int64(-2) if env.battle1.wait else np.int64(a1_action)
+            actions[self.a1] = np.int64(-2) if env.battle1.wait else np.int64(_to_pe_action(a1_action, env.battle1))
         if env.agent2_to_move:
-            actions[self.a2] = np.int64(-2) if env.battle2.wait else np.int64(self._opp_action(opponent))
+            pe_opp = _to_pe_action(self._opp_action(opponent), env.battle2)
+            actions[self.a2] = np.int64(-2) if env.battle2.wait else np.int64(pe_opp)
         actions.setdefault(self.a1, np.int64(-2))
         actions.setdefault(self.a2, np.int64(-2))
 
