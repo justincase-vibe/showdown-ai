@@ -313,12 +313,14 @@ class TraineeEnv:
             # Species Clause) and bounced it. Surface the real cause so it is not
             # mistaken for a torch/asyncio/threading bug.
             raise RuntimeError(
-                "reset() timed out waiting for the battle to start. This is usually "
-                "NOT a networking/asyncio problem -- the server rejected the team at "
-                "battle start (check the poke_env WARNING for a message like "
-                "'Your team was rejected ... Species Clause'). For random-bag teams, "
-                "ensure the pool is deduplicated by species (teams.load_verified_pool "
-                "does this). Re-raising the original timeout for the stack trace."
+                "reset() timed out waiting for the battle to start. Two usual causes: "
+                "(1) the server REJECTED the team at battle start -- check the log for a "
+                "poke_env WARNING like 'Your team was rejected ... Species Clause' (for "
+                "random-bag teams ensure the pool is deduplicated by species: "
+                "teams.load_verified_pool does this); (2) the server is not running at "
+                "all -- if the log shows 'ConnectionRefusedError' / 'WinError 1225', "
+                "start it first: cd pokemon-showdown && node pokemon-showdown start. "
+                "Re-raising the original timeout for the stack trace."
             ) from exc
         self.last_obs = obs[self.a1]["observation"]
         self.last_mask = obs[self.a1]["action_mask"]

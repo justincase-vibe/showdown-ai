@@ -53,6 +53,18 @@ TRAIN_ARGS = [
 ]
 
 
+def server_ok(url: str, tries: int = 4, delay: float = 2.0) -> bool:
+    """Poll the Showdown server until it answers (or we give up)."""
+    import urllib.request
+    for _ in range(tries):
+        try:
+            with urllib.request.urlopen(url, timeout=3) as r:
+                return r.status == 200
+        except Exception:
+            time.sleep(delay)
+    return False
+
+
 def alert(kind: str, title: str, text: str, popup: bool) -> None:
     """Always print the alert; also raise an OS pop-up (Windows) when enabled."""
     print("\n" + "=" * 64)
@@ -149,10 +161,19 @@ def main() -> None:
                     help="print alerts to the console instead of OS pop-ups")
     ap.add_argument("--stall-min", type=float, default=15.0,
                     help="kill + alert if no new stats line for this many minutes (default 15)")
+    ap.add_argument("--server-url", default="http://localhost:8000",
+                    help="Showdown server to check before launching (default http://localhost:8000)")
     args, extra = ap.parse_known_args()
+    popup = not args.no_popup
+
+    if not server_ok(args.server_url):
+        alert("error", "Server is NOT running -- no battles can start.",
+              f"No response from {args.server_url}.\nStart it first:\n"
+              "  cd pokemon-showdown && node pokemon-showdown start\n"
+              "wait for 'Worker 1 now listening', then re-run this launcher.", popup)
+        sys.exit(3)
 
     cmd = [sys.executable, TRAIN_PY] + TRAIN_ARGS + list(extra)
-    popup = not args.no_popup
     stall_s = max(60.0, args.stall_min * 60.0)
 
     print(f"launching: {' '.join(cmd)}")
