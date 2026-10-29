@@ -416,7 +416,7 @@ def _active_block(mon: Optional[Pokemon], include_pp: bool) -> List[float]:
     f.append(1.0 if mon.fainted else 0.0)
     f.append(1.0 if _safe(lambda: mon.revealed, False) else 0.0)
     f += _boost_vec(mon)
-    f += _hash_vec(_safe(lambda: mon.name), N_SPECIES_HASH)
+    f += _hash_vec(_safe(lambda: mon.species), N_SPECIES_HASH)
     f += _base_stat_vec(mon)
     f += _type_onehot(mon)
     f += _hash_vec(_safe(lambda: mon.ability), N_ABILITY_HASH)
@@ -446,7 +446,7 @@ def embed_battle(battle: AbstractBattle) -> np.ndarray:
             f.append(1.0 if mon.fainted else 0.0)
             f.append(_hp_fraction(mon))
             f += _status_onehot(mon)
-            f += _hash_vec(_safe(lambda: mon.name), N_SPECIES_HASH)
+            f += _hash_vec(_safe(lambda: mon.species), N_SPECIES_HASH)
         else:
             f += [0.0] * _OWN_SLOT
 
@@ -455,7 +455,7 @@ def embed_battle(battle: AbstractBattle) -> np.ndarray:
         if mon is not None:
             f.append(1.0 if mon.fainted else 0.0)
             f.append(1.0 if _safe(lambda: mon.revealed, False) else 0.0)
-            f += _hash_vec(_safe(lambda: mon.name), N_SPECIES_HASH)
+            f += _hash_vec(_safe(lambda: mon.species), N_SPECIES_HASH)
             f += _type_onehot(mon)
         else:
             f += [0.0] * _OPP_SLOT

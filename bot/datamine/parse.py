@@ -104,73 +104,15 @@ class ParsedBattle:
     raw_log: str = ""
 
 # ---------------------------------------------------------------------------
-# Z-move → base move mapping (Gen 7)
-# Only the common ones; unknown Z-moves fall back to the move name itself.
+# Gimmick move maps — imported from reveal.py (single source of truth, shared with
+# the live masked view and the replay reconstruction). Previously this module kept
+# its own copies (with duplicated/contradictory entries), which is exactly the kind
+# of drift that causes a train/live mismatch.
 # ---------------------------------------------------------------------------
-ZMOVE_TO_BASE: Dict[str, str] = {
-    "Bursting Dreampulse": "Moonblast",
-    "Continental Crush": "Rock Slide",
-    "Malicious Moonsault": "Play Rough",
-    "Sunne Bomb": "Flamethrower",
-    "Hydro Vortex": "Water Gun",
-    "Hydro Cannon": "Hydro Pump",
-    "Supersonic Skystrike": "Air Slash",
-    "Cloud Burst": "Rain Dance",
-    "10,000,000 Volt Thunderbolt": "Thunderbolt",
-    "Bolt Strike": "Thunder",
-    "Supernova": "Solar Beam",
-    "Healing Wish": "Heal Pulse",
-    "Black Luster": "Psychic",
-    "Malachar": "Dark Pulse",
-    "Let me be the one to judge you.": "Judgment",
-    "Colossal Cadence": "Hyper Voice",
-    "Soul-Stealing 7-Star Strike": "Giga Drain",
-    "Menacing Rising Moon": "Moon Force",
-    "Gigavolts": "Wild Charge",
-    "Acid Downpour": "Acid",
-    "Breakneck Blitz": "Extreme Speed",
-    "Cardboard Crash": "Double-Edge",
-    "Devastating Drake": "Outrage",
-    "Savage Spin-Out": "Twister",
-    "All-Out Pummeling": "Close Combat",
-    "Genesis Wave": "Bullet Seed",
-    "Sinister Slash": "Swords Dance",
-    "Raging Fury": "Fire Fang",
-    "Gear Grind": "Flash Cannon",
-    "Spectral Thief": "Shadow Ball",
-    "Befouled Beak": "Fly",
-    "Glacial Lance": "Ice Beam",
-    "Tectonic Rage": "Earthquake",
-    "Black Hole Eclipse": "Psychic",
-    "Soul-Stealing 7-Star Strike": "Giga Drain",
-    "Menacing Moonraze Maelstrom": "Moon Force",
-    "Light That Never Ends": "Light Screen",
-    "Acid Downpour": "Acid",
-    "Breakneck Blitz": "Extreme Speed",
-    "Cardboard Crash": "Double-Edge",
-    "Devastating Drake": "Outrage",
-    "Savage Spin-Out": "Twister",
-    "All-Out Pummeling": "Close Combat",
-    "Genesis Wave": "Bullet Seed",
-    "Sinister Slash": "Swords Dance",
-    "Raging Fury": "Fire Fang",
-    "Gear Grind": "Flash Cannon",
-    "Spectral Thief": "Shadow Ball",
-    "Befouled Beak": "Fly",
-    "Glacial Lance": "Ice Beam",
-    "Tectonic Rage": "Earthquake",
-    "Black Hole Eclipse": "Psychic",
-    "Acid Downpour": "Acid",
-}
-
-# G-Max moves (Gen 8) — these appear as the move name in the log
-GMAX_MOVES = {
-    "G-Max Wildfire", "G-Max Volcalith", "G-Max Foam Burst", "G-Max Steelsurge",
-    "G-Max Sandblast", "G-Max Finale", "G-Max Centiferno", "G-Max Fly",
-    "G-Max Mud Shot", "G-Max Hailstorm", "G-Max Bubblebeam", "G-Max Lightning",
-    "G-Max Starfall", "G-Max Vine Lash", "G-Max Meltdown", "G-Max Cannonade",
-    "G-Max Stun Shock", "G-Max Bubblebeam", "G-Max Centiferno",
-}
+_BOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # bot/
+if _BOT_DIR not in sys.path:
+    sys.path.insert(0, _BOT_DIR)
+from reveal import ZMOVE_TO_BASE, GMAX_MOVES  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Parser
@@ -203,6 +145,10 @@ class BattleLogParser:
         self._turn_mega: Dict[str, bool] = {}
         self._turn_dynamax: Dict[str, bool] = {}
         self._turn_tera: Dict[str, bool] = {}
+        # Last move decision per role this turn. The gimmick log line (|-mega| /
+        # |-terastallize| / |-formechange|) arrives AFTER the |move| line it belongs
+        # to, so we tag the action retroactively (see _apply_gimmick).
+        self._last_move: Dict[str, Optional[dict]] = {"p1": None, "p2": None}
         # Ratings from log
         self._ratings: Dict[str, float] = {}
 
@@ -243,6 +189,7 @@ class BattleLogParser:
             self._turn_mega = {}
             self._turn_dynamax = {}
             self._turn_tera = {}
+            self._last_move = {"p1": None, "p2": None}
         elif tag == "switch":
             self._handle_switch(fields)
         elif tag == "move":
@@ -409,9 +356,12 @@ class BattleLogParser:
         role = "p1" if actor_short.startswith("p1") else "p2"
         short_name = actor_short.split(": ")[-1] if ": " in actor_short else actor_short
 
-        # Determine move index (reveal order) — use species as the key (not nickname)
-        species = self._name_to_species[role].get(short_name, short_name)
-        key = f"{role}:{species}"
+        # Key the reveal list by IDENT (nickname), not species. Two mons of the same
+        # species must get independent reveal lists -- keying by species collided for
+        # duplicate-species teams and mislabeled both. Showdown disambiguates duplicates
+        # as "Garchomp 2", so the ident is unique per mon (matches state_from_log's
+        # per-slot tracking, keeping reveal-index == action-slot on both sides).
+        key = f"{role}:{short_name}"
         if key not in self._move_reveal:
             self._move_reveal[key] = []
 
@@ -438,7 +388,7 @@ class BattleLogParser:
             self._move_reveal[key].append(base_move)
         move_idx = min(self._move_reveal[key].index(base_move), 3)
 
-        self.b.moves.append(MoveEvent(
+        me = MoveEvent(
             actor=role,
             actor_short=actor_short,
             move_name=move_name,
@@ -446,17 +396,28 @@ class BattleLogParser:
             turn=self._turn,
             move_idx=move_idx,
             gimmick=gimmick,
-        ))
+        )
+        self.b.moves.append(me)
 
-        # Create decision → unified action index
-        action_idx = self._move_to_action(move_idx, gimmick, self.b.gen)
-        self.b.decisions.append(Decision(
+        # Create decision → unified action index (gimmick may be patched retroactively
+        # when the |-mega| / |-terastallize| line arrives on this same turn).
+        decision = Decision(
             turn=self._turn,
             actor=role,
-            action_idx=action_idx,
+            action_idx=self._move_to_action(move_idx, gimmick, self.b.gen),
             action_desc=f"move:{move_name} (slot {move_idx}, gimmick={gimmick or 'none'})",
             raw=f"move:{move_name}",
-        ))
+        )
+        self.b.decisions.append(decision)
+
+        # Remember so a later gimmick line this turn can re-label this action.
+        self._last_move[role] = {
+            "decision": decision,
+            "move_event": me,
+            "move_idx": move_idx,
+            "gimmick": gimmick,
+            "turn": self._turn,
+        }
 
     def _handle_outcome(self, fields: List[str], kind: str) -> None:
         if not fields:
@@ -481,6 +442,7 @@ class BattleLogParser:
         if fields:
             role = "p1" if fields[0].startswith("p1") else "p2"
             self._turn_mega[role] = True
+            self._apply_gimmick(role, "mega")
 
     def _handle_formechange(self, fields: List[str]) -> None:
         """Detect Mega Evolution via formechange (gen 6 style)."""
@@ -489,11 +451,13 @@ class BattleLogParser:
             if "Mega" in new_form:
                 role = "p1" if fields[0].startswith("p1") else "p2"
                 self._turn_mega[role] = True
+                self._apply_gimmick(role, "mega")
 
     def _handle_tera(self, fields: List[str]) -> None:
         if fields:
             role = "p1" if fields[0].startswith("p1") else "p2"
             self._turn_tera[role] = True
+            self._apply_gimmick(role, "tera")
 
     def _handle_start(self, fields: List[str]) -> None:
         # Check for Dynamax
@@ -502,6 +466,25 @@ class BattleLogParser:
             if "Dynamax" in effect:
                 role = "p1" if fields[0].startswith("p1") else "p2"
                 self._turn_dynamax[role] = True
+                self._apply_gimmick(role, "dynamax")
+
+    def _apply_gimmick(self, role: str, gimmick: str) -> None:
+        """Retroactively tag this role's most recent move (this turn) with a gimmick.
+
+        The Showdown protocol emits the gimmick line *after* the ``|move|`` it belongs
+        to, so the action was initially labelled as a plain move. Re-compute the
+        unified action index now that we know the gimmick.
+        """
+        ref = self._last_move.get(role)
+        if ref is None or ref["turn"] != self._turn:
+            return
+        ref["gimmick"] = gimmick
+        ref["move_event"].gimmick = gimmick
+        ref["decision"].action_idx = self._move_to_action(ref["move_idx"], gimmick, self.b.gen)
+        ref["decision"].action_desc = (
+            f"move:{ref['move_event'].move_name} "
+            f"(slot {ref['move_idx']}, gimmick={gimmick})"
+        )
 
     def _handle_win(self, fields: List[str]) -> None:
         if fields:

@@ -28,7 +28,8 @@ from poke_env.environment.singles_env import SinglesEnv
 from poke_env.ps_client import LocalhostServerConfiguration, ServerConfiguration
 from poke_env.teambuilder import Teambuilder
 
-from obs import OBS_DIM, embed_battle
+from obs import OBS_DIM, embed_battle as _embed_raw
+from state_from_log import reconstruct_current_state as _reconstruct_current
 
 # Covers gen6(14) .. gen9(26); gen-specific legal actions are a prefix of this space.
 UNIFIED_ACTION_SIZE = 26
@@ -72,7 +73,35 @@ class ShowdownEnv(SinglesEnv):
 
     # ------------------------------------------------------------------ obs
     def embed_battle(self, battle: Any) -> Any:
-        return embed_battle(battle)
+        """Build the observation the policy actually sees.
+
+        **Train/live equivalence.** poke-env populates the trainee's *own* mons with
+        their full moveset, real item and real ability, and shows the opponent's mons
+        with empty moves. The imitation-training observation, by design, is
+        *revealed-only* on both sides (PLAN.md §3.1) so the bot must learn to adapt
+        rather than rely on a hard-coded moveset. Encoding the two differently would
+        be a silent train/live mismatch that poisons every downstream policy.
+
+        So instead of embedding the raw live mon objects, we rebuild the observation
+        from the live battle's own protocol stream (``battle._build_replay_log()``) with
+        the *same* reconstruction code (``state_from_log``) used to build the training
+        data. Same handlers, same layout, same revealed-only rules -> the live and
+        training observations are identical for a given battle state.
+        """
+        try:
+            log = battle._build_replay_log()
+            gen = 8
+            for ln in log.splitlines():
+                if ln.startswith("|gen|"):
+                    try:
+                        gen = int(ln.split("|")[2])
+                    except (ValueError, IndexError):
+                        pass
+                    break
+            return _reconstruct_current(log, gen)
+        except Exception:
+            # Defensive fallback: raw encoding (pre-mask) rather than crashing a battle.
+            return _embed_raw(battle)
 
     # ---------------------------------------------------------------- reward
     def calc_reward(self, battle: Any) -> float:
