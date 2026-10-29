@@ -19,8 +19,10 @@ features + self‑play to avoid "learned helplessness."
 
 - **Part 1 — PLAYING (current focus).** Given a fixed legal team of 6, decide each turn:
   move / switch / (gen‑dependent) Mega·Z·Dynamax·Tera. Reward **+1 win / −1 loss**.
-  One shared policy spans Gen 6–9 because each gen's legal actions are a *prefix* of the
-  unified **26‑action** space, so a single mask makes one policy exact across generations.
+  One shared policy spans Gen 6–9 in a unified **963‑action move‑identity** space
+  (every move in the gen6‑9 union + 6 switches + 3 gimmick transforms), so a single mask
+  makes one policy exact across generations. Actions are a move *by identity* (not a slot),
+  so training and live play can never drift.
 - **Part 2 — DRAFTING (later).** A value head `V(team) → predicted win‑rate`. Reward the
   drafter for *accurate judgment* (predicted vs. actual outcome), so it learns to evaluate
   team strength without playing; later use `V(team)` to *select* the strongest team.
@@ -45,10 +47,10 @@ data + time game, not a tricks game.
 
 ## 3. State representation (DECIDED design)
 
-Base: **808‑dim** hand‑crafted vector (v2), generation‑agnostic, robust to hidden info
+Base: **892‑dim** hand‑crafted vector (v3), generation‑agnostic, robust to hidden info
 (safe accessors; missing → 0). Replaces the old 328‑dim vector. `OBS_DIM` is the single
-exported constant — `env.py` / `policy.py` / `train.py` pick it up automatically, so the policy
-**rebuilt at 808** with no other changes.
+exported constant — `env.py` / `policy.py` / `train.py` / `imitate.py` pick it up automatically,
+so the policy **rebuilt at 892** with no other changes.
 
 **Implemented (v2):**
 - **Neutral identity** — species / ability / item as *process‑stable multi‑probe hashes*
@@ -64,6 +66,12 @@ exported constant — `env.py` / `policy.py` / `train.py` pick it up automatical
 - **Bench identity** per slot (own: fainted/hp/status/identity; opp: fainted/revealed/identity/type).
 - **Speed proxies** (true move‑order speed isn't exposed by the API): "opp has a revealed
   priority move" + "relative base speed (opp − own)".
+- **Move identity** (v3): each revealed move gets a 4‑dim positional code
+  `[x, sin(πx), cos(πx), sin(2πx)]`, `x = move_id/954`, tying it to its slot in the 963‑action
+  space — so the policy maps "this move I see" → "that action" without a hard‑coded per‑gen table.
+- **Moveset‑shape prior** (v3): per active mon, a 26‑dim "what could this species do" vector
+  (type coverage, phys/spec bias, hazard/setup/recovery/priority caps) from its natural (L/E)
+  moves across gens 6–9 — the "Garchomp lead ⇒ Stealth Rock + setup" reasoning signal (gen‑agnostic).
 - **Learned stat inference** (still true): we don't read EVs; the value net infers bulk from
   observed damage + the HP signal.
 
@@ -141,6 +149,18 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
   **30,000 battles · 2,094,742 decisions · 317.6 MB.** Gens 6–9 × {OU, UU, RU} + Random.
   Gimmicks: Mega (gen6/7), Z (gen7), Dynamax (gen8), Tera (gen9) all detected.
   **NEXT: (3) imitation phase → (4) concurrent self‑play loop (4‑proc) → (5) eval.**
+- ✅ **(3) move‑identity action‑space redesign** (Steps 1–5 of the plan). Action = a move
+  **by identity** (name), not a slot — deletes the train/live reveal‑order mismatch by
+  construction. Global **963‑space**: 954 moves (gen6‑9 union, Z/G‑Max as distinct moves)
+  + 6 switches + 3 transforms (mega/dynamax/tera). `action_space.py` (new, single source of
+  truth), `parse.py` emits 0..962, `obs.py` adds move‑identity + moveset‑shape (808→892),
+  `env.py` builds the 963‑mask + **translates 963→poke‑env before `step`**, `imitate.py`
+  sized to 963. **Live‑verified:** gen7ou + gen6ou battles run to completion (reward ±1);
+  offline: obs finite, imitate actions in [0,962] (move/switch/transform all present).
+  **v1 caveat:** Z/G‑Max are identities in the space but the live v1 mask issues *plain* moves
+  (Z‑use + "gimmick‑with‑a‑specific‑move" are v2); mega/tera/dynamax are single transform
+  actions (paired move chosen at step‑time). **NEXT: (4) imitation precompute (GPU, on GO)
+  → (5) concurrent self‑play → (6) eval.**
 - ⬜ LATER: build other 10 team pools; Part 2 drafting value head; doubles; **search+RL
   (MCTS / PIMC)** as an amplifier on top of the learned policy+value.
 
@@ -155,14 +175,15 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
 
 | Path | Role |
 |---|---|
-| `bot/env.py` | `ShowdownEnv` + `TraineeEnv`; unified 26‑action space; reward. |
-| `bot/obs.py` | `embed_battle` → **808‑dim** vector (v2, implemented per §3). |
+| `bot/action_space.py` | **NEW** — global 963 move‑identity action space; legality, Z→base, mask, shape prior. |
+| `bot/env.py` | `ShowdownEnv` + `TraineeEnv`; 963‑mask + 963→poke‑env translation; reward. |
+| `bot/obs.py` | `embed_battle` → **892‑dim** vector (v3: move‑identity + moveset‑shape, per §3). |
 | `bot/policy.py` | `MaskedPPO` (masked actor‑critic PPO + GAE). |
 | `bot/train.py` | Self‑play loop (**→ concurrent 4‑proc per §6**). |
 | `bot/teams.py` / `bot/teamgen.py` | Team pools + server‑verified pool builder. |
 | `bot/team_pools.json` | Verified legal pools (gen6ou, gen7ou → expand to 12). |
 | `bot/verify_env.py` | Torch‑free pipeline check. |
 | `bot/datamine/fetch.py` | Download top‑ELO battles from HF (per format). |
-| `bot/datamine/parse.py` | Parse Showdown logs → structured decisions (26‑action). |
+| `bot/datamine/parse.py` | Parse Showdown logs → structured decisions (move‑identity, 0..962). |
 | `bot/data/replays/*.jsonl` | Curated battle data (gen8ru: 2000 battles). |
 | `pokemon-showdown/` | Local server (port 8000); `config/config.js` + `server/monitor.ts` gates. |
