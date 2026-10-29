@@ -33,6 +33,15 @@ def _mlp(in_dim: int, out_dim: int, hidden: Tuple[int, ...], act: type = nn.ReLU
     return nn.Sequential(*layers)
 
 
+def _blank_calib() -> Dict[str, float]:
+    """Zero-initialized critic-calibration accumulators (see ``_calib_stats``)."""
+    return {
+        "n": 0, "s_err": 0.0, "s_abs": 0.0, "s_sq": 0.0,
+        "s_v0": 0.0, "s_R": 0.0, "s_v0R": 0.0, "s_v0sq": 0.0, "s_Rsq": 0.0,
+        "s_abs_v0": 0.0, "sign_hit": 0, "sign_n": 0,
+    }
+
+
 @dataclass
 class _Episode:
     obs: List[np.ndarray] = field(default_factory=list)
@@ -88,6 +97,11 @@ class MaskedPPO:
         self._episodes: Dict[int, _Episode] = {}
         self._buffer: Optional[dict] = None
         self.n_updates = 0
+        # Critic-calibration accumulators: populated at episode flush, reported +
+        # reset on each update(). "val0" = critic's opening read of the game, "R" =
+        # the realized terminal reward (+1/-1). This is the *built-in* progress
+        # signal (the 50/50 win-rate is useless by design in both-sides self-play).
+        self._calib = _blank_calib()
 
     # ------------------------------------------------------------------ act
     @torch.no_grad()
@@ -192,6 +206,10 @@ class MaskedPPO:
             "mask": np.stack(ep.mask),
             "val": np.asarray(ep.val, dtype=np.float32),
         }
+        # Critic calibration: did the critic's opening read (val at the first
+        # decision state) match the realized game outcome (terminal reward)?
+        if len(ep.val) >= 1 and len(ep.rew) >= 1:
+            self._record_calibration(float(ep.val[0]), float(ep.rew[-1]))
         self._buffer = self._merge(self._buffer, batch)
 
     @staticmethod
@@ -199,6 +217,58 @@ class MaskedPPO:
         if a is None:
             return b
         return {k: np.concatenate([a[k], b[k]]) for k in a}
+
+    # ----------------------------------------------------- critic calibration
+    def _record_calibration(self, val0: float, R: float) -> None:
+        """Accumulate one episode's (opening value read vs realized terminal reward)."""
+        c = self._calib
+        err = val0 - R
+        c["n"] += 1
+        c["s_err"] += err
+        c["s_abs"] += abs(err)
+        c["s_sq"] += err * err
+        c["s_v0"] += val0
+        c["s_R"] += R
+        c["s_v0R"] += val0 * R
+        c["s_v0sq"] += val0 * val0
+        c["s_Rsq"] += R * R
+        c["s_abs_v0"] += abs(val0)
+        if abs(val0) > 1e-9:  # "did the bot read the game right?" (sign agreement)
+            c["sign_n"] += 1
+            if (val0 > 0) == (R > 0):
+                c["sign_hit"] += 1
+
+    def _calib_stats(self) -> Dict[str, float]:
+        """Report the calibration metrics for episodes flushed since the last
+        update(), then reset the accumulators.
+
+        * ``calib_rmse`` / ``calib_mae`` / ``calib_bias`` -- how far the critic's
+          opening read is from the realized +1/-1 (want -> 0 / 0).
+        * ``calib_corr`` -- Pearson corr(opening read, outcome) (want -> 1).
+        * ``calib_sign_hit`` -- fraction of games whose *direction* the critic read
+          correctly (want -> 1). The most interpretable single number.
+        * ``calib_confidence`` -- mean |opening read| (want: rises toward 1 AND be
+          right -- confident *and* correct beats timid *and* wrong).
+        """
+        c = self._calib
+        out: Dict[str, float] = {}
+        n = c["n"]
+        if n > 0:
+            mn_v = c["s_v0"] / n
+            mn_R = c["s_R"] / n
+            cov = c["s_v0R"] / n - mn_v * mn_R
+            var_v = c["s_v0sq"] / n - mn_v * mn_v
+            var_R = c["s_Rsq"] / n - mn_R * mn_R
+            out["calib_rmse"] = math.sqrt(c["s_sq"] / n)
+            out["calib_mae"] = c["s_abs"] / n
+            out["calib_bias"] = c["s_err"] / n
+            if var_v > 1e-12 and var_R > 1e-12:
+                out["calib_corr"] = cov / math.sqrt(var_v * var_R)
+            out["calib_sign_hit"] = (c["sign_hit"] / c["sign_n"]) if c["sign_n"] else float("nan")
+            out["calib_confidence"] = c["s_abs_v0"] / n
+            out["calib_n"] = float(n)
+        self._calib = _blank_calib()  # reset for the next update
+        return out
 
     # --------------------------------------------------------------- update
     def update(self) -> Optional[dict]:
@@ -259,7 +329,9 @@ class MaskedPPO:
             self.opt.step()
 
         self.n_updates += 1
-        return {k: v / max(1, nmb) for k, v in stats.items()}
+        out = {k: v / max(1, nmb) for k, v in stats.items()}
+        out.update(self._calib_stats())  # per-episode calibration (NOT divided by nmb)
+        return out
 
     # ------------------------------------------------------------ self-play
     def sync_opponent(self, opponent: "MaskedPPO") -> None:

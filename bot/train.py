@@ -190,13 +190,16 @@ def run(args) -> None:
         cur_mask[e.id] = e.last_mask
 
     def buffer_size() -> int:
-        # count transitions currently queued in the policy buffer (approx via episodes)
-        n = 0
-        for ep in policy._episodes.values():
-            n += len(ep)
+        # Count ONLY what update() can actually drain: the *merged* buffer built
+        # from FINISHED episodes (policy._buffer). In-progress live episodes
+        # (policy._episodes) are NOT trainable yet -- update() only consumes the
+        # merged buffer. Counting live episodes made the update gate fire
+        # prematurely, which (a) broke out of the collect loop after the FIRST env
+        # (starving the rest) and (b) spun update() on an empty merged buffer
+        # (empty upstats) while battles never got to finish.
         if policy._buffer is not None:
-            n += len(policy._buffer["act"])
-        return n
+            return len(policy._buffer["act"])
+        return 0
 
     def log_stats(tag: str, extra: dict = None):
         rec = {

@@ -217,6 +217,24 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
   20‑battle self‑play **55/45** random‑init (not 20/0) and **80% warm‑start** (expected — the
   imitation actor is P1‑biased, so as P2 it is out‑of‑distribution = flag #4 below, not a bug);
   `imitate --smoke` + `eval_imitation` regression pass. Committed `bf1ff67`.
+- ✅ **(7) CPU self-play validation + two real fixes (2026‑10‑29, this commit).**
+  (a) **`train.py` `buffer_size()` update‑gate bug — root cause of the earlier “timeouts”.** The old
+  `buffer_size()` counted **live in‑progress episodes** (`policy._episodes`) toward the “should I update”
+  gate, but `update()` only drains the **merged** buffer (`policy._buffer`). Result: the gate fired
+  prematurely → the inner collect loop `break`ed after the **first env** (starving the others) →
+  `update()` spun on an empty merged buffer (a long stream of empty `upstats:{}` records in the first
+  run) → battles never finished. **Fix:** `buffer_size()` now returns only `len(policy._buffer["act"])`
+  (or 0). **Verified:** clean end‑to‑end CPU run, `EXIT=0`, battles completed, updates real.
+  (b) **Critic‑calibration progress metrics (`policy.py`).** The 50/50 self‑play win‑rate is useless by
+  design (same net both sides), so the *built‑in* progress signal is the **value net’s calibration**:
+  at episode flush we record the critic’s opening read (`ep.val[0]`) vs the realized terminal reward
+  (`ep.rew[-1]`), and `update()` reports (then resets) `calib_rmse` / `calib_mae` / `calib_bias` /
+  `calib_corr` / `calib_sign_hit` (did the bot read the game’s *direction* right — the most
+  interpretable single number) / `calib_confidence` (mean |opening read|) / `calib_n`.
+  **Monitor these in `bot/checkpoints/stats.jsonl`, not the raw win‑rate.**
+  (c) **CPU‑vs‑GPU throughput expectation:** `live` mode is **~1 battle/min on CPU** (2× `policy.act()`
+  CPU inferences per step + observation reconstruction). This is **expected, not a defect** — GPU will
+  be much faster. Do not interpret slow CPU validation as a bug.
 - 🚩 **Flagged for review (decisions I made / gaps you should weigh in on):**
   1. **✅ RESOLVED — ~23% illegal‑argmax was a *raw‑metric artifact*, now crushed.** Hard legal‑mask
      added to the imitation loss (default ON) + corrected masked eval. The prior
@@ -276,21 +294,42 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
 5. **OBS_DIM 248/244** — ✅ **keep as‑is + documented** (`_ACTIVE_OWN`=248 / `_ACTIVE_OPP`=244 in `obs.py`). Not re‑encoded (would invalidate the trained weights).
 6. **Both‑sides self‑play** — **implemented** (`--opponent live` is now the **default**): one shared policy plays P1 and P2, both transitions train the model (zero‑sum). `random`/`frozen` remain P1‑only baselines. See §8 flag #4.
 7. **"torch breaks poke_env" — ❌ RED HERRING, root cause found + fixed.** The `asyncio.TimeoutError: Agent is not challenging` at `env.reset()` was **never a torch/asyncio/threading bug.** It is a **misleading poke‑env message** that really means *the server rejected the team at battle start* (the challenge never completes). **Proven:** DEBUG log showed `|popup|Your team was rejected … You have more than one Landorus`; `import torch + create policy + a *legal* team (StrongTeamBuilder)` resets fine in ~4 s. The real bug: the **`flat` team pools contain duplicate species** (they are the concatenation of every mon from every coherent team), so **`RandomTeamBuilder`** (which `train.py --smoke` and the `--team-mode random` baseline use) could sample two of the same species → **Species Clause violation** → team bounced → timeout. **Fix:** `teams.load_verified_pool` now **dedupes by species** (`_dedupe_by_species`), so any random bag is a legal team; all 12 formats re‑verified legal via the server oracle. Also added a defensive `RuntimeError` in `TraineeEnv.reset` that surfaces "team rejected, not a networking bug" instead of the raw timeout. `train.py --smoke` now **PASSES** (CPU). **The torch/poke_env "separate processes" rewrite is NOT needed.**
+8. **Short CPU self‑play session — ✅ RAN + 2 real bugs fixed.** Wide CPU session
+   (gen7ou / gen9ou / gen6uu, `--opponent live`, warm‑started from the imitation actor, `--lr 1e‑4` —
+   a warm net is more sensitive; 3e‑4 risks destabilizing) completed **clean** (`EXIT=0`, battles done,
+   real updates with `calib_n>0`, no spin/crash) after fixing the **`buffer_size()` update‑gate bug**
+   (env‑starvation + update‑spin — see §8 entry 7) and adding the **`calib_*` critic‑calibration
+   metrics** (the real progress signal in both‑sides self‑play). **First checkpoint for the GPU run:
+   ~1–2k battles, then eval** — throughput is server‑throttled, so the wide mix costs no extra
+   wall‑clock. `frozen` is the fallback opponent if `live` looks unstable.
 
 ## 9b. Launch the GPU self‑play (you run it, when the GPU is free)
 
 > Throttle stays **ON** (~10 battles/min, ≤16 concurrent). Battle generation is **CPU‑only**;
 > the GPU is used only for PPO updates. Do not run while this agent is using the GPU for inference.
-> **All 12 formats now have team pools** (§7 RESOLVED) — pick any subset of gen6/7/8/9 × OU/UU/RU for `--formats` (smaller tiers carry 3–15 curated teams, larger 19–25).
+> **All 12 formats now have team pools** (§7 RESOLVED) — the **wide mix is the plan** (start‑wide
+> decision: basic skills first — type matchups, sweep setup, switching — and it costs no extra
+> wall‑clock since throughput is server‑throttled). CPU `live` ≈ 1 battle/min is expected; GPU much faster.
 
 **Preflight (device‑aware; default `--smoke` is CPU and safe, `--device cuda` sanity‑checks the GPU):**
 ```
 python bot/train.py --smoke --device cuda
 ```
 
-**Full both‑sides self‑play run (warm‑started from the imitation actor):**
+**Both‑sides self‑play, wide mix, warm‑started — FIRST CHECKPOINT = 2k battles, then eval**
+(`--lr 1e‑4` because the warm net is more sensitive; `--opponent frozen` is the fallback if `live` looks unstable):
 ```
-python bot/train.py --formats gen6ou,gen7ou --weights 0.5,0.5 --num-envs 16 --opponent live --buffer-size 4096 --ppo-epochs 4 --minibatch 128 --lr 3e-4 --max-battles 10000 --device cuda --init-actor bot/data/imitation_actor.pt
+python bot/train.py --formats gen6ou,gen6ru,gen6uu,gen7ou,gen7ru,gen7uu,gen8ou,gen8ru,gen8uu,gen9ou,gen9ru,gen9uu \
+  --num-envs 16 --opponent live --buffer-size 4096 --minibatch 128 --ppo-epochs 4 --lr 1e-4 --max-battles 2000 --device cuda --init-actor bot/data/imitation_actor.pt
+```
+**Monitor `calib_*` in `bot/checkpoints/stats.jsonl` (per‑update) as the progress signal:**
+`calib_sign_hit` / `calib_corr` improving, `calib_rmse` falling, AND `calib_confidence` rising =
+genuine learning. Raw win‑rate hovers ~50/50 **by design** (shared policy on both sides) — it is
+**not** the metric to watch.
+
+**Narrow starter variant** (3 gens, quick sanity slice before the full wide run):
+```
+python bot/train.py --formats gen7ou,gen9ou,gen6uu --num-envs 3 --opponent live --buffer-size 96 --minibatch 64 --ppo-epochs 3 --lr 1e-4 --max-battles 20 --device cuda --init-actor bot/data/imitation_actor.pt
 ```
 
 ---
