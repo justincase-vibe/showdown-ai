@@ -30,6 +30,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import torch
 
 # Make sibling modules importable when run as a script.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -122,9 +123,25 @@ def run(args) -> None:
             hidden=tuple(int(h) for h in args.hidden.split(",")),
             device=policy.device, seed=args.seed + 1,
         )
-        policy.sync_opponent(opponent)  # start matched (random-init both)
+        # start matched: both begin from the same weights (random-init, or the
+        # imitation warm-start loaded just below). A trainee vs a *random* opponent
+        # would get an easy early win-rate spike that misleads the value baseline.
+        policy.sync_opponent(opponent)
     elif args.opponent == "live":
         opponent = policy
+
+    # ---- optional warm-start: load a pre-trained actor (e.g. the imitation BC) ----
+    if getattr(args, "init_actor", None) and os.path.isfile(args.init_actor):
+        try:
+            sd = torch.load(args.init_actor, map_location=policy.device, weights_only=True)
+            policy.actor.load_state_dict(sd)
+            log.info("warm-started policy actor from %s", args.init_actor)
+            if args.opponent == "frozen" and opponent is not policy:
+                opponent.actor.load_state_dict(sd)  # keep the frozen target matched
+        except Exception as e:
+            log.warning("--init-actor load failed (%s); continuing with random init", e)
+    elif getattr(args, "init_actor", None):
+        log.warning("--init-actor path not found: %s", args.init_actor)
 
     os.makedirs(args.ckpt_dir, exist_ok=True)
     stats_path = os.path.join(args.ckpt_dir, "stats.jsonl")
@@ -157,8 +174,11 @@ def run(args) -> None:
             "battles": battles_done,
             "wins": dict(wins),
             "losses": dict(losses),
-            "winrate": {k: wins[k] / (wins[k] + losses[k]) if (wins[k] + losses[k]) else None
-                        for k in wins},
+            "winrate": {
+                k: (wins.get(k, 0) / (wins.get(k, 0) + losses.get(k, 0))
+                    if (wins.get(k, 0) + losses.get(k, 0)) else None)
+                for k in (set(wins) | set(losses))
+            },
             "tag": tag,
         }
         if extra:
@@ -314,6 +334,9 @@ def main() -> None:
     p.add_argument("--log-every", type=int, default=10)
     p.add_argument("--ckpt-dir", default=os.path.join(os.path.dirname(__file__), "checkpoints"))
     p.add_argument("--replays", default=os.path.join(os.path.dirname(__file__), "replays"))
+    p.add_argument("--init-actor", default=None,
+                   help="path to a pre-trained actor state_dict (e.g. the imitation "
+                        "bot/data/imitation_actor.pt) to warm-start self-play from")
     p.add_argument("--smoke", action="store_true", help="run a quick CPU pipeline check")
     args = p.parse_args()
 

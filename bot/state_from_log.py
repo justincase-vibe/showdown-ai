@@ -629,42 +629,68 @@ class LogReplayer:
                 pass
         return 0, 100
 
-    def _build_observation(self) -> np.ndarray:
-        """Build the 808-dim observation from current state, from P1's perspective."""
+    def _perspective(self, side: str = "p1") -> Dict[str, object]:
+        """Resolve the own/opponent field mapping for ``side``.
+
+        "p1": own = P1, opponent = P2 (the imitation-training perspective).
+        "p2": own = P2, opponent = P1 (the opponent's own view -- same features,
+        own/opponent swapped). Global fields (weather/turn/trapped/force_switch)
+        are identical for both.
+        """
         state = self.state
+        if side == "p2":
+            own_mons, opp_mons = state.p2_mons, state.p1_mons
+            own_active, opp_active = state.p2_active, state.p1_active
+            own_haz, opp_haz = state.p2_hazards, state.p1_hazards
+            can_mega = state.p2_can_mega and not state.p2_mega_used
+            can_z = state.p2_can_z
+            can_dmax = state.p2_can_dynamax
+            can_tera = state.p2_can_tera and not state.p2_tera_used
+        else:
+            own_mons, opp_mons = state.p1_mons, state.p2_mons
+            own_active, opp_active = state.p1_active, state.p2_active
+            own_haz, opp_haz = state.p1_hazards, state.p2_hazards
+            can_mega = state.p1_can_mega and not state.p1_mega_used
+            can_z = state.p1_can_z
+            can_dmax = state.p1_can_dynamax
+            can_tera = state.p1_can_tera and not state.p1_tera_used
+        def _team(mons):
+            t = {}
+            for s in mons:
+                p = self._build_pokemon(mons, s)
+                if p is not None:
+                    t[s] = p
+            return t
+        return {
+            "active": self._build_pokemon(own_mons, own_active),
+            "opp_active": self._build_pokemon(opp_mons, opp_active),
+            "team": _team(own_mons),
+            "opp_team": _team(opp_mons),
+            "own_hazards": own_haz,
+            "opp_hazards": opp_haz,
+            "can_mega": can_mega, "can_z": can_z, "can_dmax": can_dmax, "can_tera": can_tera,
+        }
 
-        p1_active_mon = self._build_pokemon(state.p1_mons, state.p1_active)
-        p2_active_mon = self._build_pokemon(state.p2_mons, state.p2_active)
-
-        p1_team: Dict[int, Pokemon] = {}
-        for slot, ms in state.p1_mons.items():
-            p = self._build_pokemon(state.p1_mons, slot)
-            if p is not None:
-                p1_team[slot] = p
-
-        p2_team: Dict[int, Pokemon] = {}
-        for slot, ms in state.p2_mons.items():
-            p = self._build_pokemon(state.p2_mons, slot)
-            if p is not None:
-                p2_team[slot] = p
-
+    def _build_observation(self, side: str = "p1") -> np.ndarray:
+        """Build the observation from current state, from ``side``'s perspective."""
+        state = self.state
+        p = self._perspective(side)
         battle = _FakeBattle(
-            active_pokemon=p1_active_mon,
-            opponent_active_pokemon=p2_active_mon,
-            team=p1_team,
-            opponent_team=p2_team,
+            active_pokemon=p["active"],
+            opponent_active_pokemon=p["opp_active"],
+            team=p["team"],
+            opponent_team=p["opp_team"],
             weather={state.weather: True} if state.weather else {},
-            side_conditions={h: True for h in state.p1_hazards},
-            opponent_side_conditions={h: True for h in state.p2_hazards},
+            side_conditions={h: True for h in p["own_hazards"]},
+            opponent_side_conditions={h: True for h in p["opp_hazards"]},
             turn=state.turn,
             trapped=state.trapped,
             force_switch=state.force_switch,
-            can_mega_evolve=(state.p1_can_mega and not state.p1_mega_used),
-            can_z_move=(state.p1_can_z),
-            can_dynamax=(state.p1_can_dynamax),
-            can_tera=(state.p1_can_tera and not state.p1_tera_used),
+            can_mega_evolve=p["can_mega"],
+            can_z_move=p["can_z"],
+            can_dynamax=p["can_dmax"],
+            can_tera=p["can_tera"],
         )
-
         return embed_battle(battle)
 
     def _build_pokemon(self, mons: Dict[int, MonState], slot: Optional[int]) -> Optional[Pokemon]:
@@ -792,11 +818,18 @@ class _FakeBattle:
 # Public API
 # ---------------------------------------------------------------------------
 class StateReconstructor:
-    """High-level API: reconstruct observations from a battle log at decision points."""
+    """High-level API: reconstruct observations from a battle log at decision points.
 
-    def __init__(self, log: str, gen: int):
+    ``side`` controls the perspective of ``current_state()`` (the LIVE view):
+    "p1" (default, = the imitation-training perspective) or "p2" (the opponent's
+    own view). ``all_states()`` is always P1-perspective because the imitation
+    dataset is P1 decisions x P1 states (a fixed, self-consistent pairing).
+    """
+
+    def __init__(self, log: str, gen: int, side: str = "p1"):
         self.log = log
         self.gen = gen
+        self.side = side if side in ("p1", "p2") else "p1"
         self._replayer = LogReplayer(log, gen)
         self._all_states: Optional[List[np.ndarray]] = None
 
@@ -818,7 +851,7 @@ class StateReconstructor:
 
     def current_state(self) -> np.ndarray:
         """Observation of the FULL current battle state (every event replayed), from
-        P1's perspective.
+        ``self.side``'s perspective ("p1" or "p2").
 
         This is what the LIVE masked view uses: it runs the exact same event handlers
         and ``_build_observation`` as the replay reconstruction, so the live and
@@ -826,18 +859,24 @@ class StateReconstructor:
         construction). Unlike ``all_states()`` (snapshots at P1 decision lines), this
         reflects the state the active player currently faces -- the opponent's latest
         action included, the trainee's own pending action not yet applied.
+
+        The P2 perspective is the SAME features with own/opponent swapped, so a
+        single policy can act as either side (the network learns which features are
+        "mine" vs "theirs").
         """
         self._ensure_replayed()
-        return self._replayer._build_observation()
+        return self._replayer._build_observation(side=self.side)
 
     def __len__(self):
         self._ensure_replayed()
         return len(self._all_states)
 
 
-def reconstruct_current_state(log: str, gen: int) -> np.ndarray:
-    """One-shot: replay ``log`` fully and return the current P1-perspective observation."""
-    return StateReconstructor(log, gen).current_state()
+def reconstruct_current_state(log: str, gen: int, side: str = "p1") -> np.ndarray:
+    """One-shot: replay ``log`` fully and return the current observation from
+    ``side``'s perspective ("p1" = the imitation-training perspective, "p2" =
+    the opponent's own view; own/opponent features swapped, same layout)."""
+    return StateReconstructor(log, gen, side=side).current_state()
 
 
 # ---------------------------------------------------------------------------

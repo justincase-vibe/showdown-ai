@@ -100,9 +100,18 @@ class ShowdownEnv(SinglesEnv):
                     except (ValueError, IndexError):
                         pass
                     break
-            return _reconstruct_current(log, gen)
+            # Per-agent perspective: poke-env calls embed_battle(battle1) for a1 and
+            # embed_battle(battle2) for a2, and a1 (the challenger) is P1 in the log.
+            # Both battle objects carry the full protocol stream, so the same log is
+            # rebuilt from whichever side is being served. Without this, the P2
+            # opponent acted on a P1-perspective observation (own/opponent swapped)
+            # and was systematically handicapped -> 20/0 self-play instead of ~50/50.
+            side = "p2" if battle is getattr(self, "battle2", None) else "p1"
+            return _reconstruct_current(log, gen, side)
         except Exception:
             # Defensive fallback: raw encoding (pre-mask) rather than crashing a battle.
+            # _embed_raw reads the per-agent battle object directly, so it is already
+            # perspective-correct.
             return _embed_raw(battle)
 
     # ---------------------------------------------------------------- reward
