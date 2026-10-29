@@ -4,10 +4,14 @@ Trains the actor network to imitate P1's decisions from expert battle logs.
 Uses weighted cross-entropy with:
   - ELO weighting: (elo / 1200)^2  (quadratic, user-approved)
   - Format weighting: OU=1.15, UU=1.05, RU=1.00, Random=0.90
+  - Legal-move prior (label smoothing, --legal-eps, default 0.05): the target is
+    (1-eps)*onehot(replay_move) + eps*uniform(species-legal moves in that gen), so a
+    legal-but-unused move (Dragon Claw on Garchomp) gets small target mass while a
+    species-illegal one (Doom Desire) stays at 0.
 
 Pipeline:
-  Phase 1: Pre-compute all (state, action, weight) tuples from the 15 JSONL files.
-           Save to a .npz file for fast repeated loading.
+  Phase 1: Pre-compute all (state, action, weight, species, gen) tuples from the 15
+           JSONL files. Save to a .npz file for fast repeated loading.
   Phase 2: Train the actor network on the pre-computed data.
 
 Usage:
@@ -118,17 +122,21 @@ def precompute_dataset(
     data_dir: str = DATA_DIR,
     max_battles: int = 0,  # 0 = all
     verbose: bool = True,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Stream through all JSONL files and build the (states, actions, weights) arrays.
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Stream through all JSONL files and build the (states, actions, weights, species, gen) arrays.
 
     Returns:
-        states: np.float32 [N, 808]
-        actions: np.int64 [N]
-        weights: np.float32 [N]
+        states:    np.float32 [N, OBS_DIM]
+        actions:   np.int64   [N]
+        weights:   np.float32 [N]
+        species:   np.str_    [N]  species the decision is made with ("" if unknown)
+        gens:      np.int8    [N]  generation of the battle (for the legal-move prior)
     """
     all_states: List[np.ndarray] = []
     all_actions: List[int] = []
     all_weights: List[float] = []
+    all_species: List[str] = []
+    all_gens: List[int] = []
 
     files = sorted(
         f for f in os.listdir(data_dir) if f.endswith(".jsonl")
@@ -194,6 +202,8 @@ def precompute_dataset(
                     all_states.append(states[i])
                     all_actions.append(p1_decisions[i].action_idx)
                     all_weights.append(weight)
+                    all_species.append(p1_decisions[i].species)
+                    all_gens.append(gen)
 
                 battles_in_file += 1
                 total_battles += 1
@@ -207,13 +217,17 @@ def precompute_dataset(
     states = np.stack(all_states, axis=0).astype(np.float32)
     actions = np.array(all_actions, dtype=np.int64)
     weights = np.array(all_weights, dtype=np.float32)
+    species = np.array(all_species, dtype="U")
+    gens = np.array(all_gens, dtype=np.int8)
 
     if verbose:
+        n_with_sp = int((species != "").sum())
         print(f"\nDataset: {len(states)} samples, {states.shape[1]} dims")
         print(f"  Actions: {np.unique(actions)}")
         print(f"  Weights: min={weights.min():.3f} max={weights.max():.3f} mean={weights.mean():.3f}")
+        print(f"  Species known for {n_with_sp}/{len(species)} samples ({100*n_with_sp/max(1,len(species)):.1f}%)")
 
-    return states, actions, weights
+    return states, actions, weights, species, gens
 
 
 # ---------------------------------------------------------------------------
@@ -242,8 +256,19 @@ def train(
     device: Optional[str] = None,
     patience: int = 3,
     verbose: bool = True,
+    species: Optional[np.ndarray] = None,
+    gens: Optional[np.ndarray] = None,
+    legal_eps: float = 0.0,
 ) -> nn.Module:
-    """Train the actor with weighted cross-entropy."""
+    """Train the actor with weighted cross-entropy.
+
+    With ``legal_eps > 0`` and per-sample (species, gen), the target is label-smoothed
+    toward the species-legal move prior for that generation:
+    ``target = (1-eps)*onehot(replay_move) + eps*uniform(legal_moves)``.
+    Species-legal moves the expert did not use get small target mass (e.g. Dragon Claw
+    on Garchomp) while species-illegal moves (e.g. Doom Desire) stay at 0. Samples with
+    unknown species or an empty legal set fall back to the plain one-hot.
+    """
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     dev = torch.device(device)
@@ -260,6 +285,34 @@ def train(
     weights_t = torch.from_numpy(w_norm).to(dev)
 
     n = len(states)
+
+    # ---- legal-move prior (optional) ----
+    use_prior = legal_eps > 0.0 and species is not None and gens is not None \
+        and len(species) == n and len(gens) == n
+    prior_cache: Dict[tuple, np.ndarray] = {}
+    if use_prior:
+        as_ = get_action_space()
+        for sp, g in zip(species, gens):
+            if sp is None or str(sp) == "":
+                continue
+            key = (str(sp), int(g))
+            if key in prior_cache:
+                continue
+            legal = as_.legal_moves(str(sp), int(g))
+            vec = np.zeros(UNIFIED_ACTION_SIZE, dtype=np.float32)
+            for mname in legal:
+                mid = as_.move_id(mname)
+                if mid is not None:
+                    vec[mid] = 1.0
+            if vec.sum() > 0:
+                vec /= vec.sum()
+            prior_cache[key] = vec
+        n_with = sum(1 for sp, g in zip(species, gens)
+                     if sp is not None and str(sp) != ""
+                     and (str(sp), int(g)) in prior_cache and prior_cache[(str(sp), int(g))].sum() > 0)
+        if verbose:
+            print(f"  Legal-move prior: eps={legal_eps}, {n_with}/{n} samples "
+                  f"({100*n_with/max(1,n):.1f}%) get a species-legal target spread")
     best_loss = float("inf")
     bad_epochs = 0
 
@@ -278,8 +331,25 @@ def train(
 
             logits = actor(batch_s)
             log_probs = torch.log_softmax(logits, dim=-1)
-            # Weighted cross-entropy: -sum(w * log_prob[action]) / sum(w)
-            sample_loss = -log_probs.gather(1, batch_a.unsqueeze(1)).squeeze(1)
+            if use_prior:
+                # target = (1-eps)*onehot(replay_move) + eps*uniform(legal_moves)
+                idx_b = idx.tolist()
+                prior = np.zeros((len(idx_b), UNIFIED_ACTION_SIZE), dtype=np.float32)
+                for j, si in enumerate(idx_b):
+                    sp, g = species[si], gens[si]
+                    if sp is None or str(sp) == "":
+                        continue
+                    vec = prior_cache.get((str(sp), int(g)))
+                    if vec is not None and vec.sum() > 0:
+                        prior[j] = vec
+                prior_t = torch.from_numpy(prior).to(dev)
+                onehot = torch.zeros_like(prior_t)
+                onehot.scatter_(1, batch_a.unsqueeze(1), 1.0)
+                target = (1.0 - legal_eps) * onehot + legal_eps * prior_t
+                sample_loss = -(target * log_probs).sum(dim=-1)
+            else:
+                # Weighted cross-entropy: -sum(w * log_prob[action]) / sum(w)
+                sample_loss = -log_probs.gather(1, batch_a.unsqueeze(1)).squeeze(1)
             loss = (sample_loss * batch_w).sum() / batch_w.sum()
 
             opt.zero_grad()
@@ -327,24 +397,33 @@ def smoke_test():
     # Phase 1: Pre-compute a small subset
     print("\n[1/3] Precomputing 50 battles...")
     t0 = time.time()
-    states, actions, weights = precompute_dataset(max_battles=50, verbose=True)
+    states, actions, weights, species, gens = precompute_dataset(max_battles=50, verbose=True)
     print(f"  Done in {time.time()-t0:.1f}s: {len(states)} samples")
 
     assert states.shape == (len(states), OBS_DIM), f"Shape mismatch: {states.shape}"
     assert actions.max() < UNIFIED_ACTION_SIZE, f"Action out of range: {actions.max()}"
     assert (weights > 0).all(), "Some weights are zero or negative"
+    assert len(species) == len(states) and len(gens) == len(states)
     print(f"  ✓ shapes ok, ✓ actions in range, ✓ weights positive")
 
-    # Phase 2: Train for 3 epochs
-    print("\n[2/3] Training for 3 epochs...")
+    # Sanity: the legal-move prior resolves for at least one common species.
+    as_ = get_action_space()
+    garch = as_.legal_moves("Garchomp", int(gens[0]))
+    assert len(garch) >= 5, f"legal_moves(Garchomp, gen{gens[0]}) unexpectedly small: {len(garch)}"
+    print(f"  ✓ legal-move prior sanity: Garchomp gen{gens[0]} → {len(garch)} legal moves")
+
+    # Phase 2: Train for 3 epochs (with the legal-move prior, eps=0.05)
+    # Smoke tests stay CPU-only (GPU work only on explicit GO).
+    print("\n[2/3] Training for 3 epochs (legal_eps=0.05, CPU)...")
     t0 = time.time()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
     print(f"  Device: {device}")
     actor = train(
         states, actions, weights,
         epochs=3, batch_size=64, lr=1e-3,
         device=device, patience=10,  # no early stop for smoke test
         verbose=True,
+        species=species, gens=gens, legal_eps=0.05,
     )
     print(f"  Done in {time.time()-t0:.1f}s")
 
@@ -352,7 +431,7 @@ def smoke_test():
     print("\n[3/3] Evaluating...")
     actor.eval()
     with torch.no_grad():
-        dev = next(actor.parameters()).device
+        dev = torch.device("cpu")
         s_t = torch.from_numpy(states[:1000]).to(dev)
         a_t = torch.from_numpy(actions[:1000]).to(dev)
         logits = actor(s_t)
@@ -383,6 +462,9 @@ def main():
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--max_battles", type=int, default=0, help="Limit battles (0=all)")
     parser.add_argument("--save", type=str, default=None, help="Save model to path")
+    parser.add_argument("--legal-eps", type=float, default=0.05,
+                        help="Label-smoothing eps toward the species-legal move prior "
+                             "(0 = plain one-hot CE)")
     args = parser.parse_args()
 
     if args.smoke:
@@ -392,10 +474,11 @@ def main():
     if args.precompute:
         print("Precomputing dataset...")
         t0 = time.time()
-        states, actions, weights = precompute_dataset(
+        states, actions, weights, species, gens = precompute_dataset(
             max_battles=args.max_battles, verbose=True
         )
-        np.savez_compressed(DATASET_PATH, states=states, actions=actions, weights=weights)
+        np.savez_compressed(DATASET_PATH, states=states, actions=actions, weights=weights,
+                            species=species, gens=gens)
         print(f"\nSaved to {DATASET_PATH}")
         print(f"Size: {os.path.getsize(DATASET_PATH) / 1e6:.1f} MB")
         print(f"Time: {time.time()-t0:.1f}s")
@@ -409,6 +492,12 @@ def main():
         print(f"Loading dataset from {DATASET_PATH}...")
         data = np.load(DATASET_PATH)
         states, actions, weights = data["states"], data["actions"], data["weights"]
+        # Backward-compat: older npz files have no species/gens → fall back to ε=0.
+        species = data["species"] if "species" in data else None
+        gens = data["gens"] if "gens" in data else None
+        if species is None or gens is None:
+            print("  NOTE: dataset has no species/gens arrays → legal-move prior disabled "
+                  "(re-run --precompute to enable it)")
         print(f"Loaded: {len(states)} samples")
 
         actor = train(
@@ -417,6 +506,7 @@ def main():
             batch_size=args.batch_size,
             lr=args.lr,
             device=args.device,
+            species=species, gens=gens, legal_eps=args.legal_eps,
         )
 
         save_path = args.save or os.path.join(CACHE_DIR, "imitation_actor.pt")

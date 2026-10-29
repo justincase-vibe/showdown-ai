@@ -124,6 +124,11 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
   Server runs from `dist/` → `node build` after editing `server/*.ts`.
 - **GPU:** battle generation is **CPU‑only** → keep GPU idle during data collection. GPU is for
   **PPO updates only**, started **on explicit GO and only when the GPU is free**.
+- **DECIDED — server scaling:** run **ONE** Showdown server and scale **concurrency** (worker
+  processes / concurrent envs, capped at 16 battles) — **not** multiple servers. Each extra
+  server multiplies the throttle budget → N× CPU load → thrash. Throttle stays **ON**
+  (bounded load is a feature); throughput ceiling ≈ 12–13/min is accepted. GPU stays idle
+  until explicit GO. *Goal: a clean, bounded workflow that never fries the hardware.*
 
 ## 7. Data tasks
 

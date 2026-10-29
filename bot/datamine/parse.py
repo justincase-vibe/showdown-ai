@@ -75,9 +75,11 @@ class Decision:
     """A single player decision point → unified action index."""
     turn: int
     actor: str            # "p1" or "p2"
-    action_idx: int       # 0-25 (unified)
+    action_idx: int       # 0-962 (unified move-identity space)
     action_desc: str      # human-readable
     raw: str              # "move:Scald" or "switch:slot3"
+    species: str = ""     # species of the active mon this decision is about ("" if unknown);
+                          # for a switch, the mon being REPLACED (the pre-switch active)
 
 @dataclass
 class ParsedBattle:
@@ -338,6 +340,11 @@ class BattleLogParser:
             forced=forced,
             slot=slot,
         ))
+        # Species of the mon this switch decision is made WITH (the pre-switch active).
+        # Captured before self._active is updated below.
+        pre_active = self._active.get(role)
+        pre_species = self._name_to_species[role].get(pre_active, "") if pre_active else ""
+
         self._active[role] = short_name
 
         # Create decision
@@ -347,6 +354,7 @@ class BattleLogParser:
             action_idx=(self._as.switch_id(slot) if slot is not None else 0),  # switch to slot
             action_desc=f"switch → slot {slot} ({species})",
             raw=f"switch:{slot}",
+            species=pre_species,
         ))
 
     def _handle_move(self, fields: List[str]) -> None:
@@ -404,12 +412,14 @@ class BattleLogParser:
 
         # Create decision → unified action index (gimmick may be patched retroactively
         # when the |-mega| / |-terastallize| line arrives on this same turn).
+        active_name = self._active.get(role)
         decision = Decision(
             turn=self._turn,
             actor=role,
             action_idx=self._move_to_action(move_name, gimmick, self.b.gen),
             action_desc=f"move:{move_name} (slot {move_idx}, gimmick={gimmick or 'none'})",
             raw=f"move:{move_name}",
+            species=self._name_to_species[role].get(active_name, "") if active_name else "",
         )
         self.b.decisions.append(decision)
 
