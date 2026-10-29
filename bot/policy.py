@@ -96,14 +96,55 @@ class MaskedPPO:
         o = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
         logits = self.actor(o)[0]
         m = torch.as_tensor(mask, dtype=torch.bool, device=self.device)
-        if not m.any():
-            m = torch.ones_like(m)
+        if not bool(m.any()):
+            raise ValueError(
+                "policy.act() called with an empty action mask: this is a Showdown "
+                "'wait' request (nothing to decide this turn). The loop must pass "
+                "(TraineeEnv.step sends the default -2 order) and record the step "
+                "with store_pass() instead of consulting the policy."
+            )
         logits = logits.masked_fill(~m, float("-inf"))
         dist = Categorical(logits=logits)
         a = int(dist.sample().item())
         lp = float(dist.log_prob(torch.tensor(a, device=self.device)).item())
         v = float(self.critic(o).item())
         return a, lp, v
+
+    @torch.no_grad()
+    def value(self, obs: np.ndarray) -> float:
+        """Critic estimate for ``obs`` (used to record no-decision 'wait' steps)."""
+        self.critic.eval()
+        o = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+        return float(self.critic(o).item())
+
+    def store_pass(
+        self,
+        env_id: int,
+        obs: np.ndarray,
+        reward: float,
+        value: float,
+        done: bool,
+    ) -> None:
+        """Record a no-decision step (Showdown 'wait' request).
+
+        The policy made no decision here, so a placeholder action/logprob keeps the
+        parallel episode lists aligned; the all-zero mask makes the row (nearly)
+        gradient-inert at update time (``update()`` expands empty masks to all-legal,
+        so the stored placeholder's log-prob stays finite). If ``done``, the episode
+        is flushed so a terminal reward (+1/-1) landing on a wait step is still
+        attributed and no episode leaks.
+        """
+        ep = self._episodes.get(env_id)
+        if ep is None:
+            return  # wait state before any decision: nothing in flight for this env
+        ep.obs.append(obs)
+        ep.act.append(0)
+        ep.lp.append(0.0)
+        ep.rew.append(reward)
+        ep.mask.append(np.zeros(self.n_actions, dtype=np.int8))
+        ep.val.append(value)
+        if done:
+            self._flush_episode(env_id)
 
     # ------------------------------------------------------------- collect
     def store(

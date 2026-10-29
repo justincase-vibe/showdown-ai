@@ -161,6 +161,23 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
   (Z‑use + "gimmick‑with‑a‑specific‑move" are v2); mega/tera/dynamax are single transform
   actions (paired move chosen at step‑time). **NEXT: (4) imitation precompute (GPU, on GO)
   → (5) concurrent self‑play → (6) eval.**
+- ✅ **(4a) smoke‑test fix: Showdown protocol edge states handled correctly.**
+  (a) **Wait requests** (server `"wait"` flag, e.g. while the opponent must choose its next
+  mon): all‑zero mask ⇔ nothing to decide. `policy.act` now **raises** on an empty mask
+  (was: silent full‑space sampling → the "illegal action 264/386/818" smoke crash). Loops in
+  `train.py` detect the empty mask and **pass** (TraineeEnv sends the default −2 order),
+  recording the step via `policy.store_pass()` (no decision stored; terminal reward still
+  attributed if the battle ends on such a step; `value()` helper added).
+  (b) **Stale‑mask re‑validation:** our mask is a snapshot of the last request; the server's
+  valid orders can be narrower by send‑time (observed: Taunt → moves‑only, Whirlwind forced
+  switch → "[still]"). `TraineeEnv._valid_action` checks the conversion against
+  `battle.valid_orders` (via `SinglesEnv.action_to_order(strict=True)`) and re‑picks the first
+  masked action that IS valid (`re_picks` counter), so **stored action == executed action** —
+  poke‑env's strict=False random‑move fallback (which corrupted ~5% of steps in one battle)
+  is no longer reached. **Verified:** `train.py --smoke` PASSED ×2 (0 invalid‑order warnings,
+  re_picks exercised) and `verify_env.py --formats gen7ou,gen6ou --battles 1` ALL PASSED.
+  **Known gap (flag):** opponent‑side transitions are not stored (frozen/live opponents act
+  but never learn) — self‑play currently trains only the trainee side.
 - ⬜ LATER: build other 10 team pools; Part 2 drafting value head; doubles; **search+RL
   (MCTS / PIMC)** as an amplifier on top of the learned policy+value.
 

@@ -178,9 +178,17 @@ def run(args) -> None:
                     cur_mask[e.id] = e.last_mask
                 obs = cur_obs[e.id]
                 mask = cur_mask[e.id]
-                a, lp, v = policy.act(obs, mask)
-                new_obs, r, done = e.step(a, opponent)
-                policy.store(e.id, obs, a, lp, r, done, mask, v)
+                if int(mask.sum()) == 0:
+                    # Showdown 'wait' request: nothing to decide this turn.
+                    # Advance the battle (TraineeEnv sends the default -2 order)
+                    # and record the step WITHOUT a policy decision.
+                    new_obs, r, done = e.step(0, opponent)
+                    policy.store_pass(e.id, obs, r, policy.value(obs), done)
+                else:
+                    a, lp, v = policy.act(obs, mask)
+                    assert 0 <= a < UNIFIED_ACTION_SIZE and mask[a] == 1, f"illegal action {a}"
+                    new_obs, r, done = e.step(a, opponent)
+                    policy.store(e.id, obs, a, lp, r, done, mask, v)
                 transitions += 1
                 if done:
                     battles_done += 1
@@ -255,16 +263,23 @@ def smoke(args) -> None:
     steps = 0
     total_reward = 0.0
     done = False
+    wait_steps = 0
     while not done and steps < 200:
-        a, lp, v = policy.act(cur_obs, cur_mask)
-        assert 0 <= a < UNIFIED_ACTION_SIZE and cur_mask[a] == 1, f"illegal action {a}"
-        new_obs, r, done = te.step(a, "random")
-        policy.store(0, cur_obs, a, lp, r, done, cur_mask, v)
+        if int(cur_mask.sum()) == 0:
+            # Showdown 'wait' request: nothing to decide; just advance the battle.
+            new_obs, r, done = te.step(0, "random")
+            policy.store_pass(0, cur_obs, r, policy.value(cur_obs), done)
+            wait_steps += 1
+        else:
+            a, lp, v = policy.act(cur_obs, cur_mask)
+            assert 0 <= a < UNIFIED_ACTION_SIZE and cur_mask[a] == 1, f"illegal action {a}"
+            new_obs, r, done = te.step(a, "random")
+            policy.store(0, cur_obs, a, lp, r, done, cur_mask, v)
         total_reward += r
         cur_obs, cur_mask = new_obs, te.last_mask
         steps += 1
-    print(f"[gen7ou battle] steps={steps} terminal_reward={total_reward:+.0f} "
-          f"(+1 win / -1 loss) | won={env.battle1.won} lost={env.battle1.lost}")
+    print(f"[gen7ou battle] steps={steps} wait_steps={wait_steps} re_picks={te.re_picks} "
+          f"terminal_reward={total_reward:+.0f} (+1 win / -1 loss) | won={env.battle1.won} lost={env.battle1.lost}")
 
     # --- random-battle format: teams are server-generated (team=None) ---
     env2 = ShowdownEnv(battle_format="gen7randombattle", team=None, strict=False,

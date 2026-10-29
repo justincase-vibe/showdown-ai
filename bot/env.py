@@ -240,6 +240,33 @@ def _to_pe_action(my_action: int, battle) -> int:
     return 6 + (idx % 4)
 
 
+def _pe_valid(pe: int, battle) -> bool:
+    """Whether the poke-env int ``pe`` converts to a currently valid order."""
+    try:
+        SinglesEnv.action_to_order(np.int64(pe), battle, strict=True)
+        return True
+    except Exception:
+        return False
+
+
+def _order_to_our_action(order: Any, battle: Any) -> Optional[int]:
+    """Map a poke-env BattleOrder back into our 963 space (last-resort fallback)."""
+    pe = int(SinglesEnv.order_to_action(order, battle, strict=True))
+    as_ = get_action_space()
+    if 0 <= pe <= 5:
+        return as_.SWITCH_BASE + pe
+    if 6 <= pe <= 9:
+        known = list(getattr(battle, "active_pokemon", None).moves.values())[:4]
+        return as_.move_id(getattr(known[pe - 6], "id", None))
+    if 10 <= pe <= 13:
+        return as_.transform("mega")
+    if 18 <= pe <= 21:
+        return as_.transform("dynamax")
+    if 22 <= pe <= 25:
+        return as_.transform("tera")
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Single-agent wrapper (torch-free: usable for env verification too)
 # ---------------------------------------------------------------------------
@@ -260,6 +287,7 @@ class TraineeEnv:
         self.obs2: Optional[np.ndarray] = None
         self.mask2: Optional[np.ndarray] = None
         self.done = True
+        self.re_picks = 0  # actions re-validated against live valid_orders (stale-mask guard)
 
     def reset(self) -> np.ndarray:
         obs, _ = self.env.reset()
@@ -281,10 +309,17 @@ class TraineeEnv:
         # straight through would index the wrong move (or a switch/transform) silently.
         actions = {}
         if env.agent1_to_move:
-            actions[self.a1] = np.int64(-2) if env.battle1.wait else np.int64(_to_pe_action(a1_action, env.battle1))
+            if env.battle1.wait:
+                actions[self.a1] = np.int64(-2)
+            else:
+                a1 = self._valid_action(a1_action, env.battle1, self.last_mask)
+                actions[self.a1] = np.int64(_to_pe_action(a1, env.battle1))
         if env.agent2_to_move:
-            pe_opp = _to_pe_action(self._opp_action(opponent), env.battle2)
-            actions[self.a2] = np.int64(-2) if env.battle2.wait else np.int64(pe_opp)
+            if env.battle2.wait:
+                actions[self.a2] = np.int64(-2)
+            else:
+                a2 = self._valid_action(self._opp_action(opponent), env.battle2, self.mask2)
+                actions[self.a2] = np.int64(_to_pe_action(a2, env.battle2))
         actions.setdefault(self.a1, np.int64(-2))
         actions.setdefault(self.a2, np.int64(-2))
 
@@ -298,7 +333,42 @@ class TraineeEnv:
         self.done = done
         return self.last_obs, reward, done
 
+    def _valid_action(self, action: int, battle: Any, mask: Optional[np.ndarray]) -> int:
+        """Ensure the action's poke-env order is valid RIGHT NOW; return our action id.
+
+        Our mask is a snapshot of the last request; by the time we send, the
+        server's valid orders may be narrower (e.g. the active just got Taunted ->
+        moves only, so switch orders are rejected). poke-env (strict=False) would
+        then silently execute a random legal move that we did NOT store, corrupting
+        the action/transition pairing. Instead: if the chosen conversion is invalid,
+        re-pick the first masked action whose conversion IS valid (counted in
+        ``re_picks``) so stored action == executed action.
+        """
+        if _pe_valid(_to_pe_action(action, battle), battle):
+            return action
+        if mask is not None and int(np.sum(mask)) > 0:
+            for j in np.flatnonzero(mask):
+                j = int(j)
+                if j == action:
+                    continue
+                if _pe_valid(_to_pe_action(j, battle), battle):
+                    self.re_picks += 1
+                    return j
+        # Last resort: the server's first valid order mapped back into our space.
+        try:
+            a = _order_to_our_action(battle.valid_orders[0], battle)
+            self.re_picks += 1
+            return int(a) if a is not None else 0
+        except Exception:
+            self.re_picks += 1
+            return 0
+
     def _opp_action(self, opponent) -> int:
+        # An all-zero mask is a Showdown 'wait' request: the opponent has nothing
+        # to decide this turn and poke-env ignores the order, so return a dummy
+        # WITHOUT consulting a policy (MaskedPPO.act rightly refuses empty masks).
+        if self.mask2 is not None and int(np.sum(self.mask2)) == 0:
+            return 0
         if opponent is None or opponent == "random":
             legal = np.flatnonzero(self.mask2)
             if len(legal) == 0:
