@@ -336,6 +336,20 @@ python bot/train.py --formats gen6ou,gen6ru,gen6uu,gen7ou,gen7ru,gen7uu,gen8ou,g
 genuine learning. Raw win‑rate hovers ~50/50 **by design** (shared policy on both sides) — it is
 **not** the metric to watch.
 
+**At the 1k checkpoint — EVAL with `bot/eval_selfplay.py`** (the §2.5 "Eval" step, now runnable).
+It measures the two decision‑relevant numbers on a FRESH session (clean critic, GPU‑safe):
+1. **Critic calibration** — does the value net's "who's winning" read match the real outcome?
+   Reports `sign_hit` (want → 1.0), `corr`, `rmse`/`bias` (want → 0), `confidence` (should rise with skill).
+   This is the honest "did it learn to read games" number — the same `calib_*` metric, but off‑training.
+2. **Win‑rate vs a RANDOM opponent** — the hard floor (self‑play ~50/50 is useless by design; vs random it
+   must be clearly >50%).
+```
+python bot/eval_selfplay.py --model bot/checkpoints/ppo.pt --formats gen6ou,gen7ou,gen9ou --battles 20
+```
+**Verdict rule:** win‑rate vs random ≥ 60% AND `sign_hit` ≥ 0.60 → scale up (2k+ battles). MARGINAL → more
+self‑play. NOTE: the warm‑start `imitation_actor.pt` has a **random‑init critic** → its calibration reads
+~50/50 (expected baseline, not a bug); `ppo.pt` has the trained critic.
+
 **Narrow starter variant** (3 gens, quick sanity slice before the full wide run):
 ```
 python bot/train.py --formats gen7ou,gen9ou,gen6uu --num-envs 3 --opponent live --buffer-size 96 --minibatch 64 --ppo-epochs 3 --lr 1e-4 --max-battles 20 --device cuda --init-actor bot/data/imitation_actor.pt
@@ -355,6 +369,11 @@ python bot/train.py --formats gen7ou,gen9ou,gen6uu --num-envs 3 --opponent live 
 | `bot/teams.py` / `bot/teamgen.py` | Team pools + server‑verified pool builder. |
 | `bot/team_pools.json` | Verified coherent team pools (all 12 formats: gen6–9 × OU/UU/RU). |
 | `bot/verify_env.py` | Torch‑free pipeline check. |
+| `bot/eval_imitation.py` | Imitation masked‑top‑1 eval (expert‑match). |
+| `bot/eval_selfplay.py` | **NEW** — self‑play checkpoint eval: critic calibration (sign_hit/corr/rmse/confidence) + win‑rate vs random. The 1k‑checkpoint gate. |
+| `check_battles.ps1` | **NEW** — GPU‑free "are battles running?" check (stats freshness + node count). |
+| `bot/run_gpu_watch.py` | **NEW** — 1k‑battle launcher: server preflight, stall watchdog, OS error/done pop‑ups. |
+| `start_selfplay.bat` | **NEW** — double‑click launcher (works from any folder). |
 | `bot/datamine/fetch.py` | Download top‑ELO battles from HF (per format). |
 | `bot/datamine/parse.py` | Parse Showdown logs → structured decisions (move‑identity, 0..962). |
 | `bot/data/replays/*.jsonl` | Curated battle data (gen8ru: 2000 battles). |
