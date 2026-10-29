@@ -198,6 +198,17 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
   **Models:** `bot/data/imitation_actor.pt` (ε=0.05, **the one to use**),
   `bot/data/imitation_actor_eps010.pt` (A/B artifact).
   **NEXT: (6) concurrent self‑play PPO (warm‑started from the imitation actor) → (7) eval.**
+- ✅ **(6) P2‑perspective self‑play bug — FIXED + verified.** The P2 opponent was acting on a
+  **P1‑perspective observation** (own/opponent features swapped): `env.py` always rebuilt the
+  observation from P1's view, so P2 was *systematically handicapped* → **20/0 self‑play** instead of
+  ~50/50 (the earlier "20/0 warm‑start" number was INVALID). Fix: `embed_battle` now resolves the
+  side per agent (`side = "p2" if battle is self.battle2 else "p1"`) and passes it through
+  `state_from_log` (`_perspective(side)` / `_build_observation(side)` / `StateReconstructor(side=)`).
+  The P1 path (imitation) is unchanged — regression‑checked. **Verified:** live wiring test
+  (a1→p1, a2→p2 both served in a real battle); object‑level own↔opponent swap **90/90**;
+  20‑battle self‑play **55/45** random‑init (not 20/0) and **80% warm‑start** (expected — the
+  imitation actor is P1‑biased, so as P2 it is out‑of‑distribution = flag #4 below, not a bug);
+  `imitate --smoke` + `eval_imitation` regression pass. Committed `bf1ff67`.
 - 🚩 **Flagged for review (decisions I made / gaps you should weigh in on):**
   1. **~23% illegal‑argmax is a real limit of label‑smoothing, not a bug.** The prior
      (5% mass spread over legal moves) can't fully override the net's learned bias toward
@@ -216,12 +227,29 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
   4. **Imitation is P1‑only** (expert side). Opponent‑side decisions exist in the data and
      could be added as a second supervised head — not done (keeps scope tight).
 
+  5. **OBS_DIM layout nuance (keep as‑is vs. re‑encode) — your call.** The opponent‑active
+     block is **N_MOVES (4) dims shorter** than the own‑active block because the opponent's
+     per‑move PP slot is hidden. Measured: own_active = **248**, opp_active = **244**, so the team
+     block starts at **492** (not the `_ACTIVE*2 = 496` the constants imply), with **4 trailing
+     zero‑pad** to reach `OBS_DIM = 892`. It is **self‑consistent** (training and live use identical
+     `embed_battle` code), so it does **not** break the current model — but the `_ACTIVE`
+     constant/comments are misleading and it is a latent maintenance hazard. I did **not** change it
+     (re‑encoding would invalidate the trained imitation model). **Option:** keep as‑is + fix the
+     comments (safe, recommended) vs. re‑encode to equal widths + retrain imitation.
+
 ## 9. Open decisions
 
 - ~~Replay sources / player tier / exact format coverage~~ — **DONE:** HolidayOugi HF dataset,
   top‑2000 by ELO per format, 15 formats (gen6–9 × OU/UU/RU + 3 random).
 - **Iteration depth:** 10k is checkpoint 1; decide how far to go after first eval.
 - **Format weights:** equal now, or bias toward specific tiers/gens.
+
+### ⏸ Morning decisions (blocked on you — NOT started without an answer)
+1. **Self‑play device** — CPU (safe/slow, default) vs. GPU (fast). *flag #3*
+2. **Overnight 10k self‑play** — GO or hold? (Needs the device choice first; **not launched**.)
+3. **~23% illegal‑argmax** — keep label‑smoothing, add a hard legal‑mask to the loss, or both? *flag #1*
+4. **Learnset gap** (e.g. U‑turn/Garchomp) — augment the legal‑move prior from dataset usage? *flag #2*
+5. **OBS_DIM 248/244** — keep + fix comments (safe) vs. re‑encode equal widths + retrain? *flag #5*
 
 ## 10. Key files
 
