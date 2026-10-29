@@ -292,15 +292,26 @@ def train(
     species: Optional[np.ndarray] = None,
     gens: Optional[np.ndarray] = None,
     legal_eps: float = 0.0,
+    hard_mask: bool = True,
 ) -> nn.Module:
-    """Train the actor with weighted cross-entropy.
+    """Train the actor with weighted cross-entropy + a legal-move constraint.
 
-    With ``legal_eps > 0`` and per-sample (species, gen), the target is label-smoothed
-    toward the species-legal move prior for that generation:
-    ``target = (1-eps)*onehot(replay_move) + eps*uniform(legal_moves)``.
-    Species-legal moves the expert did not use get small target mass (e.g. Dragon Claw
-    on Garchomp) while species-illegal moves (e.g. Doom Desire) stay at 0. Samples with
-    unknown species or an empty legal set fall back to the plain one-hot.
+    Two complementary mechanisms (both keyed on per-sample (species, gen)):
+
+    * **hard-mask** (``hard_mask=True``, default): illegal moves are driven to ~0
+      probability in the loss (logits outside the legal set set to a large finite
+      penalty), so the actor's argmax is ALWAYS a legal action. This crushes the ~23%
+      "Doom-Desire-on-Garchomp" illegal-argmax failure to ~0.
+    * **label smoothing** (``legal_eps>0``): the target is
+      ``target = (1-eps)*onehot(replay_move) + eps*uniform(legal_moves)``, so a
+      legal-but-unused move (Dragon Claw) gets small target mass while a species-
+      illegal one (Doom Desire) stays at 0 (and is hard-masked anyway).
+
+    **Learnset-gap fix:** the legal set is augmented with the moves the dataset
+    actually used for that species (``legal_moves(species, gen) ∪ dataset_moves[species]``),
+    so genuinely-legal moves poke-env's curated learnset misses (e.g. U-turn for
+    Garchomp) are never wrongly forbidden. The replay action itself is always allowed
+    (safety). Samples with unknown species fall back to plain one-hot CE (no mask).
     """
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -319,33 +330,52 @@ def train(
 
     n = len(states)
 
-    # ---- legal-move prior (optional) ----
-    use_prior = legal_eps > 0.0 and species is not None and gens is not None \
-        and len(species) == n and len(gens) == n
-    prior_cache: Dict[tuple, np.ndarray] = {}
-    if use_prior:
-        as_ = get_action_space()
+    # ---- legal-move set + prior (per species/gen), augmented with dataset usage ----
+    has_species = species is not None and gens is not None and len(species) == n and len(gens) == n
+    as_ = get_action_space()
+
+    # dataset_moves: species -> set of action ids actually USED in the data. This is the
+    # learnset-gap fix: it captures genuinely-legal moves poke-env's curated learnset
+    # misses (e.g. U-turn for Garchomp) so they are never wrongly forbidden.
+    dataset_moves: Dict[str, set] = defaultdict(set)
+    if has_species:
+        for sp, a in zip(species, actions):
+            if sp is not None and str(sp) != "":
+                dataset_moves[str(sp)].add(int(a))
+
+    # legal_cache: (species, gen) -> (legal_mask [N bool], prior [N float]).
+    # legal set = legal_moves(species, gen) ∪ dataset_moves[species] (moves only).
+    legal_cache: Dict[tuple, Tuple[np.ndarray, np.ndarray]] = {}
+    if has_species and (hard_mask or legal_eps > 0.0):
+        seen = set()
         for sp, g in zip(species, gens):
             if sp is None or str(sp) == "":
                 continue
             key = (str(sp), int(g))
-            if key in prior_cache:
+            if key in seen:
                 continue
-            legal = as_.legal_moves(str(sp), int(g))
-            vec = np.zeros(UNIFIED_ACTION_SIZE, dtype=np.float32)
-            for mname in legal:
+            seen.add(key)
+            ids = set()
+            for mname in as_.legal_moves(str(sp), int(g)):
                 mid = as_.move_id(mname)
                 if mid is not None:
-                    vec[mid] = 1.0
-            if vec.sum() > 0:
-                vec /= vec.sum()
-            prior_cache[key] = vec
+                    ids.add(mid)
+            ids |= {a for a in dataset_moves.get(str(sp), set()) if a < as_.N_MOVES}
+            mask = np.zeros(UNIFIED_ACTION_SIZE, dtype=bool)
+            for a in ids:
+                mask[a] = True
+            prior = mask.astype(np.float32)
+            if prior.sum() > 0:
+                prior /= prior.sum()
+            legal_cache[key] = (mask, prior)
         n_with = sum(1 for sp, g in zip(species, gens)
                      if sp is not None and str(sp) != ""
-                     and (str(sp), int(g)) in prior_cache and prior_cache[(str(sp), int(g))].sum() > 0)
+                     and (str(sp), int(g)) in legal_cache and legal_cache[(str(sp), int(g))][0].sum() > 0)
         if verbose:
-            print(f"  Legal-move prior: eps={legal_eps}, {n_with}/{n} samples "
-                  f"({100*n_with/max(1,n):.1f}%) get a species-legal target spread")
+            print(f"  Legal set: {len(legal_cache)} species/gen keys, "
+                  f"{len(dataset_moves)} species with dataset moves")
+            print(f"    hard_mask={hard_mask}, legal_eps={legal_eps}; {n_with}/{n} samples "
+                  f"({100*n_with/max(1,n):.1f}%) get a legal constraint")
     best_loss = float("inf")
     bad_epochs = 0
 
@@ -363,26 +393,41 @@ def train(
             batch_w = weights_t[idx]
 
             logits = actor(batch_s)
-            log_probs = torch.log_softmax(logits, dim=-1)
-            if use_prior:
-                # target = (1-eps)*onehot(replay_move) + eps*uniform(legal_moves)
+
+            if has_species and (hard_mask or legal_eps > 0.0):
+                B = len(idx)
                 idx_b = idx.tolist()
-                prior = np.zeros((len(idx_b), UNIFIED_ACTION_SIZE), dtype=np.float32)
+                a_list = batch_a.tolist()
+                legal_np = np.zeros((B, UNIFIED_ACTION_SIZE), dtype=bool)
+                prior_np = np.zeros((B, UNIFIED_ACTION_SIZE), dtype=np.float32)
                 for j, si in enumerate(idx_b):
                     sp, g = species[si], gens[si]
-                    if sp is None or str(sp) == "":
-                        continue
-                    vec = prior_cache.get((str(sp), int(g)))
-                    if vec is not None and vec.sum() > 0:
-                        prior[j] = vec
-                prior_t = torch.from_numpy(prior).to(dev)
-                onehot = torch.zeros_like(prior_t)
-                onehot.scatter_(1, batch_a.unsqueeze(1), 1.0)
-                target = (1.0 - legal_eps) * onehot + legal_eps * prior_t
-                sample_loss = -(target * log_probs).sum(dim=-1)
+                    entry = legal_cache.get((str(sp), int(g))) \
+                        if (sp is not None and str(sp) != "" and g is not None) else None
+                    if entry is not None and entry[0].sum() > 0:
+                        legal_np[j] = entry[0]
+                        prior_np[j] = entry[1]
+                    else:
+                        legal_np[j] = True  # unknown species -> allow all (plain CE)
+                    legal_np[j, a_list[j]] = True  # safety: always allow the replay action
+                legal_t = torch.from_numpy(legal_np).to(dev)
+                if hard_mask:
+                    # finite penalty (not -inf) so 0 * logp can never yield NaN
+                    logits = logits.masked_fill(~legal_t, -1e4)
+                prior_t = torch.from_numpy(prior_np).to(dev)
+                log_probs = torch.log_softmax(logits, dim=-1)
+                if legal_eps > 0.0:
+                    onehot = torch.zeros_like(prior_t)
+                    onehot.scatter_(1, batch_a.unsqueeze(1), 1.0)
+                    target = (1.0 - legal_eps) * onehot + legal_eps * prior_t
+                    sample_loss = -(target * log_probs).sum(dim=-1)
+                else:
+                    sample_loss = -log_probs.gather(1, batch_a.unsqueeze(1)).squeeze(1)
             else:
-                # Weighted cross-entropy: -sum(w * log_prob[action]) / sum(w)
+                # No per-sample legal set: plain weighted CE over the full 963 space.
+                log_probs = torch.log_softmax(logits, dim=-1)
                 sample_loss = -log_probs.gather(1, batch_a.unsqueeze(1)).squeeze(1)
+
             loss = (sample_loss * batch_w).sum() / batch_w.sum()
 
             opt.zero_grad()
@@ -498,6 +543,9 @@ def main():
     parser.add_argument("--legal-eps", type=float, default=0.05,
                         help="Label-smoothing eps toward the species-legal move prior "
                              "(0 = plain one-hot CE)")
+    parser.add_argument("--no-hard-mask", dest="hard_mask", action="store_false",
+                        help="Disable the hard legal-mask (default ON): without it the "
+                             "actor can put mass on species-illegal moves (~23%% illegal-argmax)")
     args = parser.parse_args()
 
     if args.smoke:
@@ -540,6 +588,7 @@ def main():
             lr=args.lr,
             device=args.device,
             species=species, gens=gens, legal_eps=args.legal_eps,
+            hard_mask=args.hard_mask,
         )
 
         save_path = args.save or os.path.join(CACHE_DIR, "imitation_actor.pt")

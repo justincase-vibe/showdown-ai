@@ -162,7 +162,11 @@ MOVE_BLOCK = N_TYPES + N_CAT + N_MOVE_SEM + N_MOVE_ID + 1  # type, cat, sem, ide
 # Active-mon cues: recharge, protect, tera, dancing, + curated cue effects.
 _ACTIVE_CUES = 4 + N_CUE_EFFECTS  # = 16
 
-# One active-mon block, shared by own (pp known) and opponent (pp hidden -> 0).
+# One active-mon block. The OWN active mon keeps the per-move PP slot
+# (``include_pp=True``); the OPPONENT's PP is hidden, so its block is ``N_MOVES``
+# dims SHORTER (each of the 4 moves drops its PP slot). ``_ACTIVE`` below is the
+# OWN width (the historical single-block constant); see the OBS_DIM note for how
+# the shorter opponent block is accounted for as trailing zero-padding.
 _ACTIVE = (
     1              # hp fraction
     + N_STATUS     # status
@@ -178,6 +182,10 @@ _ACTIVE = (
     + _ACTIVE_CUES
     + _SHAPE_DIM  # moveset-shape prior (species capability)
 )
+
+# True per-side active widths (verified): OWN keeps PP (248), OPP hides it (244).
+_ACTIVE_OWN = _ACTIVE            # own active block width (PP known) = 248
+_ACTIVE_OPP = _ACTIVE - N_MOVES  # opponent active block width (PP hidden) = 244
 
 _OWN_SLOT = 1 + 1 + N_STATUS + N_SPECIES_HASH  # fainted, hp, status, identity
 _OPP_SLOT = 1 + 1 + N_SPECIES_HASH + N_TYPES   # fainted, revealed, identity, type
@@ -200,6 +208,15 @@ _FIELD = (
 )
 _GLOBAL = 2  # own fainted fraction / opp fainted fraction
 
+# NOTE (true layout, verified): own active = _ACTIVE_OWN (248), opp active =
+# _ACTIVE_OPP (244 = 248 - N_MOVES, because the opponent's per-move PP slot is
+# hidden). embed_battle lays the two actives out contiguously, so they actually
+# occupy _ACTIVE_OWN + _ACTIVE_OPP = 492 dims and the team block starts at 492.
+# The formula below uses `_ACTIVE*2` (= 496), i.e. it OVER-counts the opponent
+# block by N_MOVES (4); embed_battle's final zero-pad fills those 4 trailing dims
+# to reach OBS_DIM (892). Do NOT "simplify" this to the sum of the true block
+# widths -- those 4 trailing zero dims are part of the layout the trained model
+# expects (changing them invalidates the existing weights).
 OBS_DIM = _ACTIVE * 2 + _OWN_TEAM + _OPP_TEAM + _FIELD + _GLOBAL
 
 

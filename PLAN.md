@@ -188,14 +188,19 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
   samples carry a known species; 91.3% resolve a non-empty legal‑move prior. Trained 10
   epochs (batch 256, lr 3e‑4, **ε=0.05** legal‑move prior, weighted CE with (elo/1200)² ×
   format weight). ~90 s/epoch on CPU.
-  **Eval (`eval_imitation.py`):** masked top‑1 (top‑1 is a *legal* move) **≈ 75%**, raw
-  top‑1 56–59%, **illegal‑argmax ≈ 23%**, conditional‑on‑legal 57%.
-  **A/B:** ε=0.05 beats ε=0.10 on *every* metric (75.1% / 22.8% illegal vs 72.6% / 25.3%) →
-  **0.05 is the default.**
+  **Eval (`eval_imitation.py`)** — metric FIXED to the **masked top‑1 accuracy** (apply the
+  per‑sample legal mask → argmax → compare to the expert action) = what the model does *live*.
+  The old "top‑1 is legal / illegal‑argmax" numbers measured the **raw unmasked** argmax — a
+  red herring for a hard‑masked actor (its illegal‑move logits are unconstrained by the loss).
+  Correct numbers (200k samples, 2026‑10‑29): **new hard‑mask actor 85.2%** (moves 76.0% / switch
+  100% / transform 100%) vs **old label‑smooth‑only 75.6%** (72.7% / 81.1% / 38.7%). The raw
+  numbers even *invert* the truth (new 3.6% vs old 56.1% raw) → **never trust the raw metric**.
+  **A/B:** ε=0.05 is the default (ε=0.10 was worse on every metric).
   **Memory fix:** `precompute_dataset` now pre‑allocates the states buffer once and fills it
   in place (was list‑append + `np.stack` = ~7.5 GB double‑allocation, which OOMs on this
   8‑GB‑free box). Pre‑allocation peaks ~4 GB. Dataset = 105 MB npz.
-  **Models:** `bot/data/imitation_actor.pt` (ε=0.05, **the one to use**),
+  **Models:** `bot/data/imitation_actor.pt` (**hard‑mask + ε=0.05 — THE one to use / warm‑start**),
+  `bot/data/imitation_actor_labelsmooth_only.pt` (pre‑hard‑mask backup, for A/B),
   `bot/data/imitation_actor_eps010.pt` (A/B artifact).
   **NEXT: (6) concurrent self‑play PPO (warm‑started from the imitation actor) → (7) eval.**
 - ✅ **(6) P2‑perspective self‑play bug — FIXED + verified.** The P2 opponent was acting on a
@@ -210,17 +215,20 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
   imitation actor is P1‑biased, so as P2 it is out‑of‑distribution = flag #4 below, not a bug);
   `imitate --smoke` + `eval_imitation` regression pass. Committed `bf1ff67`.
 - 🚩 **Flagged for review (decisions I made / gaps you should weigh in on):**
-  1. **~23% illegal‑argmax is a real limit of label‑smoothing, not a bug.** The prior
+  1. **✅ RESOLVED — ~23% illegal‑argmax was a *raw‑metric artifact*, now crushed.** Hard legal‑mask
+     added to the imitation loss (default ON) + corrected masked eval. The prior
      (5% mass spread over legal moves) can't fully override the net's learned bias toward
      globally‑common moves (e.g. U‑turn). Harmless in *live* play — `env.py` hard‑masks to
      the true moveset — but it means the imitation actor alone is not fully prior‑compliant.
      **Option (your call):** hard‑mask the imitation loss to the legal set (drop illegal
      logits to −inf) instead of / in addition to label smoothing → illegal rate → ~0.
-  2. **Learnset data gap:** some genuinely‑legal moves are missing from poke‑env's curated
+  2. **✅ RESOLVED — Learnset data gap:** legal set augmented with `dataset_moves[species]`
+     (moves the data actually used). Some genuinely‑legal moves were missing from poke‑env's curated
      learnset (e.g. **U‑turn for Garchomp**), so they read as "illegal" to the prior AND to
      the eval mask. This inflates the illegal rate and weakens the prior for those species.
      Augmenting the prior with "moves the dataset actually used per species" would fix it.
-  3. **Self‑play PPO device:** the scaling decision says GPU‑on‑GO, but the GPU is ~90% used
+  3. **✅ RESOLVED — Self‑play PPO device = GPU** (your choice). `train.py --device cuda`.
+     The scaling decision said GPU‑on‑GO, but the GPU is ~90% used
      by agent inference and RAM is only 8 GB free. A 10k‑game self‑play on **CPU** is the
      safe default (bounded, matches the "never fry the hardware" rule) but is **slow**
      (PPO updates on CPU). **Your call: CPU (safe/slow) vs GPU (fast, on explicit GO)?**
@@ -244,12 +252,12 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
 - **Iteration depth:** 10k is checkpoint 1; decide how far to go after first eval.
 - **Format weights:** equal now, or bias toward specific tiers/gens.
 
-### ⏸ Morning decisions (blocked on you — NOT started without an answer)
-1. **Self‑play device** — CPU (safe/slow, default) vs. GPU (fast). *flag #3*
-2. **Overnight 10k self‑play** — GO or hold? (Needs the device choice first; **not launched**.)
-3. **~23% illegal‑argmax** — keep label‑smoothing, add a hard legal‑mask to the loss, or both? *flag #1*
-4. **Learnset gap** (e.g. U‑turn/Garchomp) — augment the legal‑move prior from dataset usage? *flag #2*
-5. **OBS_DIM 248/244** — keep + fix comments (safe) vs. re‑encode equal widths + retrain? *flag #5*
+### ✅ Morning decisions — RESOLVED (2026‑10‑29)
+1. **Self‑play device** — ✅ **GPU** (your choice). `train.py --device cuda`; warm‑start from the imitation actor. I prepare, **you launch**.
+2. **Overnight 10k self‑play** — ⏳ **you run it** (agent does not launch it; I'm using the GPU for inference). Command in my report.
+3. **~23% illegal‑argmax** — ✅ **FIXED + verified.** Hard legal‑mask in the imitation loss (default ON) + a corrected *masked* eval metric. The scary "71.7% illegal" was a **raw‑unmasked‑argmax artifact**, NOT a live defect (the legal mask is always applied at live time). Correct **masked top‑1: new 85.2% vs old 75.6%**; switch/transform imitation jumped to 100%.
+4. **Learnset gap** (e.g. U‑turn/Garchomp) — ✅ **FIXED.** Legal set = `legal_moves(species, gen) ∪ dataset_moves[species]` (moves the data actually used), + always‑allow the replay action. Applied in `imitate.py` (train) and `eval_imitation.py`.
+5. **OBS_DIM 248/244** — ✅ **keep as‑is + documented** (`_ACTIVE_OWN`=248 / `_ACTIVE_OPP`=244 in `obs.py`). Not re‑encoded (would invalidate the trained weights).
 
 ## 10. Key files
 
