@@ -14,6 +14,7 @@ server.log
 
 # Data (too large for git)
 bot/data/
+bot/checkpoints/
 
 # Misc
 *.log

@@ -300,7 +300,7 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
    real updates with `calib_n>0`, no spin/crash) after fixing the **`buffer_size()` update‑gate bug**
    (env‑starvation + update‑spin — see §8 entry 7) and adding the **`calib_*` critic‑calibration
    metrics** (the real progress signal in both‑sides self‑play). **First checkpoint for the GPU run:
-   ~1–2k battles, then eval** — throughput is server‑throttled, so the wide mix costs no extra
+   1k battles, then eval** — throughput is server‑throttled, so the wide mix costs no extra
    wall‑clock. `frozen` is the fallback opponent if `live` looks unstable.
 
 ## 9b. Launch the GPU self‑play (you run it, when the GPU is free)
@@ -316,11 +316,20 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
 python bot/train.py --smoke --device cuda
 ```
 
-**Both‑sides self‑play, wide mix, warm‑started — FIRST CHECKPOINT = 2k battles, then eval**
+**Easiest — the watchdog launcher (error pop-up on failure/stall, summary pop-up on done, beeps):**
+```
+python bot/run_gpu_watch.py
+```
+It runs the 1k‑battle command below, logs to `bot/run_gpu.log`, kills + alerts if no stats
+progress for 15 min (`--stall-min`), and pops `ERROR` / `STALLED` / `DONE` windows. `--no-popup`
+prints instead. Extra args override the defaults, e.g. `python bot/run_gpu_watch.py --no-popup
+--formats gen7ou --num-envs 1 --max-battles 1 --device cpu` for a quick test.
+
+**Both‑sides self‑play, wide mix, warm‑started — FIRST CHECKPOINT = 1k battles, then eval**
 (`--lr 1e‑4` because the warm net is more sensitive; `--opponent frozen` is the fallback if `live` looks unstable):
 ```
 python bot/train.py --formats gen6ou,gen6ru,gen6uu,gen7ou,gen7ru,gen7uu,gen8ou,gen8ru,gen8uu,gen9ou,gen9ru,gen9uu \
-  --num-envs 16 --opponent live --buffer-size 4096 --minibatch 128 --ppo-epochs 4 --lr 1e-4 --max-battles 2000 --device cuda --init-actor bot/data/imitation_actor.pt
+  --num-envs 16 --opponent live --buffer-size 4096 --minibatch 128 --ppo-epochs 4 --lr 1e-4 --max-battles 1000 --device cuda --init-actor bot/data/imitation_actor.pt
 ```
 **Monitor `calib_*` in `bot/checkpoints/stats.jsonl` (per‑update) as the progress signal:**
 `calib_sign_hit` / `calib_corr` improving, `calib_rmse` falling, AND `calib_confidence` rising =
