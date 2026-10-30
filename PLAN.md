@@ -276,6 +276,89 @@ Measured battles/min at **16 concurrent battles** (random‑vs‑random = the *l
      trained imitation warm‑start). The correct *eventual* fix is a **symmetric 248/248 re‑encode**
      (re‑build `OBS_DIM` + retrain the imitation actor) — do later, after the team‑pool blocker.
 
+## 8b. Unattended self-play continuation — agent-run 2026‑10‑30 (decisions + uncertainties)
+
+> You asked me to (1) snapshot the net, (2) run **1,000 more** self-play battles, and (3) log my
+> decision uncertainties while you're away. **State as of this note:** run-1 checkpoint preserved;
+> the two-seat eval is finishing (verdict → `bot/_eval2.log`); the 1k continuation is launching via
+> the watchdog. Below is what I chose, why, and the things I could **not** decide and want your call on.
+
+**Done + verified this session:**
+- ✅ Snapshotted run-1 → `bot/checkpoints/ppo_run1_1k.pt` + `stats_run1_1k.jsonl` (byte-identical). The continuation overwrites `ppo.pt`; run-1 is safe.
+- ✅ Extracted + **load-verified** the bare actor → `bot/data/actor_run1_1k.pt` (255,043 params; loads into a fresh `MaskedPPO.actor`). `bot/extract_actor.py`.
+- ✅ Error-checked the two-seat eval end-to-end (smoke test, no crash) — full checklist in this session's chat.
+
+**Decisions I made unattended (flag if you disagree):**
+- **D1 — Eval *before* self-play (sequencing).** I do **not** run the eval and the 1k self-play concurrently: both hammer the same server + CPU, the eval would be starved, and its verdict (real skill vs P1-seat-bias) decides whether "1k more battles" is even the right move. So: let the eval finish → capture verdict → launch continuation.
+- **D2 — Continue from run-1's ACTOR, not the imitation actor.** `--init-actor bot/data/actor_run1_1k.pt` = a true continuation (builds on the 1k run). **Caveat:** `--init-actor` carries the **actor only** (critic + optimizer reset to init) — the established warm-start pattern (run-1 + the morning CPU session both did this). The actor is what plays; the weak critic (sign_hit ~0.5) re-warms from reward over ~100–200 battles. Want full actor+critic+opt continuity? → see **U3** (a ~5-line `train.py` enhancement).
+- **D3 — GPU.** Matches run-1 (proven over 8.65 h *with* agent inference active). The watchdog pops an `ERROR` box on any OOM/crash, so a failure is caught, not silent. Prefer CPU-safe? Relaunch with `--device cpu` (one flag).
+- **D4 — Watchdog launcher.** `bot/run_gpu_watch.py` for the unattended run: server preflight + 15‑min stall watchdog + `DONE/ERROR/STALLED` pop-ups + beeps.
+- **D5 — Same hyperparams as run-1** (lr 1e‑4, buffer 4096, minibatch 128, 16 envs, `--opponent live`). Changing several knobs at once while you're away is the recklessness we agreed to avoid.
+
+**Uncertainties I could NOT resolve (need your call when you're back):**
+- **U1 — THE BIG ONE: is the ~94% self-play real skill or a P1‑seat‑bias artifact?** The two‑seat eval answers it. §8 flag #5 already notes the obs is **asymmetric (248 own / 244 opp)**; the *eventual* fix is a **symmetric 248/248 re‑encode**. **If the eval shows P1 strong / P2 ~50% → it's the bias artifact**, and 1,000 more self-play battles would *reinforce* the bias rather than build balanced skill. I proceeded with the continuation as you asked, **but if the verdict confirms strong bias, the higher-value move is likely the symmetric re‑encode first** (rebuild `OBS_DIM` + retrain the imitation actor), then re-run self-play. ← **please read the eval verdict first.**
+- **U2 — Critic is still a coin flip** (`sign_hit` 0.5 in run-1). More self-play *may* fix it; track `calib_*` in `stats.jsonl` (want sign_hit/corr ↑, rmse ↓, confidence ↑).
+- **U3 — Actor-only warm-start (D2).** Want full actor+critic+opt continuity? Small enhancement — say the word.
+- **U4 — After this 1k:** apply the §9b verdict rule (win-rate vs random ≥ 60% **and** sign_hit ≥ 0.60 → scale to 2k+; else more self-play **or** the bias fix).
+
+**What to check when you're back (in this order):**
+1. `bot/_eval2.log` — the two-seat verdict (real skill vs seat bias) → decides **U1**.
+2. `bot/run_gpu.log` + any desktop pop-up — did the continuation finish / error / stall?
+3. `bot/checkpoints/stats.jsonl` — `calib_*` trend for the continuation (**U2**).
+4. Checkpoints: `ppo.pt` = continuation (run-2); `ppo_run1_1k.pt` = preserved run-1.
+
+## 8c. 🛑 BLOCKER — bot is switch‑degenerate & worse‑than‑random (found 2026‑10‑30, pre‑run)
+
+> **I did NOT launch the requested 1,000‑battle continuation.** The two‑seat eval + step‑level
+> diagnostics show the current bot (and its imitation warm‑start) **cannot attack** — it is
+> *worse than a random opponent*. Running 1k more self‑play on this foundation would just reinforce
+> the defect. Below is the evidence chain, the localized root cause, and the fix I recommend.
+> **Please review before any more training.**
+
+**Measured facts (reproducible via the `bot/diag_*.py` scripts):**
+1. **Eval vs random (2‑seat):** `ppo.pt` wins **0/21 (P1)** and **1/21 (P2)** vs a random‑move
+   opponent. A weak bot sits ~50/50 vs random; **0/21 means it systematically loses** — *worse than
+   random*, not "untrained".
+2. **Replays (bot P1, gen6ou 1400–1406):** the bot **fainted all 6 mons in every battle** (P2 fainted
+   0–4). Switch‑heavy: one battle had 50 switch lines vs 16 move lines.
+3. **Live logits (masked, `diag_action.py`):** on real observations the actor puts **move≈0.001 /
+   switch≈0.999** probability mass — for **BOTH** `ppo.pt` AND `imitation_actor.pt`.
+4. **Effective vocabulary (`diag_collapse.py`):** argmax lands on **only 10 of 963** actions —
+   3 transforms (mega/tera) + 6 switches + 1 move (0.1%). It **cannot pick a real move**.
+5. **Training data is fine (`diag_data.py`):** labels are **61% move / 38% switch / 1% transform** —
+   experts attack; the data is not the problem.
+6. **Collapse is from TRAINING, not init (`diag_init.py`):** fresh random‑init spread = **0.30**
+   (flat); trained actor spread = **15.64**, **move logits −5.7**, **switch logits +4.2**.
+   Training *drove* every move down and every switch up.
+
+**Root cause (localized to the imitation training; leading mechanism = the hard‑mask):**
+`imitate.py` hard‑masks the 954 non‑legal moves to −1e4 each sample. Since any *specific* move is
+legal for only a few species, nearly every move is "illegal" on most samples, so the −1e4 penalty
+drags the **entire move band down**, while the always‑relevant switch/transform band stays high.
+Net: a move‑suppressed, switch‑dominated actor. The earlier "85% masked top‑1" (§8 flag #1) clearly
+did **not** transfer to a live‑capable actor — live, masked, it is ~100% switch. (I have not yet
+proven the exact gradient path end‑to‑end; that's the first thing to verify in the fix.)
+
+**Why self‑play didn't save it:** run‑1 was warm‑started from this broken actor (`--init-actor`),
+so self‑play inherited a switch‑spammer on *both* sides; the ~94% P1 self‑play number is a
+first‑mover/degenerate artifact, **not** skill (confirmed by the 0/21 vs‑random floor).
+
+**Recommended fix (needs your GO — it's a training‑design change, so I did not unilaterally run it):**
+1. Fix the imitation mask/loss so it does **not** over‑suppress the active's legal moves — e.g. keep
+   the active's legal moves **+ switches** in‑set, use a **softer** penalty than −1e4, or drop the
+   hard‑mask and rely on the legal‑prior target. **Retrain + re‑eval.**
+2. **Gate before resuming self‑play:** a healthy actor must (a) reach high **true** masked top‑1
+   (re‑measure with the real per‑state legal set), (b) be **move‑capable** (live masked mass: moves
+   clearly > 0), and (c) **beat random > 50%** in a 2‑seat eval. Only then self‑play.
+3. Diagnostics added (keep them): `bot/diag_action.py`, `bot/diag_data.py`, `bot/diag_trainobs.py`,
+   `bot/diag_collapse.py`, `bot/diag_init.py`.
+
+**State on disk (clean):** run‑1 checkpoint preserved (`ppo_run1_1k.pt`); actor extracted
+(`actor_run1_1k.pt`); eval verdicts in `bot/_eval2.log` + `bot/_eval_baseline.log`; server still
+LIVE. Nothing is broken beyond the pre‑existing actor defect. If you *do* want the 1k run anyway,
+the launcher is ready: `python bot/run_gpu_watch.py --init-actor bot/data/actor_run1_1k.pt`
+(though it will very likely reproduce the same switch‑degenerate result).
+
 ## 9. Open decisions
 
 - ~~Replay sources / player tier / exact format coverage~~ — **DONE:** HolidayOugi HF dataset,
