@@ -42,6 +42,7 @@ from env import ShowdownEnv, TraineeEnv, UNIFIED_ACTION_SIZE  # noqa: E402
 from obs import OBS_DIM  # noqa: E402
 from policy import MaskedPPO  # noqa: E402
 from teams import RandomTeamBuilder, StrongTeamBuilder  # noqa: E402
+from poke_env.ps_client import ServerConfiguration  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -59,6 +60,14 @@ def apportion(total: int, weights: List[float]) -> List[int]:
     return counts
 
 
+def _server_config(port: int) -> ServerConfiguration:
+    """Build a poke_env ServerConfiguration pointing at a local server on ``port``."""
+    return ServerConfiguration(
+        websocket_url=f"ws://localhost:{port}/showdown/websocket",
+        authentication_url="https://play.pokemonshowdown.com/action.php?",
+    )
+
+
 def build_envs(
     formats: List[str],
     weights: List[float],
@@ -66,10 +75,13 @@ def build_envs(
     seed: int,
     save_replays: Optional[str],
     team_mode: str = "strong",
+    server_ports: Optional[List[int]] = None,
 ) -> List[TraineeEnv]:
     counts = apportion(num_envs, weights)
     envs: List[TraineeEnv] = []
     idx = 0
+    if server_ports is None:
+        server_ports = [8000]
     for fmt, c in zip(formats, counts):
         for _ in range(c):
             if "randombattle" in fmt:
@@ -78,9 +90,11 @@ def build_envs(
                 team = RandomTeamBuilder(battle_format=fmt, seed=seed + idx)
             else:
                 team = StrongTeamBuilder(battle_format=fmt, seed=seed + idx)
+            port = server_ports[idx % len(server_ports)]
             env = ShowdownEnv(
                 battle_format=fmt,
                 team=team,
+                server_configuration=_server_config(port),
                 strict=False,
                 save_replays=save_replays,
                 log_level=logging.WARNING,
@@ -129,8 +143,15 @@ def run(args) -> None:
         formats, weights, args.num_envs, args.opponent, args.buffer_size, args.max_battles, args.device,
     )
 
+    # Parse server ports (e.g. "8000,8001,...,8009")
+    if getattr(args, "server_ports", None):
+        server_ports = [int(p.strip()) for p in args.server_ports.split(",") if p.strip()]
+    else:
+        server_ports = [8000]
+    log.info("server_ports=%s (%d server(s))", server_ports, len(server_ports))
+
     envs = build_envs(formats, weights, args.num_envs, args.seed, args.replays,
-                      team_mode=args.team_mode)
+                      team_mode=args.team_mode, server_ports=server_ports)
     fmt_of = {e.id: e.fmt for e in envs}
 
     policy = MaskedPPO(
@@ -387,8 +408,9 @@ def main() -> None:
     p.add_argument("--ckpt-dir", default=os.path.join(os.path.dirname(__file__), "checkpoints"))
     p.add_argument("--replays", default=os.path.join(os.path.dirname(__file__), "replays"))
     p.add_argument("--init-actor", default=None,
-                   help="path to a pre-trained actor state_dict (e.g. the imitation "
-                        "bot/data/imitation_actor.pt) to warm-start self-play from")
+                   help="path to a pre-trained actor state_dict to warm-start from (optional)")
+    p.add_argument("--server-ports", default=None,
+                   help="comma-separated list of Showdown server ports (e.g. 8000,8001,8002)")
     p.add_argument("--smoke", action="store_true", help="run a quick CPU pipeline check")
     args = p.parse_args()
 

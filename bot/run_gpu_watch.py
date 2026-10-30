@@ -37,19 +37,22 @@ TRAIN_PY = os.path.join(HERE, "train.py")
 STATS_PATH = os.path.join(HERE, "checkpoints", "stats.jsonl")
 LOG_PATH = os.path.join(HERE, "run_gpu.log")
 
-# The 1k-battle wide self-play (PLAN.md section 9b). CLI extras are appended after
-# these, so a quick test can override any of them (last occurrence wins).
+# 10-server wide self-play from random init (~1 GB net, no imitation warm-start).
+# CLI extras are appended after these, so a quick test can override any of them.
 TRAIN_ARGS = [
     "--formats", "gen6ou,gen6ru,gen6uu,gen7ou,gen7ru,gen7uu,gen8ou,gen8ru,gen8uu,gen9ou,gen9ru,gen9uu",
-    "--num-envs", "16",
+    "--num-envs", "30",
     "--opponent", "live",
-    "--buffer-size", "4096",
-    "--minibatch", "128",
+    "--buffer-size", "8192",
+    "--minibatch", "256",
     "--ppo-epochs", "4",
     "--lr", "1e-4",
-    "--max-battles", "1000",
+    "--max-battles", "5000",
     "--device", "cuda",
-    "--init-actor", "bot/data/imitation_actor.pt",
+    "--hidden", "1024,2048,4096,4096,2048,1024",
+    "--server-ports", "8000,8001,8002,8003,8004,8005,8006,8007,8008,8009",
+    "--team-mode", "random",
+    "--log-every", "50",
 ]
 
 
@@ -63,6 +66,16 @@ def server_ok(url: str, tries: int = 4, delay: float = 2.0) -> bool:
         except Exception:
             time.sleep(delay)
     return False
+
+
+def all_servers_ok(ports: list, tries: int = 8, delay: float = 2.0) -> list:
+    """Check ALL given ports are up. Returns list of (port, ok) tuples."""
+    results = []
+    for port in ports:
+        url = f"http://localhost:{port}/"
+        ok = server_ok(url, tries=tries, delay=delay)
+        results.append((port, ok))
+    return results
 
 
 def alert(kind: str, title: str, text: str, popup: bool) -> None:
@@ -162,16 +175,30 @@ def main() -> None:
     ap.add_argument("--stall-min", type=float, default=15.0,
                     help="kill + alert if no new stats line for this many minutes (default 15)")
     ap.add_argument("--server-url", default="http://localhost:8000",
-                    help="Showdown server to check before launching (default http://localhost:8000)")
+                    help="(legacy, single-server mode) -- see --server-ports")
     args, extra = ap.parse_known_args()
     popup = not args.no_popup
 
-    if not server_ok(args.server_url):
-        alert("error", "Server is NOT running -- no battles can start.",
-              f"No response from {args.server_url}.\nStart it first:\n"
-              "  cd pokemon-showdown && node pokemon-showdown start\n"
-              "wait for 'Worker 1 now listening', then re-run this launcher.", popup)
+    # Determine which ports to check: use --server-ports from TRAIN_ARGS if present,
+    # otherwise fall back to the legacy single --server-url.
+    if "--server-ports" in TRAIN_ARGS:
+        port_str = TRAIN_ARGS[TRAIN_ARGS.index("--server-ports") + 1]
+        ports = [int(p.strip()) for p in port_str.split(",") if p.strip()]
+    else:
+        ports = [8000]
+
+    results = all_servers_ok(ports)
+    down = [(p, r) for p, r in results if not r]
+    if down:
+        down_str = ", ".join(f"port {p}" for p, _ in down)
+        alert("error", f"{len(down)}/{len(ports)} servers are DOWN -- cannot start.",
+              f"Down: {down_str}\n"
+              f"Start all servers first:\n"
+              f"  cd pokemon-showdown && start_servers.bat\n"
+              f"or manually: set SHOWDOWN_PORT=<port> && node pokemon-showdown start",
+              popup)
         sys.exit(3)
+    print(f"All {len(ports)} servers up (ports {ports[0]}-{ports[-1]})")
 
     cmd = [sys.executable, TRAIN_PY] + TRAIN_ARGS + list(extra)
     stall_s = max(60.0, args.stall_min * 60.0)
