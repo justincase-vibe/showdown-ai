@@ -39,6 +39,7 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from env import ShowdownEnv, TraineeEnv, UNIFIED_ACTION_SIZE  # noqa: E402
+from action_space import get_action_space  # noqa: E402
 from obs import OBS_DIM  # noqa: E402
 from policy import MaskedPPO  # noqa: E402
 from teams import RandomTeamBuilder, StrongTeamBuilder  # noqa: E402
@@ -203,6 +204,14 @@ def run(args) -> None:
     transitions = 0
     start = time.time()
 
+    # --- quality tracking (switch ratio, forfeits) ---
+    as_ = get_action_space()
+    battle_moves = 0
+    battle_switches = 0
+    battle_forfeits = 0
+    battle_turns = 0
+    recent_battles: List[dict] = []  # last N battles for quality stats
+
     # reset all envs
     cur_obs: Dict[int, np.ndarray] = {}
     cur_mask: Dict[int, np.ndarray] = {}
@@ -223,6 +232,17 @@ def run(args) -> None:
         return 0
 
     def log_stats(tag: str, extra: dict = None):
+        # Quality metrics from recent battles
+        n_recent = min(20, len(recent_battles))
+        if n_recent > 0:
+            recent = recent_battles[-n_recent:]
+            avg_sw = round(np.mean([b["sw%"] for b in recent]))
+            avg_turns = round(np.mean([b["turns"] for b in recent]), 1)
+            n_forfeit = sum(1 for b in recent if b["forfeit"])
+        else:
+            avg_sw = 0
+            avg_turns = 0
+            n_forfeit = 0
         rec = {
             "t": int(time.time() - start),
             "battles": battles_done,
@@ -233,6 +253,7 @@ def run(args) -> None:
                     if (wins.get(k, 0) + losses.get(k, 0)) else None)
                 for k in (set(wins) | set(losses))
             },
+            "quality": {"avg_sw%": avg_sw, "avg_turns": avg_turns, "forfeits": n_forfeit},
             "tag": tag,
         }
         if extra:
@@ -261,12 +282,18 @@ def run(args) -> None:
                 else:
                     a, lp, v = policy.act(obs, mask)
                     assert 0 <= a < UNIFIED_ACTION_SIZE and mask[a] == 1, f"illegal action {a}"
+                    # Track action type for quality stats
+                    if a >= as_.SWITCH_BASE and a < as_.SWITCH_BASE + 6:
+                        battle_switches += 1
+                    else:
+                        battle_moves += 1
                     new_obs, r, done = e.step(a, opponent)
                     policy.store(e.id, obs, a, lp, r, done, mask, v)
                 # Both-sides self-play: also store the opponent's transition when the
                 # opponent is the shared policy (--opponent live); no-op otherwise.
                 _store_opponent_side(e, policy, opponent, done)
                 transitions += 1
+                battle_turns += 1
                 if done:
                     battles_done += 1
                     key = fmt_of[e.id]
@@ -276,6 +303,29 @@ def run(args) -> None:
                         losses[key] = losses.get(key, 0) + 1
                     else:
                         pass  # draw / double-kO
+                    
+                    # --- quality check: detect forfeit (one side >3 mons alive, <15 turns) ---
+                    b1 = e.env.battle1
+                    b2 = e.env.battle2
+                    b1_alive = sum(1 for p in (b1.team or {}).values() if not p.fainted)
+                    b2_alive = sum(1 for p in (b2.team or {}).values() if not p.fainted)
+                    if battle_turns < 15 and ((b1_alive >= 5 and b2_alive == 0) or (b2_alive >= 5 and b1_alive == 0)):
+                        battle_forfeits += 1
+                    
+                    # Log per-battle quality
+                    total_actions = battle_moves + battle_switches
+                    sw_pct = (battle_switches / total_actions * 100) if total_actions > 0 else 0
+                    recent_battles.append({
+                        "b": battles_done, "fmt": key, "turns": battle_turns,
+                        "mv": battle_moves, "sw": battle_switches, "sw%": round(sw_pct),
+                        "forfeit": battle_forfeits > 0 and (b1_alive >= 5 or b2_alive >= 5),
+                        "result": "W" if r > 0 else ("L" if r < 0 else "D")
+                    })
+                    # Reset per-battle counters
+                    battle_moves = 0
+                    battle_switches = 0
+                    battle_turns = 0
+                    
                     # re-arm immediately
                     cur_obs[e.id] = e.reset()
                     cur_mask[e.id] = e.last_mask
