@@ -59,21 +59,41 @@ def _entry(battle_format: str) -> Dict:
     return pools[battle_format]
 
 
+def _base_species(species: str) -> str:
+    """Normalize a species name to its base form for Species Clause dedup.
+
+    Handles form variants: Lopunny-Mega -> lopunny, Landorus-Therian -> landorus,
+    Greninja-Bond -> greninja, Kyurem-Black -> kyurem, etc.
+    Also handles Hisuian/Regional forms: HisuianZigzagoon -> hisuianzigzagoon (kept
+    distinct since it IS a different base species).
+    """
+    s = species.strip().lower()
+    # Strip form suffixes that the Species Clause treats as the same base mon
+    # (Mega, Therian, Bond, Black, White, Shadow, Primal, Gmax, etc.)
+    for suffix in ("-mega", "-therian", "-bond", "-black", "-white", "-shadow",
+                   "-primal", "-gmax", "-origin", "-battle-bond"):
+        if s.endswith(suffix):
+            return s[: -len(suffix)]
+    # Hisuian/Regional forms are DIFFERENT species (keep them)
+    # E.g. HisuianZigzagoon stays as hisuianzigzagoon
+    return s
+
+
 def _dedupe_by_species(mons: List[Dict]) -> List[Dict]:
-    """Drop duplicate *species* from a flat mon pool (first occurrence wins).
+    """Drop duplicate *base species* from a flat mon pool (first occurrence wins).
 
     The stored ``flat`` pools are the concatenation of every mon from every coherent
     team, so a popular species (Garchomp, Landorus, …) appears several times. A random
-    *bag* that draws two of the same species is **illegal** (Species Clause) and the
-    server rejects it at battle start -- which poke-env surfaces as a misleading
-    ``asyncio.TimeoutError: Agent is not challenging`` (the challenge never completes
-    because the team is bounced). Deduping by species guarantees any N-subset is a
-    legal team, since each distinct species came from an already-legal team.
+    *bag* that draws two of the same base species is **illegal** (Species Clause) and
+    the server rejects it at battle start. We dedupe by *base* species (stripping
+    form suffixes like -Mega, -Therian, -Bond) so "Lopunny" and "Lopunny-Mega"
+    count as the same slot.
     """
     seen: set = set()
     out: List[Dict] = []
     for m in mons:
-        key = str(m.get("species", "")).strip().lower()
+        raw = str(m.get("species", "")).strip()
+        key = _base_species(raw)
         if not key or key in seen:
             continue
         seen.add(key)
