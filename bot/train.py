@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import random
 import sys
@@ -61,11 +62,11 @@ def apportion(total: int, weights: List[float]) -> List[int]:
     return counts
 
 
-def _server_config(port: int) -> ServerConfiguration:
-    """Build a poke_env ServerConfiguration pointing at a local server on ``port``."""
+def _server_config(port: int, ip: str = "localhost") -> ServerConfiguration:
+    """Build a poke_env ServerConfiguration pointing at a local server on ``ip:port``."""
     return ServerConfiguration(
-        websocket_url=f"ws://localhost:{port}/showdown/websocket",
-        authentication_url="https://play.pokemonshowdown.com/action.php?",
+        websocket_url=f"ws://{ip}:{port}/showdown/websocket",
+        authentication_url=f"http://{ip}:{port}/action.php?",
     )
 
 
@@ -77,6 +78,7 @@ def build_envs(
     save_replays: Optional[str],
     team_mode: str = "strong",
     server_ports: Optional[List[int]] = None,
+    server_ip: str = "localhost",
 ) -> List[TraineeEnv]:
     counts = apportion(num_envs, weights)
     envs: List[TraineeEnv] = []
@@ -95,7 +97,7 @@ def build_envs(
             env = ShowdownEnv(
                 battle_format=fmt,
                 team=team,
-                server_configuration=_server_config(port),
+                server_configuration=_server_config(port, server_ip),
                 strict=False,
                 save_replays=save_replays,
                 log_level=logging.WARNING,
@@ -144,15 +146,25 @@ def run(args) -> None:
         formats, weights, args.num_envs, args.opponent, args.buffer_size, args.max_battles, args.device,
     )
 
-    # Parse server ports (e.g. "8000,8001,...,8009")
+    # Parse server targets (e.g. "8000,8001" or "192.168.1.5:8000,192.168.1.5:8001")
     if getattr(args, "server_ports", None):
-        server_ports = [int(p.strip()) for p in args.server_ports.split(",") if p.strip()]
+        server_ip = "localhost"
+        server_ports = []
+        for p in args.server_ports.split(","):
+            p = p.strip()
+            if ":" in p:
+                h, port = p.split(":")
+                server_ip = h.strip()
+                server_ports.append(int(port))
+            else:
+                server_ports.append(int(p))
     else:
+        server_ip = "localhost"
         server_ports = [8000]
-    log.info("server_ports=%s (%d server(s))", server_ports, len(server_ports))
+    log.info("server_ip=%s server_ports=%s (%d server(s))", server_ip, server_ports, len(server_ports))
 
     envs = build_envs(formats, weights, args.num_envs, args.seed, args.replays,
-                      team_mode=args.team_mode, server_ports=server_ports)
+                      team_mode=args.team_mode, server_ports=server_ports, server_ip=server_ip)
     fmt_of = {e.id: e.fmt for e in envs}
 
     policy = MaskedPPO(
@@ -208,16 +220,18 @@ def run(args) -> None:
     as_ = get_action_space()
     battle_moves = 0
     battle_switches = 0
+    battle_switch_slots = [0] * 6   # which bench slot each switch targeted (degeneracy check)
     battle_forfeits = 0
     battle_turns = 0
+    illegal_window = 0              # illegal picks since the last "battles" log (window, not cumulative)
     recent_battles: List[dict] = []  # last N battles for quality stats
 
-    # reset all envs
     cur_obs: Dict[int, np.ndarray] = {}
     cur_mask: Dict[int, np.ndarray] = {}
-    for e in envs:
-        cur_obs[e.id] = e.reset()
-        cur_mask[e.id] = e.last_mask
+    # NOTE: the initial reset is done by the guarded startup loop below (safe_reset).
+    # A bare ``e.reset()`` here would create a live battle that the guard then sees and
+    # either forfeits (old behavior) or aborts (current) -- the root of the turn-1
+    # 'concede'. So we must NOT reset here; the guarded loop is the single initial reset.
 
     def buffer_size() -> int:
         # Count ONLY what update() can actually drain: the *merged* buffer built
@@ -239,10 +253,14 @@ def run(args) -> None:
             avg_sw = round(np.mean([b["sw%"] for b in recent]))
             avg_turns = round(np.mean([b["turns"] for b in recent]), 1)
             n_forfeit = sum(1 for b in recent if b["forfeit"])
+            avg_sw_conc = round(float(np.mean([b.get("sw_conc", 0.0) for b in recent])), 3)
+            total_sw_recent = sum(b.get("sw", 0) for b in recent)
         else:
             avg_sw = 0
             avg_turns = 0
             n_forfeit = 0
+            avg_sw_conc = 0
+            total_sw_recent = 0
         rec = {
             "t": int(time.time() - start),
             "battles": battles_done,
@@ -253,7 +271,10 @@ def run(args) -> None:
                     if (wins.get(k, 0) + losses.get(k, 0)) else None)
                 for k in (set(wins) | set(losses))
             },
-            "quality": {"avg_sw%": avg_sw, "avg_turns": avg_turns, "forfeits": n_forfeit},
+            "quality": {"avg_sw%": avg_sw, "avg_turns": avg_turns, "forfeits": n_forfeit,
+                        "sw_conc": avg_sw_conc,
+                        "illegal_picks": sum(getattr(e, "illegal_total", 0) for e in envs),
+                        "illegal_window": illegal_window},
             "tag": tag,
         }
         if extra:
@@ -262,33 +283,165 @@ def run(args) -> None:
         with open(stats_path, "a") as fh:
             fh.write(line + "\n")
         log.info("%s", line)
+        # --- degenerate-behavior warnings: catch bugs that LOOK like a deliberate choice ---
+        if total_sw_recent >= 10 and avg_sw_conc >= 0.8:
+            log.warning(
+                "!!! DEGENERATE SWITCHING: %.0f%% of recent switches hit the SAME bench slot "
+                "(conc=%.2f, %d switches). This looks like a forced-switch/mask bug, not a real "
+                "choice -- inspect env.get_action_mask / _decide and the recent replays.",
+                avg_sw_conc * 100, avg_sw_conc, total_sw_recent,
+            )
+        if illegal_window >= 5:
+            log.warning(
+                "!!! ILLEGAL-PICK SPIKE: %d server-rejected picks in this window -- the action "
+                "mask likely disagrees with the server. Check env.get_action_mask.",
+                illegal_window,
+            )
+
+    def safe_reset(e, max_retries: int = 3, grace_s: float = 5.0, cooldown: float = 11.0):
+        """Reset an env (start the next battle) with guard + cooldown + narrow retry.
+
+        GUARD (the forfeit fix): poke-env's reset()/close() auto-forfeit any battle that
+        is not finished yet (poke_env/environment/env.py) -- the sole source of the
+        spurious turn-1 'forfeit' replays. Root cause: step() computes ``done`` from the
+        battle it pulled via battle_queue.race_get(), but never writes that battle back
+        to env.battle1, so env.battle1 (what reset() inspects) can be a DIFFERENT/stale
+        battle. Before every reset we make sure the current battle has actually finished
+        (a timing race is waited out via grace_s); if it is still LIVE we ABORT the
+        re-arm (return failure) instead of calling reset() -- we never forfeit. The
+        caller drops this env slot.
+        COOLDOWN: Showdown cancels a challenge issued <10s after the previous one; a
+        cancelled challenge leaves a limbo battle that the next reset then forfeits. So
+        we space re-challenges per env (>= cooldown since the last).
+        NARROW RETRY: only the expected failure (team-rejection / challenge-timeout,
+        surfaced as RuntimeError by TraineeEnv.reset) is retried -- a bare ``except
+        Exception`` was re-calling reset() on ANY error (forfeits a live battle AND
+        hammers the cooldown).
+
+        Returns (obs, success); success is False when the re-arm is aborted (live battle)
+        or a reset keeps failing.
+        """
+        def finished() -> bool:
+            try:
+                for b in (e.env.battle1, e.env.battle2):
+                    if b is not None and not bool(getattr(b, "finished", False)):
+                        return False
+                return True
+            except Exception:
+                return True  # unknown state: let reset()'s own logic + trace handle it
+
+        def sig(b) -> str:
+            try:
+                alive = sum(1 for p in (b.team or {}).values() if not p.fainted)
+                return (f"turn={b.turn} alive={alive} finished={bool(b.finished)} "
+                        f"tag={getattr(b, 'battle_tag', '?')} id={id(b)}")
+            except Exception:
+                return "n/a"
+
+        log.info(
+            "safe_reset ENTER [env %d]: b1=%s | b2=%s | e.done=%s | "
+            "a1_to_move=%s a2_to_move=%s",
+            e.id,
+            sig(e.env.battle1), sig(e.env.battle2),
+            getattr(e, "done", "?"),
+            getattr(e.env, "agent1_to_move", "?"),
+            getattr(e.env, "agent2_to_move", "?"),
+        )
+
+        for attempt in range(max_retries):
+            # --- guard: a LIVE battle at re-arm time would be FORFEITED by reset() ---
+            # (the turn-1 'concede' bug). Root cause: poke-env's step() computes ``done``
+            # from the battle it pulled via battle_queue.race_get(), but it never writes
+            # that battle back to env.battle1 -- so env.battle1 (what reset() inspects)
+            # can be a DIFFERENT/stale battle. When that stale battle is not finished,
+            # reset() forfeits the live one. Fix: if the battle is still live after the
+            # grace wait, ABORT the re-arm (return failure) instead of calling reset().
+            # The caller drops this env slot; we deliberately do NOT forfeit.
+            if not finished():
+                deadline = time.time() + grace_s
+                while not finished() and time.time() < deadline:
+                    time.sleep(0.25)
+                if not finished():
+                    log.error(
+                        "LIVE-BATTLE AT RE-ARM [env %d, attempt %d/%d]: e.done=%s | "
+                        "b1=%s | b2=%s | a1_to_move=%s a2_to_move=%s -- ABORTING "
+                        "re-arm (NOT forfeiting); dropping this env slot.",
+                        e.id, attempt + 1, max_retries,
+                        getattr(e, "done", "?"),
+                        sig(e.env.battle1), sig(e.env.battle2),
+                        getattr(e.env, "agent1_to_move", "?"),
+                        getattr(e.env, "agent2_to_move", "?"),
+                    )
+                    return None, False
+            # --- FIX #4 cooldown: never re-challenge inside the server's 10s window ---
+            wait = cooldown - (time.time() - getattr(e, "_last_challenge", 0.0))
+            if wait > 0:
+                time.sleep(wait)
+            e._last_challenge = time.time()
+            # --- reset (FIX #2: retry only the expected failure) ---
+            try:
+                obs = e.reset()
+                return obs, True
+            except (RuntimeError, TimeoutError) as exc:
+                log.warning("env %d reset failed (attempt %d/%d): %s",
+                            e.id, attempt + 1, max_retries, str(exc)[:160])
+                if attempt == max_retries - 1:
+                    log.error("env %d: giving up after %d resets -- skipping this slot", e.id, max_retries)
+                    return None, False
+        return None, False
+
+    # --- initial reset with safety net ---
+    skipped_envs: set = set()
+    for e in envs:
+        obs, ok = safe_reset(e)
+        if ok:
+            cur_obs[e.id] = obs
+            cur_mask[e.id] = e.last_mask
+        else:
+            skipped_envs.add(e.id)
+            log.warning("env %d skipped at startup", e.id)
 
     try:
         while battles_done < args.max_battles:
             # --- collect a batch of transitions across envs ---
             for e in envs:
+                if e.id in skipped_envs:
+                    continue
                 if e.done:
                     # re-arm finished envs as they come up
-                    cur_obs[e.id] = e.reset()
+                    obs, ok = safe_reset(e)
+                    if not ok:
+                        skipped_envs.add(e.id)
+                        continue
+                    cur_obs[e.id] = obs
                     cur_mask[e.id] = e.last_mask
                 obs = cur_obs[e.id]
                 mask = cur_mask[e.id]
-                if int(mask.sum()) == 0:
-                    # Showdown 'wait' request: nothing to decide this turn.
-                    # Advance the battle (TraineeEnv sends the default -2 order)
-                    # and record the step WITHOUT a policy decision.
-                    new_obs, r, done = e.step(0, opponent)
-                    policy.store_pass(e.id, obs, r, policy.value(obs), done)
-                else:
-                    a, lp, v = policy.act(obs, mask)
-                    assert 0 <= a < UNIFIED_ACTION_SIZE and mask[a] == 1, f"illegal action {a}"
-                    # Track action type for quality stats
-                    if a >= as_.SWITCH_BASE and a < as_.SWITCH_BASE + 6:
-                        battle_switches += 1
+                try:
+                    # Both sides make their OWN server-validated decision inside step():
+                    # P1 = the trainee policy, P2 = the opponent. If a pick is illegal the
+                    # env re-asks the agent (and applies a small penalty) until it is legal,
+                    # so the (action, logprob) pairs exposed on e.last_self / e.last_opp are
+                    # always consistent for PPO.
+                    new_obs, r, done = e.step(policy, opponent)
+                    ls = e.last_self
+                    if ls.get("made"):
+                        a = int(ls["a"])
+                        # Track action type for quality stats
+                        if as_.SWITCH_BASE <= a < as_.SWITCH_BASE + 6:
+                            battle_switches += 1
+                            battle_switch_slots[a - as_.SWITCH_BASE] += 1
+                        else:
+                            battle_moves += 1
+                        illegal_window += int(ls.get("ill") or 0)
+                        policy.store(e.id, ls["obs"], a, ls["lp"], r, done, ls["mask"], ls.get("v", 0.0))
                     else:
-                        battle_moves += 1
-                    new_obs, r, done = e.step(a, opponent)
-                    policy.store(e.id, obs, a, lp, r, done, mask, v)
+                        # Showdown 'wait' request: P1 made no decision; record the step pass.
+                        policy.store_pass(e.id, obs, r, policy.value(obs), done)
+                except Exception as exc:
+                    log.error("env %d: step crashed: %s -- skipping this env slot", e.id, str(exc)[:200])
+                    skipped_envs.add(e.id)
+                    continue
                 # Both-sides self-play: also store the opponent's transition when the
                 # opponent is the shared policy (--opponent live); no-op otherwise.
                 _store_opponent_side(e, policy, opponent, done)
@@ -315,24 +468,52 @@ def run(args) -> None:
                     # Log per-battle quality
                     total_actions = battle_moves + battle_switches
                     sw_pct = (battle_switches / total_actions * 100) if total_actions > 0 else 0
+                    # Switch-slot concentration: "always switch to the same mon" (a mask/
+                    # forced-switch bug) shows up as ~100% of switches hitting ONE slot. A
+                    # healthy policy spreads across the bench, so a dominant slot is a flag.
+                    sw_conc, sw_ent = 0.0, 0.0
+                    tot_sw = sum(battle_switch_slots)
+                    if tot_sw > 0:
+                        ps = [x / tot_sw for x in battle_switch_slots if x > 0]
+                        sw_conc = max(ps)
+                        sw_ent = -sum(p * math.log2(p) for p in ps)
                     recent_battles.append({
                         "b": battles_done, "fmt": key, "turns": battle_turns,
                         "mv": battle_moves, "sw": battle_switches, "sw%": round(sw_pct),
+                        "sw_conc": round(sw_conc, 3), "sw_ent": round(sw_ent, 3),
                         "forfeit": battle_forfeits > 0 and (b1_alive >= 5 or b2_alive >= 5),
                         "result": "W" if r > 0 else ("L" if r < 0 else "D")
                     })
                     # Reset per-battle counters
                     battle_moves = 0
                     battle_switches = 0
+                    battle_switch_slots = [0] * 6
                     battle_turns = 0
+
+                    # --- LOUD FORFEIT FLAG: if this happened, it's a BUG ---
+                    is_forfeit = recent_battles[-1]["forfeit"]
+                    if is_forfeit:
+                        log.warning("!!! FORFEIT DETECTED [battle %d, %s] -- bot conceded. THIS SHOULD NOT HAPPEN. Check env timeout/switch logic.", battles_done, key)
                     
-                    # re-arm immediately
-                    cur_obs[e.id] = e.reset()
+                    # re-arm immediately (with safety net)
+                    obs, ok = safe_reset(e)
+                    if not ok:
+                        skipped_envs.add(e.id)
+                        continue
+                    cur_obs[e.id] = obs
                     cur_mask[e.id] = e.last_mask
                     if battles_done % args.log_every == 0:
                         log_stats("battles")
+                        illegal_window = 0
                     if buffer_size() >= args.buffer_size:
                         break
+
+            # --- safety: every env slot dropped -> stop (avoids an infinite no-op
+            #     loop now that a live-battle re-arm ABORTS instead of forfeiting) ---
+            if len(skipped_envs) >= len(envs):
+                log.error("all %d env slots were dropped -- aborting the run "
+                          "(see LIVE-BATTLE AT RE-ARM warnings above)", len(envs))
+                break
 
             # --- update policy when buffer is full ---
             if buffer_size() >= args.buffer_size:
@@ -404,16 +585,17 @@ def smoke(args) -> None:
     done = False
     wait_steps = 0
     while not done and steps < 200:
-        if int(cur_mask.sum()) == 0:
-            # Showdown 'wait' request: nothing to decide; just advance the battle.
-            new_obs, r, done = te.step(0, "random")
+        # Both sides decide inside step() (P1 = policy, P2 = random). Re-ask + small
+        # penalty for an illegal pick happen there; the decision is on te.last_self.
+        new_obs, r, done = te.step(policy, "random")
+        ls = te.last_self
+        if ls.get("made"):
+            a = int(ls["a"])
+            policy.store(0, ls["obs"], a, ls["lp"], r, done, ls["mask"], ls.get("v", 0.0))
+        else:
+            # Showdown 'wait' request: P1 made no decision; record the step pass.
             policy.store_pass(0, cur_obs, r, policy.value(cur_obs), done)
             wait_steps += 1
-        else:
-            a, lp, v = policy.act(cur_obs, cur_mask)
-            assert 0 <= a < UNIFIED_ACTION_SIZE and cur_mask[a] == 1, f"illegal action {a}"
-            new_obs, r, done = te.step(a, "random")
-            policy.store(0, cur_obs, a, lp, r, done, cur_mask, v)
         total_reward += r
         cur_obs, cur_mask = new_obs, te.last_mask
         steps += 1

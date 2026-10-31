@@ -62,20 +62,15 @@ def _entry(battle_format: str) -> Dict:
 def _base_species(species: str) -> str:
     """Normalize a species name to its base form for Species Clause dedup.
 
-    Handles form variants: Lopunny-Mega -> lopunny, Landorus-Therian -> landorus,
-    Greninja-Bond -> greninja, Kyurem-Black -> kyurem, etc.
-    Also handles Hisuian/Regional forms: HisuianZigzagoon -> hisuianzigzagoon (kept
-    distinct since it IS a different base species).
+    Safest approach: strip everything after the first dash. This catches ALL form
+    variants (Mega, Therian, Bond, Zygarde-10, Hoopa-Unbound, Kyurem-Black, etc.).
+    It may over-dedupe regional forms (Hisuian Zigzagoon vs Zigzagoon), but that's
+    a conservative direction -- we never create an illegal team, we just exclude a
+    rare legal combination. Far safer than missing a form and getting rejected.
     """
     s = species.strip().lower()
-    # Strip form suffixes that the Species Clause treats as the same base mon
-    # (Mega, Therian, Bond, Black, White, Shadow, Primal, Gmax, etc.)
-    for suffix in ("-mega", "-therian", "-bond", "-black", "-white", "-shadow",
-                   "-primal", "-gmax", "-origin", "-battle-bond"):
-        if s.endswith(suffix):
-            return s[: -len(suffix)]
-    # Hisuian/Regional forms are DIFFERENT species (keep them)
-    # E.g. HisuianZigzagoon stays as hisuianzigzagoon
+    if "-" in s:
+        s = s.split("-", 1)[0]
     return s
 
 

@@ -37,11 +37,11 @@ TRAIN_PY = os.path.join(HERE, "train.py")
 STATS_PATH = os.path.join(HERE, "checkpoints", "stats.jsonl")
 LOG_PATH = os.path.join(HERE, "run_gpu.log")
 
-# 10-server wide self-play from random init (~1 GB net, no imitation warm-start).
+# 5-server wide self-play from random init (~1 GB net, no imitation warm-start).
 # CLI extras are appended after these, so a quick test can override any of them.
 TRAIN_ARGS = [
     "--formats", "gen6ou,gen6ru,gen6uu,gen7ou,gen7ru,gen7uu,gen8ou,gen8ru,gen8uu,gen9ou,gen9ru,gen9uu",
-    "--num-envs", "30",
+    "--num-envs", "10",
     "--opponent", "live",
     "--buffer-size", "2048",
     "--minibatch", "512",
@@ -52,7 +52,7 @@ TRAIN_ARGS = [
     "--hidden", "1024,2048,4096,4096,2048,1024",
     "--server-ports", "8000,8001,8002,8003,8004,8005,8006,8007,8008,8009",
     "--team-mode", "random",
-    "--log-every", "50",
+    "--log-every", "20",
 ]
 
 

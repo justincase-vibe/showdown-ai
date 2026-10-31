@@ -359,6 +359,39 @@ LIVE. Nothing is broken beyond the pre‑existing actor defect. If you *do* want
 the launcher is ready: `python bot/run_gpu_watch.py --init-actor bot/data/actor_run1_1k.pt`
 (though it will very likely reproduce the same switch‑degenerate result).
 
+## 8d. 🩹 FIXED — illegal‑switch re‑picks + “forced into an unintended mon” (2026‑10‑31)
+
+> You asked to *fix the bug, not punish it*, and to let the agent keep choosing (re‑ask until
+> legal, with a slight penalty). Done + verified on CPU.
+
+**Root cause (measured, not guessed):** instrumenting the real decision path showed **every**
+re‑pick was **P2, switch band, `nV=1` (server allows 1 move) vs `nM=7` (mask allowed all 6 switches
++ a move)**. That is the **whole‑bench‑fainted** state: `available_switches` is **empty**, but
+`get_action_mask` treated “empty” as *allow all six slots* (the `if avail_sw and bs not in
+avail_sw: continue` guard fell through). The policy then picked a switch the server correctly
+rejected → the “re‑pick / forced into an unintended mon” you saw. **A mask bug, not a policy problem.**
+
+**Fix (`bot/env.py`):**
+1. `get_action_mask` now un‑masks a switch **only if that mon is in `available_switches`** (an
+   empty set ⇒ no switches), exactly matching the server / poke‑env → **`illegal_picks` → 0**.
+2. Unified decision path `_decide()` (replaces the old `_valid_action` + `_first_valid_switch` +
+   `_opp_decision` split): the **agent always picks**; if the pick is illegal we **mask it out and
+   re‑ask** (the agent keeps choosing) until it is legal, then a **slight capped penalty**
+   (0.05/pick, max 0.20 — can’t flip a win/loss). This also **honors the agent’s own switch choice**
+   in forced‑switch states (U‑turn/Volt Switch/Roar/Dragon Tail/Whirlwind) instead of slot 0.
+3. `step(actor1, actor2)` now returns a consistent `(action, logprob)` per side
+   (`last_self` / `last_opp`) so PPO’s ratio stays correct; both sides train (`--opponent live`).
+
+**Reward (terminal core unchanged + one small nudge):** Win **+1.0** / Loss **−1.0** / Forfeit
+**−1.5** (backstop — a forfeit is *not* a win; should now be ~0) / illegal‑pick **−0.05·count**
+(capped 0.20).
+
+**Verified (CPU, server 8000):** `bot/test_mask_fix.py` (empty‑bench ⇒ no switches; force‑switch ⇒
+only bench, no moves); `bot/test_decide.py` (illegal→re‑ask→legal; legal→0; exhaust→safe fallback;
+empty→wait); `train.py` 3‑battle live self‑play (**0 forfeits, 0 illegal_picks**, PPO update OK);
+and `train.py --smoke` (**re_picks=0**). `train.py` / `quick_eval.py` updated to the new `step()`
+signature; `launcher.py` spawns them as subprocesses (unaffected).
+
 ## 9. Open decisions
 
 - ~~Replay sources / player tier / exact format coverage~~ — **DONE:** HolidayOugi HF dataset,

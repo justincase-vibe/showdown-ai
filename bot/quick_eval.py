@@ -46,29 +46,28 @@ def play_battle(te, policy, bot_seat="p1", hidden=(1024, 2048, 4096, 4096, 2048,
     as_ = get_action_space()
     
     while not te.done and turns < 300:
-        legal = np.flatnonzero(mask) if mask is not None else np.array([])
-        if len(legal) == 0:
-            new_obs, r, done = te.step(0, opp)
-        elif bot_seat == "p1":
-            a, lp, v = policy.act(obs, mask)
-            # Classify action
-            if a >= as_.SWITCH_BASE and a < as_.SWITCH_BASE + 6:
+        # Both sides decide inside step(). The bot is P1 (bot_seat='p1') or P2, the other
+        # seat is a random baseline. The bot's decision is on te.last_self / te.last_opp.
+        if bot_seat == "p1":
+            new_obs, r, done = te.step(policy, "random")
+            bot_dec, opp_dec = te.last_self, te.last_opp
+        else:
+            new_obs, r, done = te.step("random", policy)
+            bot_dec, opp_dec = te.last_opp, te.last_self
+        if bot_dec.get("made"):
+            a = int(bot_dec["a"])
+            if as_.SWITCH_BASE <= a < as_.SWITCH_BASE + 6:
                 bot_switches += 1
             elif a >= as_.TRANSFORM_BASE:
                 bot_transforms += 1
             else:
                 bot_moves += 1
-            new_obs, r, done = te.step(a, opp)
-        else:
-            a1 = int(rng.choice(legal))
-            if a1 >= as_.SWITCH_BASE and a1 < as_.SWITCH_BASE + 6:
+        if opp_dec.get("made"):
+            a = int(opp_dec["a"])
+            if as_.SWITCH_BASE <= a < as_.SWITCH_BASE + 6:
                 opp_switches += 1
-            elif a1 >= as_.TRANSFORM_BASE:
-                pass
             else:
                 opp_moves += 1
-            new_obs, r, done = te.step(a1, opp)
-        
         obs = new_obs
         mask = te.last_mask
         turns += 1
@@ -150,7 +149,7 @@ def main():
         from poke_env.ps_client import ServerConfiguration
         cfg = ServerConfiguration(
             websocket_url=f"ws://localhost:{port}/showdown/websocket",
-            authentication_url="https://play.pokemonshowdown.com/action.php?",
+            authentication_url=f"http://localhost:{port}/action.php?",
         )
         team = RandomTeamBuilder(battle_format=fmt, seed=i)
         env = ShowdownEnv(battle_format=fmt, team=team, server_configuration=cfg,

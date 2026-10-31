@@ -20,7 +20,7 @@ drives it directly.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 from gymnasium import spaces
@@ -116,11 +116,28 @@ class ShowdownEnv(SinglesEnv):
             return _embed_raw(battle)
 
     # ---------------------------------------------------------------- reward
+    # Simple terminal-only reward. Zero-sum by construction: a win on one side is the
+    # loss on the other. No per-step shaping (trading is a valid strategy, switch count
+    # doesn't matter -- only the outcome does).
+    #
+    #   Win:  +1.0
+    #   Loss: -1.0
+    #
+    # There is deliberately NO forfeit reward. A "forfeit" in this stack is not an action
+    # the policy can take (the 963 space is moves+switches+transforms only) -- it is
+    # poke-env sending /forfeit when a battle is reset()/close()d before it finished, i.e.
+    # a harness artifact, not a learned choice. We therefore treat a forfeited battle as
+    # an ordinary loss (our team did not win), which keeps the reward zero-sum and stops
+    # us from "shaping" a button the net never had. If your stats show forfeits, that is a
+    # BUG to fix in the harness (train.py), not a reward to tune.
+    REWARD_WIN = 1.0
+    REWARD_LOSS = -1.0
+
     def calc_reward(self, battle: Any) -> float:
         if battle.won:
-            return 1.0
+            return self.REWARD_WIN
         if battle.lost:
-            return -1.0
+            return self.REWARD_LOSS
         return 0.0
 
     # ------------------------------------------------------- unified action mask
@@ -175,18 +192,23 @@ class ShowdownEnv(SinglesEnv):
                 if t is not None:
                     mask[t] = True
 
-        # --- switches (alive + available; always allowed unless trapped) ---
+        # --- switches (only the ones the server says are available) ---
+        # ROOT-CAUSE FIX: unmask a switch ONLY if that mon is in `available_switches`.
+        # The old code used `if avail_sw and bs not in avail_sw: continue`, so an EMPTY
+        # available_switches (whole bench fainted / no switchable mon) fell through and
+        # allowed ALL six slots. The policy would then pick a switch the server rejects
+        # -> the "re-pick / forced into an unintended mon" bug. An empty set must mean
+        # "no switches", exactly like poke-env's own get_action_mask.
         if not bool(getattr(battle, "trapped", False)):
             try:
-                avail_sw = [getattr(p, "base_species", None)
-                            for p in (getattr(battle, "available_switches", None) or [])]
+                avail_sw = {getattr(p, "base_species", None)
+                            for p in (getattr(battle, "available_switches", None) or [])}
+                avail_sw.discard(None)
             except Exception:
-                avail_sw = []
+                avail_sw = set()
             for slot, mon in enumerate(team):
                 bs = getattr(mon, "base_species", None)
-                if bs is None:
-                    continue
-                if avail_sw and bs not in avail_sw:
+                if bs is None or bs not in avail_sw:
                     continue
                 sid = as_.switch_id(slot)
                 if sid is not None:
@@ -297,10 +319,14 @@ class TraineeEnv:
         self.obs2: Optional[np.ndarray] = None
         self.mask2: Optional[np.ndarray] = None
         self.done = True
-        self.re_picks = 0  # actions re-validated against live valid_orders (stale-mask guard)
-        # Both-sides self-play: P2's decision, captured in step() so a SHARED policy
-        # can learn from the opponent side too (zero-sum reward). See _opp_decision.
-        self.last_opp: Optional[dict] = None
+        self.re_picks = 0  # == illegal picks the policy made and we had to re-ask about
+        self.illegal_total = 0  # lifetime illegal picks (for logging)
+        self._ill1 = 0  # P1 illegal-pick count this episode (logging only)
+        self._ill2 = 0  # P2 illegal-pick count this episode (logging only)
+        # Both-sides self-play: each side's decision, captured in step() so a SHARED
+        # policy can learn from BOTH sides (zero-sum reward). See _decide.
+        self.last_self: Optional[dict] = None  # P1 (trainee) decision
+        self.last_opp: Optional[dict] = None   # P2 (opponent) decision
         self.last_opp_rew: float = 0.0
 
     def reset(self) -> np.ndarray:
@@ -327,39 +353,109 @@ class TraineeEnv:
         self.obs2 = obs[self.a2]["observation"]
         self.mask2 = obs[self.a2]["action_mask"]
         self.done = False
+        self._ill1 = 0
+        self._ill2 = 0
         return self.last_obs
 
-    def step(self, a1_action: int, opponent) -> Tuple[np.ndarray, float, bool]:
+    # A pick the server rejects (rare, only if the mask is momentarily stale) is NOT
+    # penalized in reward -- terminal rewards stay purely win/loss (+1/-1). We simply
+    # mask that pick out and ASK THE AGENT AGAIN until it emits a legal one, so its own
+    # choice is honored and forced-switch states (U-turn / Volt Switch / Roar / Dragon
+    # Tail / Whirlwind) stay in the training signal. The mask should match the server,
+    # so re-asks should fire ~0 times; the per-episode counts are kept for logging only.
+    MAX_REASK = 8
+
+    def _decide(self, obs, mask, actor, battle, max_tries: int = MAX_REASK):
+        """Have the agent pick a SERVER-LEGAL action, honoring its own choice.
+
+        * If the mask is empty (Showdown 'wait'), return None (caller sends the -2 pass).
+        * Otherwise sample from ``actor`` (a policy, or 'random') under the current mask
+          and check the resulting order against the server. If it is legal, use it.
+          If it is illegal, mask that pick out and ASK AGAIN (the agent keeps choosing)
+          until it is legal (the count is logged only, with no reward effect). This is
+          what makes forced-switch states (U-turn / Volt Switch / Roar / Dragon Tail /
+          Whirlwind) work without shoving an arbitrary mon in: the agent's actual pick is
+          used whenever it is legal.
+        * If we exhaust re-asks (shouldn't happen once the mask is exact), fall back to a
+          server-valid order so the battle can never stall/forfeit.
+
+        Returns ``(action|None, logprob, value, n_illegal)`` -- a consistent
+        ``(action, logprob)`` pair (the logprob is from the draw that produced the action),
+        which is what keeps PPO's importance ratio correct.
+        """
+        m = np.array(mask, dtype=bool).copy() if mask is not None else np.zeros(UNIFIED_ACTION_SIZE, dtype=bool)
+        if int(m.sum()) == 0:
+            return None, 0.0, 0.0, 0  # 'wait': no decision this turn
+        n_illegal = 0
+        for _ in range(max_tries):
+            if actor is None or actor == "random":
+                legal = np.flatnonzero(m)
+                a = int(legal[np.random.randint(len(legal))]) if len(legal) else 0
+                lp = 0.0
+                v = 0.0
+            else:
+                a, lp, v = actor.act(obs, m)
+                a = int(a)
+            if _pe_valid(_to_pe_action(a, battle), battle):
+                return a, float(lp), float(v), n_illegal
+            # Illegal pick: the agent gets to choose again (this pick is masked out).
+            m[a] = False
+            n_illegal += 1
+            if int(m.sum()) == 0:
+                break
+        # Exhausted re-asks: take a server-valid order so the battle cannot stall.
+        a = self._first_valid_from_orders(battle)
+        return a, 0.0, 0.0, n_illegal + 1
+
+    @staticmethod
+    def _first_valid_from_orders(battle: Any) -> int:
+        """Last-resort: first action the server itself lists as valid (valid_orders)."""
+        try:
+            for order in battle.valid_orders:
+                a = _order_to_our_action(order, battle)
+                if a is not None:
+                    return int(a)
+        except Exception:
+            pass
+        return get_action_space().SWITCH_BASE  # absolute fallback
+
+    def step(self, actor1, actor2) -> Tuple[np.ndarray, float, bool]:
+        """Advance one battle. ``actor1``/``actor2`` are each a policy (with ``.act``) or
+        the string/None 'random'. Both sides make their own, server-validated decision
+        (see ``_decide``); a SHARED policy (``--opponent live``) plays both sides and both
+        transitions train the model (zero-sum reward).
+        """
         env = self.env
-        # poke-env's action_to_order calls ``action.item()``, so it needs a numpy scalar,
-        # not a plain Python int (a plain int raises AttributeError, which its
-        # ``except ValueError`` does NOT catch).
-        #
-        # CRITICAL: our actions live in the 963-space (move-identity); poke-env expects
-        # its own slot-based ints. Translate *before* env.step -- passing a raw 963 id
-        # straight through would index the wrong move (or a switch/transform) silently.
-        #
-        # Both-sides: capture P2's decision (state it decided from + action/logprob/value)
-        # BEFORE the post-step overwrite of self.obs2/self.mask2 below.
-        obs2_pre = self.obs2
-        mask2_pre = self.mask2
-        a2 = lp2 = v2 = None
-        actions = {}
-        if env.agent1_to_move:
-            if env.battle1.wait:
-                actions[self.a1] = np.int64(-2)
-            else:
-                a1 = self._valid_action(a1_action, env.battle1, self.last_mask)
+        # Capture each side's decision state BEFORE the post-step overwrite of obs/mask.
+        obs1_pre, mask1_pre = self.last_obs, self.last_mask
+        obs2_pre, mask2_pre = self.obs2, self.mask2
+        actions: dict = {}
+        a1 = lp1 = v1 = ill1 = None
+        a2 = lp2 = v2 = ill2 = None
+
+        # --- P1 (trainee) ---
+        if env.agent1_to_move and self.last_mask is not None and int(np.sum(self.last_mask)) > 0:
+            a1, lp1, v1, ill1 = self._decide(obs1_pre, self.last_mask, actor1, env.battle1)
+            if a1 is not None:
+                # numpy int64: poke-env's action_to_order calls ``action.item()``.
                 actions[self.a1] = np.int64(_to_pe_action(a1, env.battle1))
-        if env.agent2_to_move:
-            if env.battle2.wait:
-                actions[self.a2] = np.int64(-2)
-            else:
-                a2, lp2, v2 = self._opp_decision(opponent)
-                a2v = self._valid_action(a2, env.battle2, self.mask2)
-                actions[self.a2] = np.int64(_to_pe_action(a2v, env.battle2))
+        # --- P2 (opponent) ---
+        if env.agent2_to_move and self.mask2 is not None and int(np.sum(self.mask2)) > 0:
+            a2, lp2, v2, ill2 = self._decide(obs2_pre, self.mask2, actor2, env.battle2)
+            if a2 is not None:
+                actions[self.a2] = np.int64(_to_pe_action(a2, env.battle2))
+
+        # Not our turn to move (Showdown 'wait'): send the default pass order.
         actions.setdefault(self.a1, np.int64(-2))
         actions.setdefault(self.a2, np.int64(-2))
+
+        # Illegal-pick accounting (drives the slight terminal penalty + logging).
+        ill1 = int(ill1) if ill1 is not None else 0
+        ill2 = int(ill2) if ill2 is not None else 0
+        self.re_picks += ill1 + ill2
+        self.illegal_total += ill1 + ill2
+        self._ill1 += ill1
+        self._ill2 += ill2
 
         new_obs, rew, term, trunc, _info = env.step(actions)
         self.last_obs = new_obs[self.a1]["observation"]
@@ -370,66 +466,27 @@ class TraineeEnv:
         reward2 = float(rew[self.a2])  # zero-sum: = -reward at a terminal win/loss
         done = bool(term[self.a1]) or bool(trunc[self.a1])
         self.done = done
-        # Expose P2's decision so a shared policy can learn BOTH sides. obs2_pre is the
-        # state P2 decided from (pre-step); reward2 is P2's zero-sum reward.
+
+        # Expose each side's decision so a shared policy can learn BOTH sides. Each dict
+        # holds a consistent (action, logprob, value) pair under the mask that produced it.
+        self.last_self = {
+            "a": a1,
+            "lp": float(lp1) if lp1 is not None else 0.0,
+            "v": float(v1) if v1 is not None else 0.0,
+            "obs": obs1_pre, "mask": mask1_pre,
+            "ill": int(ill1) if ill1 is not None else 0,
+            "made": a1 is not None,
+        }
         self.last_opp = {
-            "a": int(a2) if a2 is not None else None,
+            "a": a2,
             "lp": float(lp2) if lp2 is not None else 0.0,
             "v": float(v2) if v2 is not None else 0.0,
-            "obs": obs2_pre,
-            "mask": mask2_pre,
+            "obs": obs2_pre, "mask": mask2_pre,
+            "ill": int(ill2) if ill2 is not None else 0,
             "made": a2 is not None,
         }
         self.last_opp_rew = reward2
         return self.last_obs, reward, done
-
-    def _valid_action(self, action: int, battle: Any, mask: Optional[np.ndarray]) -> int:
-        """Ensure the action's poke-env order is valid RIGHT NOW; return our action id.
-
-        Our mask is a snapshot of the last request; by the time we send, the
-        server's valid orders may be narrower (e.g. the active just got Taunted ->
-        moves only, so switch orders are rejected). poke-env (strict=False) would
-        then silently execute a random legal move that we did NOT store, corrupting
-        the action/transition pairing. Instead: if the chosen conversion is invalid,
-        re-pick the first masked action whose conversion IS valid (counted in
-        ``re_picks``) so stored action == executed action.
-        """
-        if _pe_valid(_to_pe_action(action, battle), battle):
-            return action
-        if mask is not None and int(np.sum(mask)) > 0:
-            for j in np.flatnonzero(mask):
-                j = int(j)
-                if j == action:
-                    continue
-                if _pe_valid(_to_pe_action(j, battle), battle):
-                    self.re_picks += 1
-                    return j
-        # Last resort: the server's first valid order mapped back into our space.
-        try:
-            a = _order_to_our_action(battle.valid_orders[0], battle)
-            self.re_picks += 1
-            return int(a) if a is not None else 0
-        except Exception:
-            self.re_picks += 1
-            return 0
-
-    def _opp_decision(self, opponent) -> Tuple[int, float, float]:
-        """Opponent (P2) decision -> ``(action, logprob, value)``.
-
-        Returns the policy's full decision (so a shared self-play policy can learn from
-        P2's transition) or a dummy for the 'random' baseline. An all-zero mask is a
-        Showdown 'wait' request: nothing to decide this turn, so return a dummy WITHOUT
-        consulting a policy (MaskedPPO.act rightly refuses empty masks).
-        """
-        if self.mask2 is not None and int(np.sum(self.mask2)) == 0:
-            return 0, 0.0, 0.0
-        if opponent is None or opponent == "random":
-            legal = np.flatnonzero(self.mask2)
-            if len(legal) == 0:
-                legal = np.array([0])
-            return int(np.random.choice(legal)), 0.0, 0.0
-        a, lp, v = opponent.act(self.obs2, self.mask2)
-        return int(a), float(lp), float(v)
 
     def close(self):
         try:
