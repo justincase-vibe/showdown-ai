@@ -390,6 +390,46 @@ def run(args) -> None:
                     return None, False
         return None, False
 
+    def _drain(max_steps_per_env: int = 2000, total_budget_s: float = 300.0) -> None:
+        """Play out any battle that is still in progress so teardown (close()) has
+        nothing live to abandon -- the root-cause fix for the spurious 'X forfeited'
+        replays that appeared one-per-env at the end of every run.
+
+        poke-env's close() forfeits any battle that is not finished yet; that was the
+        sole source of the spurious forfeits (the last in-progress battle on each env).
+        Rather than forfeit those battles (a harness artifact, not a policy choice), we
+        let them finish naturally: step each live env to completion, storing the
+        transitions so the finished battles are not wasted. Bounded by a per-env step
+        cap and a total time budget; anything still live afterwards is abandoned
+        cleanly by ShowdownEnv.close() (no forfeit, no hang).
+        """
+        active = [e for e in envs if e.id not in skipped_envs and not e.done]
+        if not active:
+            return
+        log.info("draining %d in-progress battle(s) to a clean finish before teardown...", len(active))
+        t0 = time.time()
+        for e in active:
+            steps = 0
+            try:
+                while not e.done and steps < max_steps_per_env and (time.time() - t0) < total_budget_s:
+                    obs_before = e.last_obs
+                    new_obs, r, done = e.step(policy, opponent)
+                    ls = e.last_self
+                    if ls.get("made"):
+                        policy.store(e.id, ls["obs"], int(ls["a"]), ls["lp"], r, done, ls["mask"], ls.get("v", 0.0))
+                    else:
+                        policy.store_pass(e.id, obs_before, r, policy.value(obs_before), done)
+                    _store_opponent_side(e, policy, opponent, done)
+                    steps += 1
+                    if done:
+                        break
+            except Exception as exc:
+                log.warning("drain: env %d stopped early (%s); close() will abandon it cleanly",
+                            e.id, str(exc)[:140])
+            log.info("drain: env %d %s after %d step(s)", e.id,
+                     "finished" if e.done else "still live (abandoning)", steps)
+        log.info("drain complete in %.1fs", time.time() - t0)
+
     # --- initial reset with safety net ---
     skipped_envs: set = set()
     for e in envs:
@@ -495,13 +535,19 @@ def run(args) -> None:
                     if is_forfeit:
                         log.warning("!!! FORFEIT DETECTED [battle %d, %s] -- bot conceded. THIS SHOULD NOT HAPPEN. Check env timeout/switch logic.", battles_done, key)
                     
-                    # re-arm immediately (with safety net)
-                    obs, ok = safe_reset(e)
-                    if not ok:
-                        skipped_envs.add(e.id)
-                        continue
-                    cur_obs[e.id] = obs
-                    cur_mask[e.id] = e.last_mask
+                    # Re-arm ONLY if we still need battles. Once we hit max_battles we
+                    # must NOT start a new battle here -- that would leave it in progress
+                    # at teardown (the old source of spurious 'forfeit' replays). The
+                    # drain step below finishes the envs that are still mid-battle.
+                    if battles_done < args.max_battles:
+                        obs, ok = safe_reset(e)
+                        if not ok:
+                            skipped_envs.add(e.id)
+                            continue
+                        cur_obs[e.id] = obs
+                        cur_mask[e.id] = e.last_mask
+                    else:
+                        e.done = True  # target reached; leave this env finished
                     if battles_done % args.log_every == 0:
                         log_stats("battles")
                         illegal_window = 0
@@ -528,6 +574,24 @@ def run(args) -> None:
                     "dt": round(time.time() - t0, 3),
                     "upstats": {k: round(v, 5) for k, v in (upstats or {}).items()},
                 })
+
+        # --- Graceful teardown (root-cause fix for spurious 'forfeit' replays): ---
+        # Play out any battle still in progress so close() has nothing live to abandon.
+        # Without this, the old close() would forfeit the last in-progress battle on each
+        # env -- exactly the 'X forfeited / win Y' replays we saw one-per-env at run end.
+        _drain()
+
+        # Capture the drained battles' transitions (they flushed to the buffer on done).
+        if buffer_size() > 0:
+            t0 = time.time()
+            upstats = policy.update()
+            policy.save(os.path.join(args.ckpt_dir, "ppo.pt"))
+            log_stats("final-update", {
+                "update": policy.n_updates,
+                "dt": round(time.time() - t0, 3),
+                "upstats": {k: round(v, 5) for k, v in (upstats or {}).items()},
+            })
+        log_stats("run-end", {"battles": battles_done, "elapsed_s": round(time.time() - start, 1)})
     except KeyboardInterrupt:
         log.info("interrupted -- saving checkpoint")
         policy.save(os.path.join(args.ckpt_dir, "ppo.pt"))

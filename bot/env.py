@@ -219,6 +219,42 @@ class ShowdownEnv(SinglesEnv):
     def get_action_space_size(gen: int) -> int:
         return UNIFIED_ACTION_SIZE
 
+    # ------------------------------------------------------------------ teardown
+    def close(self, force: bool = True, wait: bool = True):
+        """Tear down WITHOUT ever sending a forfeit (root-cause fix).
+
+        poke-env's ``PokeEnv.close()`` does two things for a battle that is not
+        finished yet: it sends a ``ForfeitBattleOrder`` (the *sole* source of the
+        spurious 'X forfeited / win Y' replays -- one per env, at the end of every
+        run), and it then blocks on ``_challenge_task.result()``, which only completes
+        *because* that forfeit ended the battle.
+
+        A forfeit is a harness artifact, not an action the policy can take (our 963
+        space is moves + switches + transforms only), so we must never emit one. Instead
+        we abandon the live battle cleanly: no forfeit, no blocking wait (the challenge
+        task is still pending for a live battle), and no ``reset_battles()`` (it raises
+        while a battle is live). We just drop the references and drain the queues; the
+        abandoned local self-play battle is cancelled with the event loop at process
+        exit. When a battle has genuinely finished (the normal end-of-run path after
+        draining), ``reset_battles()`` runs safely and the queue drain is a no-op.
+        """
+        if self._challenge_task is not None and self._challenge_task.done():
+            self.reset_battles()  # only safe once the battle has actually finished
+        self._challenge_task = None
+        self.battle1 = None
+        self.battle2 = None
+        self.agent1.battle = None
+        self.agent2.battle = None
+        for q in (
+            self.agent1.order_queue, self.agent2.order_queue,
+            self.agent1.battle_queue, self.agent2.battle_queue,
+        ):
+            try:
+                while not q.empty():
+                    q.get()
+            except Exception:
+                pass
+
 
 # ---------------------------------------------------------------------------
 # 963-space (move-identity) action  ->  poke-env slot-based int

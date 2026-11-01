@@ -392,6 +392,47 @@ empty→wait); `train.py` 3‑battle live self‑play (**0 forfeits, 0 illegal_p
 and `train.py --smoke` (**re_picks=0**). `train.py` / `quick_eval.py` updated to the new `step()`
 signature; `launcher.py` spawns them as subprocesses (unaffected).
 
+## 8e. \ud83d\udea9 FIXED \u2014 spurious \"forfeit\" replays at run\u2011end (found 2026\u201111\u201101, root\u2011caused + fixed)
+
+> You found forfeits in the last\u20115 replays of the 20\u2011battle run (battles 1852/1855/1856/1857),
+> incl. a **turn\u20111** one, and said *\"we did not fix the bugs \u2026 please please fix it.\"* It was
+> **not** a U\u2011turn bug, **not** a policy choice, and **not** the `reset()`/`put_nowait` race the
+> earlier handoff was chasing. It was a **teardown** bug.
+
+**Root cause (proven, not hypothesized):** `poke_env`'s `PokeEnv.close()` **forfeits every battle
+that isn't finished yet** (`if self.battle1 and not self.battle1.finished \u2192 ForfeitBattleOrder`),
+then blocks on `_challenge_task.result()`, which only unblocks *because* that forfeit ended the
+battle. The run loop hits `max_battles` with each env holding a **fresh in\u2011progress battle** (re\u2011armed
+the instant one finishes); the `finally:` block calls `close()` on all envs \u2192 each in\u2011progress battle
+gets a `/forfeit` \u2192 the server writes \"X forfeited / win Y\" into those replays. **One spurious forfeit
+per env, at run end, every time.**
+
+**Evidence that nails it:** the run log shows `forfeits: 0` on *every* stats line and the `safe_reset`
+guard *always* read `finished=True` (so `reset()` was never the culprit); the 4 forfeit replays are
+exactly the battles **not** followed by a `safe_reset ENTER` (still live when `done. battles=20` fired);
+1856/1857 forfeit on **turn 1\u20132 with no faints** (brand\u2011new in\u2011progress battles); the \"U\u2011turn\" in 1855
+was just the last action before the run ended.
+
+**Fix (root cause, keeps poke\u2011env; files `bot/env.py` + `bot/train.py`, not yet committed):**
+1. **`ShowdownEnv.close()` override** \u2014 **never sends a forfeit**: no `/forfeit`, no blocking wait, no
+   `reset_battles()` raise; it abandons a live battle cleanly (drop refs + drain queues). A forfeit is
+   not an action the 963 policy can take, so this is correct by design \u2014 the *guarantee*.
+2. **`train.py` drain** \u2014 after `max_battles`, play out any in\u2011progress battle to a natural win/loss
+   (bounded by step + time caps), store its transitions, then one final PPO update captures them. Also
+   stop *starting* a new battle once the target is reached. This is the *proper* graceful end.
+
+**Verified (real battles, server 8000, CPU):** 12\u2011battle / 4\u2011env / mixed gen7ou+gen7randombattle /
+`--opponent live` \u2192 log shows `draining 3 in\u2011progress battle(s)\u2026 env 1 finished after 12 / env 2 after 7
+/ env 3 after 94 steps`, clean exit; **new replays 1922\u20131936 all have `forfeited`=0** and each ends
+`|win|\u2026`. `train.py --smoke` PASSES. Only residual log noise is a **benign** poke\u2011env parse warning on
+**Pursuit** (hits the switching mon) \u2014 does not affect correctness.
+
+**If it regresses:** look at (a) any code path that calls `close()` while a battle is live, or (b) a new
+`ForfeitBattleOrder` source. Re\u2011check = run a small multi\u2011env batch and grep the newest replays for
+`forfeited` (expect 0). Note: current reward is terminal\u2011only **+1 win / \u22121 loss** (no forfeit reward) \u2014
+a forfeit is a *harness artifact*, not a reward to tune. *(\u00a78d's \"Forfeit \u22121.5\" line is stale; the code
+is +1/\u22121 only.)*
+
 ## 9. Open decisions
 
 - ~~Replay sources / player tier / exact format coverage~~ — **DONE:** HolidayOugi HF dataset,
