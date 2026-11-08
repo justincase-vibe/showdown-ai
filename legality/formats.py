@@ -11,6 +11,7 @@ format *rules* and get filled at legality-ingest time from the format's ruleTabl
 
 from __future__ import annotations
 
+import re
 from typing import Dict, List, Optional
 
 
@@ -120,6 +121,38 @@ def by_id(fmt: str) -> Dict:
         if f["id"] == fmt:
             return f
     raise KeyError(f"format '{fmt}' not in registry (known: {len(TARGET_FORMATS)})")
+
+
+# ── @smogon/calc engine key (PLAN.md D32) ────────────────────────────
+#
+# @smogon/calc's ``calculate(gen, ...)`` indexes its MECHANICS table by this
+# key: 1–9 are the standard gens, and 0 is the library's native *champions*
+# mechanics set (verified: library champions Slash BP=80 == this fork's
+# ``data/mods/champions/moves.ts``; gen-9 Slash=70). Champions formats are
+# therefore NOT gen 9 for damage purposes — mapping them to 9 would
+# silently mis-calc ~25 moves. The format's ``mod`` (not its ``gen``
+# column) is the correct key source.
+_MOD_ENGINE_KEYS: Dict[str, int] = {
+    "champions": 0,
+}
+_GEN_MOD = re.compile(r"^gen(\d+)$")
+
+
+def engine_key(fmt: str) -> int:
+    """@smogon/calc engine key (the ``gen`` argument) for a target format id.
+
+    ``genN`` mods map to ``N``; ``champions`` maps to ``0``. Raises
+    ``KeyError`` for an unknown format id and ``ValueError`` for a mod we
+    cannot map (add it to ``_MOD_ENGINE_KEYS`` when that happens).
+    """
+    f = by_id(fmt)
+    mod = f.get("mod") or ""
+    if mod in _MOD_ENGINE_KEYS:
+        return _MOD_ENGINE_KEYS[mod]
+    m = _GEN_MOD.match(mod)
+    if m:
+        return int(m.group(1))
+    raise ValueError(f"no @smogon/calc engine key for mod {mod!r} (format {fmt!r})")
 
 
 if __name__ == "__main__":

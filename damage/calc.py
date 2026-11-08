@@ -6,14 +6,20 @@ numbers always match the library; this module only marshals JSON in/out and adds
 Python-friendly surface plus the speed-comparison helper.
 
     from damage import calc
-    calc.calc_damage(attacker, defender, move, field=None, gen=9)
+    calc.calc_damage(attacker, defender, move, field=None, fmt="gen9bss3v3", gen=9)
         -> {'min','max','expected',            # damage in HP
             'min_pct','max_pct','expected_pct',# % of defender max HP
             'crit': {'min','max','expected'},  # critical-hit range (separate value)
             'immune': bool, 'maxhp': int, 'desc': str}
 
-    calc.compare_speed(a, b, gen=9)
+    calc.compare_speed(a, b, fmt="gen9bss3v3", gen=9)
         -> {'a': int, 'b': int, 'faster': 'a' | 'b' | 'tie'}
+
+Prefer passing ``fmt`` (a format id from the legality registry): the engine
+key is resolved from the format's ``mod`` (``genN`` -> N, ``champions`` -> 0 —
+the library's native champions mechanics set, see PLAN.md D32). ``gen`` is
+kept as the low-level engine key for callers that already have it; when both
+are given, ``fmt`` wins.
 
 attacker / defender / a / b are dicts using @smogon/calc option names:
 ``name`` (required), and any of ``level``, ``nature``, ``evs``, ``ivs``, ``item``,
@@ -33,11 +39,20 @@ import os
 import subprocess
 from typing import Any, Dict, Optional, Union
 
+from legality import formats as _formats
+
 _NODE = "node"
 _SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "node_calc.js")
 
 Mon = Dict[str, Any]
 MoveSpec = Union[str, Dict[str, Any]]
+
+
+def _engine_key(gen: int, fmt: Optional[str]) -> int:
+    """Resolve the @smogon/calc engine key: ``fmt`` wins over ``gen``."""
+    if fmt is None:
+        return gen
+    return _formats.engine_key(fmt)
 
 
 def _node(request: Dict[str, Any]) -> Dict[str, Any]:
@@ -74,15 +89,21 @@ def calc_damage(
     defender: Mon,
     move: MoveSpec,
     field: Optional[Dict[str, Any]] = None,
+    fmt: Optional[str] = None,
     gen: int = 9,
 ) -> Dict[str, Any]:
     """Damage range (min/max/expected, in HP and % of defender max HP) + crit block.
 
     ``immune`` is True and all damage is 0 when the move cannot hit the defender.
+
+    Pass ``fmt`` (a format id, e.g. ``"gen9bss3v3"``) so the correct engine is
+    selected per format (champions formats use the library's champions
+    mechanics, key 0 — not gen 9). ``gen`` is the raw engine key, used when
+    ``fmt`` is not given.
     """
     req = {
         "type": "damage",
-        "gen": gen,
+        "gen": _engine_key(gen, fmt),
         "attacker": attacker,
         "defender": defender,
         "move": _normalise_move(move),
@@ -91,21 +112,27 @@ def calc_damage(
     return _node(req)
 
 
-def effective_speed(mon: Mon, gen: int = 9, tailwind: bool = False) -> int:
+def effective_speed(
+    mon: Mon,
+    fmt: Optional[str] = None,
+    gen: int = 9,
+    tailwind: bool = False,
+) -> int:
     """Effective action speed for a mon, applying boosts/item/Tailwind/paralysis."""
-    req = {"type": "speed", "gen": gen, "pokemon": mon, "tailwind": tailwind}
+    req = {"type": "speed", "gen": _engine_key(gen, fmt), "pokemon": mon, "tailwind": tailwind}
     return int(_node(req)["speed"])
 
 
 def compare_speed(
     a: Mon,
     b: Mon,
+    fmt: Optional[str] = None,
     gen: int = 9,
     a_tailwind: bool = False,
     b_tailwind: bool = False,
 ) -> Dict[str, Any]:
     """Compare two mons' effective speed. ``faster`` is 'a', 'b', or 'tie'."""
-    sa = effective_speed(a, gen, a_tailwind)
-    sb = effective_speed(b, gen, b_tailwind)
+    sa = effective_speed(a, fmt, gen, a_tailwind)
+    sb = effective_speed(b, fmt, gen, b_tailwind)
     faster = "a" if sa > sb else ("b" if sb > sa else "tie")
     return {"a": sa, "b": sb, "faster": faster}
