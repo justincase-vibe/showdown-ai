@@ -1,0 +1,195 @@
+"""Step 1 lookup API (build plan: "Move / Species Database").
+
+Read-only query layer over ``legality.db`` for the bot:
+
+    get_move(name, gen=9)           -> move props + parsed effect flags
+    get_species(name, gen=9)        -> types, base stats, abilities, tier
+    legal_moves(species, fmt)       -> move ids legal in a format
+    get_common_sets(species, fmt)   -> Smogon sets w/ normalized probability
+    get_type_chart(gen=9)           -> {defending: {attacking: factor}}
+
+Names accept display names or ids (normalized with Showdown ``toID``).
+``gen`` defaults to 9 (the project target; the move table holds current-gen
+properties — per-gen overrides land in ``move_gen`` later).
+
+Raises ``KeyError`` for unknown moves/species; returns ``[]`` where a
+"no data" answer is meaningful (no sets for a species, …).
+"""
+from __future__ import annotations
+
+import json
+import re
+from typing import Any, Dict, List, Optional
+
+from . import api, db
+
+#: side_condition values that mean "hazard setter" (field conditions)
+HAZARDS = frozenset({"stealthrock", "spikes", "stickybarbedsteel"})
+#: side_condition values that mean "screen setter"
+SCREENS = frozenset({"reflect", "lightscreen"})
+
+
+def to_id(name: str) -> str:
+    """Showdown toID: lowercase alphanumerics only."""
+    return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+
+
+# ── moves ────────────────────────────────────────────────────────────
+def get_move(name: str, gen: int = 9) -> Dict[str, Any]:
+    """Move properties + parsed effect flags.
+
+    Returns a dict with: id, name, type, category, power, accuracy, pp,
+    priority, desc, boosts (parsed JSON, e.g. {"atk": 2} or None),
+    drain/recoil (integer percent or None), and boolean flags:
+    is_hazard, is_screen, is_tailwind (from the server's side_condition).
+    """
+    mid = to_id(name)
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT * FROM move WHERE id=?", (mid,)).fetchone()
+        if r is None:
+            raise KeyError(f"unknown move: {name!r}")
+        d = dict(r)
+        d["boosts"] = json.loads(d["boosts"]) if d.get("boosts") else None
+        sc = d.get("side_condition")
+        d["is_hazard"] = sc in HAZARDS
+        d["is_screen"] = sc in SCREENS
+        d["is_tailwind"] = sc == "tailwind"
+        return d
+    finally:
+        conn.close()
+
+
+# ── species ──────────────────────────────────────────────────────────
+def get_species(name: str, gen: int = 9) -> Dict[str, Any]:
+    """Form row + gen-scoped attributes.
+
+    Returns: id, name, base_id (base species), forme, flags
+    (is_mega/is_primal/is_gmax), types [display names], stats
+    {hp, atk, def, spa, spd, spe}, abilities [{id, name, hidden}], tier.
+    """
+    fid = to_id(name)
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT * FROM form WHERE id=?", (fid,)).fetchone()
+        if r is None:
+            raise KeyError(f"unknown species: {name!r}")
+        d = dict(r)
+        d["types"] = [row["type"] for row in conn.execute(
+            "SELECT type FROM form_type WHERE form_id=? AND gen=? ORDER BY type",
+            (fid, gen))]
+        st = conn.execute(
+            "SELECT hp, atk, def, spa, spd, spe FROM form_stats WHERE form_id=? AND gen=?",
+            (fid, gen)).fetchone()
+        d["stats"] = dict(st) if st else None
+        d["abilities"] = [
+            {"id": a["ability_id"], "name": a["name"], "hidden": bool(a["is_hidden"])}
+            for a in conn.execute(
+                "SELECT fa.ability_id AS ability_id, a.name AS name, fa.is_hidden AS is_hidden "
+                "FROM form_ability fa JOIN ability a ON a.id=fa.ability_id "
+                "WHERE fa.form_id=? AND fa.gen=? ORDER BY fa.ability_id",
+                (fid, gen))]
+        tier = conn.execute(
+            "SELECT tier FROM form_tier WHERE form_id=? AND gen=?", (fid, gen)).fetchone()
+        d["tier"] = tier["tier"] if tier else None
+        return d
+    finally:
+        conn.close()
+
+
+def legal_moves(species: str, fmt: str) -> List[str]:
+    """Move ids legal for the species in the format (Fissure rule, D7).
+
+    Sorted by move id. Empty list if the species has no legal moves there
+    (or is not in the format at all)."""
+    api._require_format(fmt)
+    fid = to_id(species)
+    conn = db.connect()
+    try:
+        rows = conn.execute(
+            "SELECT move_id FROM format_form_move WHERE format_id=? AND form_id=? "
+            "ORDER BY move_id", (fmt, fid)).fetchall()
+        return [r["move_id"] for r in rows]
+    finally:
+        conn.close()
+
+
+# ── common sets (Smogon) ─────────────────────────────────────────────
+def get_common_sets(species: str, fmt: str) -> List[Dict[str, Any]]:
+    """Scraped (Smogon) sets for a species in a format.
+
+    Each set: id, title, moves (ordered move ids), item_id, ability_id,
+    nature, evs (spread string), tera_type, source_url, and ``probability``
+    = 1 / (number of sets for that species in that format) — so probabilities
+    for a species sum to exactly 1. Empty list if the species has no sets.
+    """
+    api._require_format(fmt)
+    fid = to_id(species)
+    conn = db.connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM strategy WHERE format_id=? AND form_id=? ORDER BY id",
+            (fmt, fid)).fetchall()
+        if not rows:
+            return []
+        p = 1.0 / len(rows)
+        out = []
+        for s in rows:
+            d = dict(s)
+            d["moves"] = [r["move_id"] for r in conn.execute(
+                "SELECT move_id FROM strategy_move WHERE set_id=? ORDER BY ord",
+                (s["id"],))]
+            d["probability"] = p
+            out.append(d)
+        return out
+    finally:
+        conn.close()
+
+
+def common_set_species(fmt: str) -> List[str]:
+    """Species ids (form ids) that have at least one set in the format."""
+    api._require_format(fmt)
+    conn = db.connect()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT form_id FROM strategy WHERE format_id=? ORDER BY form_id",
+            (fmt,)).fetchall()
+        return [r["form_id"] for r in rows]
+    finally:
+        conn.close()
+
+
+# ── type chart ───────────────────────────────────────────────────────
+def get_type_chart(gen: int = 9) -> Dict[str, Dict[str, float]]:
+    """{defending_type: {attacking_type: factor}} for the standard 18x18 matrix.
+
+    Keys are display names ("Fire", "Water", …) to match ``move.type`` and
+    ``form_type.type`` in the DB — so damage math can do
+    ``chart[defender_type][move_type]`` directly without conversion. The
+    table stores lowercase ids; display names are the id capitalized (true
+    for all 18 real types).
+
+    factor: 0 = immune, 0.5 = resist, 1 = neutral, 2 = super-effective.
+    (Values exactly as the local server's sim computes them — this build's
+    typechart.ts; see PLAN.md §3 verified facts.)
+    """
+    conn = db.connect()
+    try:
+        chart: Dict[str, Dict[str, float]] = {}
+        for r in conn.execute(
+                "SELECT attacking, defending, factor FROM type_chart WHERE gen=?",
+                (gen,)):
+            chart.setdefault(r["defending"].capitalize(), {})[r["attacking"].capitalize()] = r["factor"]
+        return chart
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    # tiny smoke demo
+    import pprint
+    pprint.pprint(get_move("Stealth Rock"))
+    pprint.pprint({k: v for k, v in get_species("Garchomp").items()
+                   if k not in ("nonstandard_reason",)})
+    pprint.pprint(get_common_sets("Garchomp", "gen9ou")[:1])
+    pprint.pprint(get_type_chart()["Dragon"])

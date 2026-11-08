@@ -22,3 +22,11 @@ bot/checkpoints/
 Thumbs.db
 pokemon-showdown/
 bot/replays/
+
+# Generated / build artifacts (Step 1 wrap-up)
+node_modules/
+.pytest_cache/
+# generated DB (rebuild recipe in legality/PLAN.md)
+legality/legality.db
+# extracted payload, ~30MB, regenerable via extract_gen9.js
+legality/data/
