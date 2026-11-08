@@ -17,9 +17,15 @@ Python-friendly surface plus the speed-comparison helper.
 
 Prefer passing ``fmt`` (a format id from the legality registry): the engine
 key is resolved from the format's ``mod`` (``genN`` -> N, ``champions`` -> 0 —
-the library's native champions mechanics set, see PLAN.md D32). ``gen`` is
-kept as the low-level engine key for callers that already have it; when both
-are given, ``fmt`` wins.
+the library's native champions mechanics set, see PLAN.md D32), and each mon's
+battle level is resolved through the format's level rules (D33): BSS 3v3,
+VGC and champions battle at level 50, LC at level 5, ladder at 100. A mon
+without ``level`` gets the format's battle level; an explicit level outside
+the format's [minLevel, maxLevel] raises ``ValueError`` (the sim's validator
+would reject such a set). ``gen`` is kept as the low-level engine key for
+callers that already have it; when both are given, ``fmt`` wins. Without
+``fmt`` there are no format level rules (raw engine semantics, library
+default level 100).
 
 attacker / defender / a / b are dicts using @smogon/calc option names:
 ``name`` (required), and any of ``level``, ``nature``, ``evs``, ``ivs``, ``item``,
@@ -40,6 +46,7 @@ import subprocess
 from typing import Any, Dict, Optional, Union
 
 from legality import formats as _formats
+from legality import lookup as _lookup
 
 _NODE = "node"
 _SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "node_calc.js")
@@ -53,6 +60,21 @@ def _engine_key(gen: int, fmt: Optional[str]) -> int:
     if fmt is None:
         return gen
     return _formats.engine_key(fmt)
+
+
+def _resolve_mon(mon: Mon, fmt: Optional[str]) -> Mon:
+    """Resolve a mon's battle level through the format's rules (D33).
+
+    No-op without ``fmt`` (raw engine path, library default level). With
+    ``fmt``, mirrors the fork's team-validator: unset level -> the format's
+    battle level; adjustLevelDown/adjustLevel applied; out-of-range explicit
+    level -> ValueError.
+    """
+    if fmt is None:
+        return mon
+    m = dict(mon)
+    m["level"] = _lookup.battle_level(fmt, mon.get("level"))
+    return m
 
 
 def _node(request: Dict[str, Any]) -> Dict[str, Any]:
@@ -104,8 +126,8 @@ def calc_damage(
     req = {
         "type": "damage",
         "gen": _engine_key(gen, fmt),
-        "attacker": attacker,
-        "defender": defender,
+        "attacker": _resolve_mon(attacker, fmt),
+        "defender": _resolve_mon(defender, fmt),
         "move": _normalise_move(move),
         "field": field,
     }
@@ -119,7 +141,8 @@ def effective_speed(
     tailwind: bool = False,
 ) -> int:
     """Effective action speed for a mon, applying boosts/item/Tailwind/paralysis."""
-    req = {"type": "speed", "gen": _engine_key(gen, fmt), "pokemon": mon, "tailwind": tailwind}
+    req = {"type": "speed", "gen": _engine_key(gen, fmt),
+           "pokemon": _resolve_mon(mon, fmt), "tailwind": tailwind}
     return int(_node(req)["speed"])
 
 

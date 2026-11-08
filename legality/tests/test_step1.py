@@ -231,6 +231,108 @@ def test_bss_format_rules():
         assert f["picked_team"] == 3  # bring 6, pick 3 (ruleTable.pickedTeamSize)
         # fork's BSS definition leaves maxTeam unset (server default 6)
         assert f["max_team"] in (None, 6)
+        # D33: Flat Rules = Adjust Level Down 50 → standard teams battle at 50
+        # (maxLevel 100 is the CAP, not the battle level — team-validator.ts:614)
+        assert f["min_level"] == 1
+        assert f["max_level"] == 100
+        assert f["adjust_level_down"] == 50
+        assert f["adjust_level"] is None
+        assert f["default_level"] == 50  # canonical battle level
+    finally:
+        conn.close()
+
+
+def test_format_battle_levels():
+    """D33: every format carries its fork-verified level rules (DB v4)."""
+    conn = db.connect()
+    try:
+        rows = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM format")}
+        # no format left without level rules (the old silent trap)
+        for fid, f in rows.items():
+            assert f["default_level"] is not None, fid
+            assert f["min_level"] is not None and f["max_level"] is not None, fid
+        # spot checks against the fork ruleTable dump (2026-11-08, TeamValidator)
+        assert rows["gen9ou"]["default_level"] == 100
+        assert rows["gen9championsou"]["default_level"] == 50
+        assert rows["gen9championsou"]["adjust_level"] == 50
+        assert rows["gen9championsvgc2026regmc"]["default_level"] == 50
+        assert rows["gen9vgc2025regi"]["default_level"] == 50
+        assert rows["gen9lc"]["default_level"] == 5 and rows["gen9lc"]["max_level"] == 5
+        assert rows["gen1lc"]["default_level"] == 5 and rows["gen1lc"]["adjust_level"] == 5
+        assert rows["gen4vgc2010"]["default_level"] == 50
+        assert rows["gen4vgc2010"]["adjust_level_down"] == 50
+    finally:
+        conn.close()
+
+
+def test_battle_level_resolves_like_the_validator():
+    """battle_level mirrors team-validator.ts (lines 611–615, 1144)."""
+    bl = lookup.battle_level
+    # BSS (Adjust Level Down 50): default 50; 100 -> 50; below the threshold stays
+    assert bl("gen9bss3v3") == 50
+    assert bl("gen9bss3v3", 100) == 50
+    assert bl("gen9bss3v3", 50) == 50
+    assert bl("gen9bss3v3", 30) == 30
+    # champions (Adjust Level = 50, exact): always 50
+    assert bl("gen9championsou") == 50
+    assert bl("gen9championsou", 100) == 50
+    assert bl("gen9championsou", 20) == 50
+    # LC gen9 (maxLevel 5): default 5; level 100 is ILLEGAL -> ValueError
+    assert bl("gen9lc") == 5
+    with pytest.raises(ValueError):
+        bl("gen9lc", 100)
+    # gen1lc (Adjust Level = 5, exact; maxLevel stays 100): 100 is legal, -> 5
+    assert bl("gen1lc", 100) == 5
+    # ladder: level passes through
+    assert bl("gen9ou", 100) == 100
+    assert bl("gen9ou", 50) == 50
+    with pytest.raises(ValueError):
+        bl("gen9ou", 150)
+    # unknown format (api._require_format raises ValueError)
+    with pytest.raises(ValueError):
+        bl("gen9notarealformat")
+
+
+def test_format_levels_match_fork():
+    """D29 guard: DB level rules must equal the SERVER's live ruleTable dump.
+
+    The registry bakes the fork's values; this test re-derives them from the
+    server build's own TeamValidator so the baked data can't drift from the
+    sim the bot actually fights on.
+    """
+    import json
+    import os
+    import subprocess
+
+    from legality import formats
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    sim = os.path.join(root, "pokemon-showdown", "dist", "sim", "index.js")
+    script = (
+        "const { TeamValidator } = require(process.argv[1]); "
+        "const ids = JSON.parse(process.argv[2]); "
+        "console.log(JSON.stringify(ids.map(id => { const rt = new TeamValidator(id).ruleTable; "
+        "let bl = rt.defaultLevel; "
+        "if (rt.adjustLevelDown && bl >= rt.adjustLevelDown) bl = rt.adjustLevelDown; "
+        "if (rt.adjustLevel) bl = rt.adjustLevel; "
+        "return { id, minLevel: rt.minLevel, maxLevel: rt.maxLevel, "
+        "adjustLevel: rt.adjustLevel, adjustLevelDown: rt.adjustLevelDown, bl }; })));"
+    )
+    proc = subprocess.run(
+        ["node", "-e", script, sim, json.dumps(formats.format_ids())],
+        capture_output=True, text=True, timeout=60, cwd=root)
+    assert proc.returncode == 0, proc.stderr
+    fork = {r["id"]: r for r in json.loads(proc.stdout)}
+
+    conn = db.connect()
+    try:
+        for fid in formats.format_ids():
+            row = conn.execute("SELECT * FROM format WHERE id=?", (fid,)).fetchone()
+            f = fork[fid]
+            assert row["min_level"] == f["minLevel"], fid
+            assert row["max_level"] == f["maxLevel"], fid
+            assert row["adjust_level"] == (f["adjustLevel"] or None), fid
+            assert row["adjust_level_down"] == (f["adjustLevelDown"] or None), fid
+            assert row["default_level"] == f["bl"], fid
     finally:
         conn.close()
 

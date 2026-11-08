@@ -17,7 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMA_PATH = os.path.join(HERE, "schema.sql")
 DB_PATH = os.environ.get("LEGALITY_DB", os.path.join(HERE, "legality.db"))
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 #: tables that must never be wiped (provenance + schema bookkeeping)
 PROTECTED_TABLES = frozenset({"meta", "ingest_log"})
 #: tables with data (for status + wipe whitelist)
@@ -57,8 +57,16 @@ def bootstrap(db_path: str = DB_PATH, force: bool = False) -> Dict[str, Any]:
         conn.executescript(ddl)  # PRAGMA foreign_keys ignored in executescript; fine here
         conn.execute("PRAGMA foreign_keys = ON")
 
+        # v4 (D33): format level rules. CREATE TABLE IF NOT EXISTS does not
+        # alter existing DBs, so add the columns to pre-v4 databases.
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(format)")}  # no row_factory here
+        for col in ("min_level", "max_level", "adjust_level", "adjust_level_down"):
+            if col not in existing:
+                conn.execute(f"ALTER TABLE format ADD COLUMN {col} INTEGER")
+
         # upsert format registry
         cols = ["id", "name", "gen", "tier", "game_type", "min_team", "max_team",
+                "min_level", "max_level", "adjust_level", "adjust_level_down",
                 "default_level", "section", "mod", "exists_in_server"]
         for f in formats.TARGET_FORMATS:
             conn.execute(

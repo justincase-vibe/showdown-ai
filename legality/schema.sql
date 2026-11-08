@@ -147,6 +147,15 @@ CREATE TABLE IF NOT EXISTS format (
   min_team         INTEGER,
   max_team         INTEGER,
   picked_team      INTEGER,   -- v2: team-preview pick size (e.g. 3 for BSS); NULL = all
+  -- v4 (D33): level rules from the fork's ruleTable (team-validator ground truth).
+  -- default_level = CANONICAL BATTLE LEVEL for a standard team (ruleTable
+  -- defaultLevel after adjustLevelDown/adjustLevel), NOT the raw defaultLevel:
+  -- BSS 3v3 plays level 50 (Flat Rules = Adjust Level Down 50), VGC 50, LC 5,
+  -- ladder 100, champions 50 (the @smogon/calc champions engine hard-codes 50).
+  min_level        INTEGER,
+  max_level        INTEGER,
+  adjust_level     INTEGER,   -- exact level forced by the format (e.g. champions 50, gen1lc 5)
+  adjust_level_down INTEGER,  -- levels at/above this are lowered to it (e.g. BSS/VGC 50)
   default_level    INTEGER,
   section          TEXT,
   mod              TEXT,

@@ -4,9 +4,17 @@ plus the project's custom ``gen9bss3v3``; see PLAN.md §2–3).
 Every entry resolves via ``Dex.formats.get`` with ``effectType == 'Format'`` in the
 local Showdown build.
 
-``min_team`` / ``max_team`` / ``default_level`` are intentionally None here: they are
-format *rules* and get filled at legality-ingest time from the format's ruleTable
-(VGC 2024 was 4-mon — never assume 6; LC is level 5; BSS 3v3 picks 3 of 6).
+``min_team`` / ``max_team`` are intentionally None here: they are format
+*rules* and get filled at legality-ingest time from the format's ruleTable
+(VGC 2024 was 4-mon — never assume 6; BSS 3v3 picks 3 of 6).
+
+Level rules (D33) are the fork ruleTable values (verified 2026-11-08 by dumping
+``new TeamValidator(fmt).ruleTable`` from this server build's dist): ladder =
+level 100, VGC = 50, LC = 5, BSS 3v3 = 50 (Flat Rules: Adjust Level Down 50),
+champions = 50 (Adjust Level = 50; the @smogon/calc champions engine also
+hard-codes level 50). ``default_level`` is the CANONICAL BATTLE LEVEL for a
+standard team (defaultLevel after adjustLevelDown/adjustLevel), NOT the raw
+defaultLevel.
 """
 
 from __future__ import annotations
@@ -16,11 +24,16 @@ from typing import Dict, List, Optional
 
 
 def _f(id: str, name: str, gen: int, tier: str, game_type: str = "singles",
-       mod: Optional[str] = None, section: Optional[str] = None) -> Dict:
+       mod: Optional[str] = None, section: Optional[str] = None,
+       min_level: int = 1, max_level: int = 100, default_level: int = 100,
+       adjust_level: Optional[int] = None,
+       adjust_level_down: Optional[int] = None) -> Dict:
     return {
         "id": id, "name": name, "gen": gen, "tier": tier,
         "game_type": game_type, "min_team": None, "max_team": None,
-        "default_level": None, "section": section, "mod": mod,
+        "min_level": min_level, "max_level": max_level,
+        "adjust_level": adjust_level, "adjust_level_down": adjust_level_down,
+        "default_level": default_level, "section": section, "mod": mod,
         "exists_in_server": 1,
     }
 
@@ -58,35 +71,47 @@ UBERS: List[Dict] = [
     _f(f"gen{g}ubers", f"[Gen {g}] Ubers", g, "Uber", mod=f"gen{g}") for g in range(1, 10)
 ]
 
-# ── Little Cup (8): no gen2 ──────────────────────────────────────────
-LITTLE_CUP: List[Dict] = [
-    _f(f"gen{g}lc", f"[Gen {g}] LC", g, "LC", mod=f"gen{g}")
-    for g in (1, 3, 4, 5, 6, 7, 8, 9)
-]
+# ── Little Cup (8): no gen2 — level 5 formats ────────────────────────
+# (gen1lc: maxLevel stays 100 + Adjust Level = 5; gen3+: maxLevel = 5)
+LITTLE_CUP: List[Dict] = (
+    [_f("gen1lc", "[Gen 1] LC", 1, "LC", mod="gen1", default_level=5, adjust_level=5)]
+    + [_f(f"gen{g}lc", f"[Gen {g}] LC", g, "LC", mod=f"gen{g}",
+          max_level=5, default_level=5) for g in (3, 4, 5, 6, 7, 8, 9)]
+)
 
-# ── VGC (6): canonical latest per gen, all doubles ──────────────────
+# ── VGC (6): canonical latest per gen, all doubles — level 50 ──────
+# (2010/2013/2016: Adjust Level Down = 50; 2019/2022/2025: Adjust Level = 50)
 VGC: List[Dict] = [
-    _f("gen4vgc2010", "[Gen 4] VGC 2010", 4, "VGC", "doubles", mod="gen4"),
-    _f("gen5vgc2013", "[Gen 5] VGC 2013", 5, "VGC", "doubles", mod="gen5"),
-    _f("gen6vgc2016", "[Gen 6] VGC 2016", 6, "VGC", "doubles", mod="gen6"),
-    _f("gen7vgc2019", "[Gen 7] VGC 2019", 7, "VGC", "doubles", mod="gen7"),
-    _f("gen8vgc2022", "[Gen 8] VGC 2022", 8, "VGC", "doubles", mod="gen8"),
-    _f("gen9vgc2025regi", "[Gen 9] VGC 2025 Reg I", 9, "VGC", "doubles", mod="gen9"),
+    _f("gen4vgc2010", "[Gen 4] VGC 2010", 4, "VGC", "doubles", mod="gen4",
+       default_level=50, adjust_level_down=50),
+    _f("gen5vgc2013", "[Gen 5] VGC 2013", 5, "VGC", "doubles", mod="gen5",
+       default_level=50, adjust_level_down=50),
+    _f("gen6vgc2016", "[Gen 6] VGC 2016", 6, "VGC", "doubles", mod="gen6",
+       default_level=50, adjust_level_down=50),
+    _f("gen7vgc2019", "[Gen 7] VGC 2019", 7, "VGC", "doubles", mod="gen7",
+       default_level=50, adjust_level=50),
+    _f("gen8vgc2022", "[Gen 8] VGC 2022", 8, "VGC", "doubles", mod="gen8",
+       default_level=50, adjust_level=50),
+    _f("gen9vgc2025regi", "[Gen 9] VGC 2025 Reg I", 9, "VGC", "doubles", mod="gen9",
+       default_level=50, adjust_level=50),
 ]
 
-# ── Champions (2): gen9 mod; OU singles + VGC doubles ───────────────
+# ── Champions (2): gen9 mod; OU singles + VGC doubles ─ level 50 ───
 CHAMPIONS: List[Dict] = [
-    _f("gen9championsou", "[Gen 9 Champions] OU", 9, "OU", "singles", mod="champions"),
+    _f("gen9championsou", "[Gen 9 Champions] OU", 9, "OU", "singles", mod="champions",
+       default_level=50, adjust_level=50),
     _f("gen9championsvgc2026regmc", "[Gen 9 Champions] VGC 2026 Reg M-C",
-       9, "VGC", "doubles", mod="champions"),
+       9, "VGC", "doubles", mod="champions", default_level=50, adjust_level=50),
 ]
 
-# ── BSS 3v3 (our AI target format; local-server custom) ────────────
+# ── BSS 3v3 (our AI target format; local-server custom) ─ level 50 ─
 # Fixed-team 3v3 Singles under Battle Spot Singles flat rules (bring 6,
 # pick 3). Defined in pokemon-showdown/config/formats.ts (this project's
 # server copy) — NOT a stock Smogon format, hence section tag.
+# Flat Rules = "Adjust Level Down = 50" → standard teams battle at level 50.
 BSS: List[Dict] = [
-    _f("gen9bss3v3", "[Gen 9] BSS 3v3", 9, "BSS", mod="gen9", section="bss"),
+    _f("gen9bss3v3", "[Gen 9] BSS 3v3", 9, "BSS", mod="gen9", section="bss",
+       default_level=50, adjust_level_down=50),
 ]
 
 # Known-but-not-targeted (available in server data; add via config if wanted):

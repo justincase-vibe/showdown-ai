@@ -7,6 +7,7 @@ Read-only query layer over ``legality.db`` for the bot:
     legal_moves(species, fmt)       -> move ids legal in a format
     get_common_sets(species, fmt)   -> Smogon sets w/ normalized probability
     get_type_chart(gen=9)           -> {defending: {attacking: factor}}
+    battle_level(fmt, level=None)   -> level a mon fights at in the format (D33)
 
 Names accept display names or ids (normalized with Showdown ``toID``).
 ``gen`` defaults to 9 (the project target; the move table holds current-gen
@@ -183,6 +184,44 @@ def get_type_chart(gen: int = 9) -> Dict[str, Dict[str, float]]:
         return chart
     finally:
         conn.close()
+
+
+# ── format level rules (D33) ─────────────────────────────────────────
+def battle_level(fmt: str, level: Optional[int] = None) -> int:
+    """Level a mon fights at in ``fmt``, mirroring the fork's team-validator.
+
+    Mirrors ``sim/team-validator.ts`` (validateSet, lines 611–615 + 1144):
+    unset level -> the format's default; ``adjustLevelDown`` lowers any level
+    at/above it to itself; ``adjustLevel`` forces an exact level. So in BSS
+    3v3 / VGC (Adjust Level Down 50) a standard level-100 team fights at 50;
+    in champions / gen1lc (Adjust Level) the level is always 50 / 5.
+
+    Raises ``ValueError`` for an unknown format or when an explicit ``level``
+    is outside the format's [minLevel, maxLevel] — the validator would reject
+    such a set, so the calc refuses to invent numbers for it (no silent
+    level-100 default in a level-50 format).
+    """
+    api._require_format(fmt)
+    conn = db.connect()
+    try:
+        r = conn.execute(
+            "SELECT min_level, max_level, adjust_level, adjust_level_down, default_level"
+            " FROM format WHERE id=?", (fmt,)).fetchone()
+    finally:
+        conn.close()
+    if r is None:
+        raise KeyError(f"format '{fmt}' not in DB")
+    lvl = r["default_level"] if level is None else int(level)
+    if level is not None and not (r["min_level"] <= lvl <= r["max_level"]):
+        raise ValueError(
+            f"level {level} is outside [{r['min_level']}, {r['max_level']}] for format '{fmt}'")
+    adj_down = r["adjust_level_down"]
+    if adj_down is not None and lvl >= adj_down:
+        lvl = adj_down
+    adj = r["adjust_level"]
+    if adj is not None:
+        lvl = adj
+    return lvl
 
 
 if __name__ == "__main__":
