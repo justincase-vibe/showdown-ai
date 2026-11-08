@@ -49,7 +49,7 @@ from scratch, draft head) is **superseded** by the 10-step plan below.
 | # | Step | Deliverable | Gate (tests) | Status |
 |---|------|-------------|--------------|--------|
 | 1 | Move/species database | lookup layer over Showdown data + Smogon common sets (Gen 9) | known lookups correct; learnset integrity (no missing keys); set probabilities sum to 1 | ✅ **2026-11-07** — `legality/tests/test_step1.py` **21/21 green** |
-| 2 | Damage calculator wrapper | `calc_damage(att, def, move, field) → (min%, max%, expected%)` via @smogon/calc (Node) | 15–20 hand-checked matchups within rounding; screens/boosts/immunities; speed helper | ⬜ |
+| 2 | Damage calculator wrapper | `calc_damage(att, def, move, field) → (min%, max%, expected%)` via @smogon/calc (Node) | 15–20 hand-checked matchups within rounding; screens/boosts/immunities; speed helper | ✅ **2026-11-08** — `damage/tests/test_step2.py` **34/34 green** (17 hand-checked matchups + 3 immunities + STAB/eff/burn/boost/weather/screen/item/ability/crit/speed) |
 | 3 | Opponent belief sampler | belief over hidden info; `update(event)`, `sample(n)`, `move_probabilities(mon)` | revealed move in every sample; illegal sets = 0; probs sum to 1 after each update; Choice-lock shift | ⬜ |
 | 4 | Observation encoder | structured per-mon + damage block + field + legal mask (replaces flat 892-dim) | fixed shapes; no leakage (unrevealed move absent); deterministic; bench swap = slot permutation only | ⬜ |
 | 5 | Network | set encoder + GRU core + masked policy/value heads (hidden 128–256) | illegal actions = exactly 0 prob; permutation invariance; overfit-32 sanity; GRU reset per battle | ⬜ |
@@ -84,6 +84,8 @@ Step 1 wrap-up.
 | D27 | **Gen 9 + `[Gen 9] BSS 3v3`** (`gen9bss3v3`) is the AI target format; data also covers `gen9ou/uu/ru` | BSS format added to `pokemon-showdown/config/formats.ts` (this project's server copy only) + `npm run build`; rules verified in tests | 2026-11-07 |
 | D28 | **Keep JSON/TS data pipeline** — Node `Dex` extracts Showdown data → JSON payload → SQLite; no format migration | user: "JSON is fine, we don't need to change the file types" | 2026-11-07 |
 | D29 | **This fork's data = ground truth, always.** Type chart verified to match the official chart (20 cells checked against `dist/data/typechart.js`). Species typing DOES deviate: `ninetalesalola` = **Ice/Fairy** (official: Fire/Fairy). Earlier note claiming "chart deviates (Fire→Fairy 1x, Rock→Bug 1x, …)" was an **axis mix-up** — Rock→Bug is 2× (super-effective); the 1× cell was Bug→Rock | tests assert fork-verified values; never re-derive from memory of the official chart | 2026-11-07 |
+| D30 | **Step 2 engine = @smogon/calc v0.12.0** (the official Smogon calc library) wrapped as a Node CLI (`damage/node_calc.js`) reading JSON from stdin; Python `damage/calc.py` spawns it and exposes `calc_damage(...)` + `compare_speed(...)`. Damage, critical hits (separate value), and immunity (→0, the library *throws* on 0-damage so we catch it) all come from the library — no formula re-implementation. Installed at project root (`package.json`); `node_modules/` stays gitignored | plan says "prefer wrapping"; the library is literally the Smogon calculator, so "match the official calc within rounding" is satisfied by construction and cross-checked against an independent formula | 2026-11-08 |
+| D31 | **Speed helper & natures follow @smogon/calc / this fork (ground truth), not memory.** Natures: `Jolly=+Spe/−SpA`, `Adamant=+Atk/−SpA`, `Bold=+Def/−Atk`, `Modest=+SpA/−Atk`, `Naive=+Spe/−SpD`, `Serious=neutral` (fork `data/natures.ts` == @smogon/calc `NATURES`). **Gen 7+ paralysis = ×0.5** (not the classic ×0.25) — matches BOTH @smogon/calc `getFinalSpeed` and this fork's `par` handler, so the bot's speed reasoning stays consistent with the sim it fights on. Crit bypasses Reflect in the library model. Speed order: base → boosts → Tailwind(×2) → Scarf(×1.5) → par(×0.5) | my own nature/paralysis memory was wrong twice (Jolly, par ×0.25); always source these from the library/fork, never from memory | 2026-11-08 |
 
 ## 5. Verified facts about this server build (evidence — don't re-derive)
 
@@ -132,6 +134,32 @@ Step 1 wrap-up.
   python -m legality.ingest_movesets
   python -m pytest legality/tests -v
   ```
+
+## 6a. Step 2 deliverables (done — evidence)
+
+- **Engine:** `damage/node_calc.js` (Node CLI, JSON in/out) over **@smogon/calc v0.12.0**;
+  `damage/calc.py` is the Python API (`calc_damage`, `effective_speed`, `compare_speed`);
+  `damage/__init__.py` mirrors the `legality` package layout.
+- **Public API:**
+  - `calc.calc_damage(attacker, defender, move, field=None, gen=9)` →
+    `{min,max,expected, min_pct,max_pct,expected_pct, crit:{min,max,expected}, immune, maxhp, desc}`.
+  - `calc.compare_speed(a, b, gen=9, a_tailwind, b_tailwind)` → `{a, b, faster}`.
+- **Verified behavior (34/34 tests, `damage/tests/test_step2.py`):** 17 hand-checked
+  matchups (each recomputed from the standard formula with the library's own base stats,
+  then asserted) + 3 immunities (→0); STAB, super-effective/neutral/resisted, burn (÷2),
+  offence +2/−2 and defence +2 boosts, Rain ×1.5 (Water) / Sun ×1.5 (Fire), Reflect ÷2
+  (physical) / Light Screen ÷2 (special), Life Orb ×1.3, Choice Band ×1.5 Atk,
+  Adaptability (×2 STAB), critical hits (separate value; ignore a −2 Atk drop; bypass
+  Reflect), and the speed helper (base/boosts/Scarf/par/Tailwind orderings, incl. the
+  par- and boost-flips). Step 1 stays green (21/21) — **55/55 combined**.
+- **Gate run:**
+  ```
+  cd "C:\\Users\\JustinCase\\Documents\\Projects\\showdown AI-imitation"
+  python -m pytest damage/tests -v     # Step 2: 34 passed
+  python -m pytest legality/tests damage/tests -q   # 55 passed
+  ```
+- **Note:** @smogon/calc **throws** (`damage===0`) instead of returning 0 for complete
+  immunities — `node_calc.js` catches that and reports `{immune:true, min:max=0}`.
 
 ## 7. Superseded (old project, read-only reference)
 
