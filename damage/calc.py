@@ -30,7 +30,16 @@ default level 100).
 attacker / defender / a / b are dicts using @smogon/calc option names:
 ``name`` (required), and any of ``level``, ``nature``, ``evs``, ``ivs``, ``item``,
 ``ability``, ``status`` ('par'/'brn'/...), ``boosts`` ({'atk':2,...}), ``teraType``,
-``moves``. ``move`` is a move-name string (or ``{'name':..., 'isCrit':bool}``).
+``moves``.
+
+``hp`` (optional, AI-facing): the mon's CURRENT HP as a 0.0-1.0 fraction of its
+max HP. @smogon/calc gates several damage effects on current HP — attacker-side
+Defeatist (<=1/2, Atk&SpA x0.5), Overgrow/Blaze/Torrent/Swarm (<=1/3, x1.5 on the
+matching type), Eruption/Water Spout/Flail/Reversal (BP scales with own HP); and
+defender-side Multiscale/Shadow Shield/Tera Shell (only AT FULL HP, x0.5), Brine
+(<=1/2, x1.5), Crush Grip/Wring Out/Hard Press (BP scales with the defender's HP).
+Without ``hp`` the mon is assumed at full HP (unchanged behaviour). ``curHP`` is
+accepted as a library-facing alias (absolute HP, clamped to the mon's max HP). ``move`` is a move-name string (or ``{'name':..., 'isCrit':bool}``).
 ``field`` (optional) may set ``weather`` (capitalised: 'Rain'/'Sun'/'Sand'/'Hail'),
 ``terrain``, ``attackerSide`` and ``defenderSide`` (e.g. ``{'isReflect': True}``).
 

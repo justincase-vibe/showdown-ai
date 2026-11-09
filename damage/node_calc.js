@@ -18,7 +18,31 @@
 // ivs, item, ability, status, boosts, teraType, moves. field keys: weather
 // (capitalised: "Rain"/"Sun"/"Sand"/"Hail"), terrain, attackerSide, defenderSide.
 
+const path = require('path');
 const { calculate, Pokemon, Move, Field, Side } = require('@smogon/calc');
+
+// @smogon/calc resolves `item` and `ability` by DISPLAY NAME (its item/ability
+// tables are keyed by name, not id). The AI / legality DB and the sim fork all
+// carry IDS ("lifeorb", "adaptability"), so passing an id is SILENTLY IGNORED
+// by the library -> wrong damage. Species and move names are normalised by the
+// library itself (id or name both work), so only item/ability need translating.
+// Ground truth for id -> name: the fork's own items/abilities tables.
+function loadId2Name(file, tableKey) {
+  try {
+    const mod = require(path.join(__dirname, '..', 'pokemon-showdown', 'dist', 'data', file));
+    const table = (mod && (mod[tableKey])) || {};
+    const m = {};
+    for (const id of Object.keys(table)) if (table[id] && table[id].name) m[id] = table[id].name;
+    return m;
+  } catch (e) { return {}; }
+}
+const ITEM_ID2NAME = loadId2Name('items', 'Items');
+const ABILITY_ID2NAME = loadId2Name('abilities', 'Abilities');
+// Accept ids AND display names: translate id->name when known, else pass through
+// (so a display name that isn't a fork id still works, and the Step 2 tests that
+// pass names keep passing).
+const normItem = (x) => (x && ITEM_ID2NAME[x]) || x;
+const normAbility = (x) => (x && ABILITY_ID2NAME[x]) || x;
 
 function clean(obj) {
   if (!obj) return {};
@@ -34,13 +58,42 @@ function buildPokemon(gen, o) {
     nature: o.nature,
     evs: o.evs || {},
     ivs: o.ivs || { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
-    item: o.item,
-    ability: o.ability,
+    item: normItem(o.item),
+    ability: normAbility(o.ability),
     status: o.status,
     boosts: o.boosts || {},
     teraType: o.teraType,
     moves: o.moves,
   });
+
+  // Current HP (optional). @smogon/calc gates several damage-affecting effects on
+  // a mon's CURRENT HP, which the library otherwise assumes to be FULL:
+  //   attacker  Defeatist (<=1/2, Atk&SpA x0.5), Overgrow/Blaze/Torrent/Swarm
+  //             (<=1/3, matching-type x1.5), Eruption/Water Spout/Flail/Reversal
+  //             (base power scales with own HP);
+  //   defender  Multiscale/Shadow Shield/Tera Shell (only AT FULL HP, x0.5),
+  //             Brine (<=1/2, x1.5), Crush Grip/Wring Out/Hard Press (BP scales
+  //             with defender HP).
+  // So with no curHP the low-HP attacker effects never fire and the full-HP-only
+  // defender effects always do. The AI's belief state knows each mon's HP as a
+  // fraction, so we accept:
+  //   hp     -> 0.0-1.0 fraction of THIS mon's max HP  (AI-facing; level/IV/EV-agnostic)
+  //   curHP  -> absolute HP (clamped to [1, maxHP])      (library-facing alias)
+  // Omitting both preserves full-HP semantics (unchanged from before).
+  const maxHP = new Pokemon(gen, o.name, opts).maxHP();
+  if (o.hp !== undefined && o.hp !== null) {
+    const frac = Number(o.hp);
+    if (Number.isNaN(frac) || frac < 0 || frac > 1) {
+      throw new Error('hp must be a 0.0-1.0 fraction (got ' + o.hp + ')');
+    }
+    opts.curHP = Math.max(1, Math.floor(frac * maxHP));
+  } else if (o.curHP !== undefined && o.curHP !== null) {
+    const abs = Number(o.curHP);
+    if (Number.isNaN(abs) || abs <= 0) {
+      throw new Error('curHP must be > 0 (got ' + o.curHP + ')');
+    }
+    opts.curHP = Math.max(1, Math.min(maxHP, Math.floor(abs)));
+  }
   return new Pokemon(gen, o.name, opts);
 }
 
@@ -72,8 +125,8 @@ function effectiveSpeed(gen, o, tailwind) {
   let s = p.stats.spe; // base stat (nature + EV), NOT including boosts
   s = applyBoost(s, (o.boosts || {}).spe || 0);
   if (tailwind) s = Math.floor(s * 2);
-  if (o.item === 'Choice Scarf') s = Math.floor(s * 1.5);
-  if (o.status === 'par' && o.ability !== 'Quick Feet') s = Math.floor(s * 0.5);
+  if (normItem(o.item) === 'Choice Scarf') s = Math.floor(s * 1.5);
+  if (o.status === 'par' && normAbility(o.ability) !== 'Quick Feet') s = Math.floor(s * 0.5);
   return Math.max(0, Math.min(10000, s));
 }
 
