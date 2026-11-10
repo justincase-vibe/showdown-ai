@@ -136,14 +136,24 @@ def calc_damage(
 ) -> Dict[str, Any]:
     """Damage range (min/max/expected, in HP and % of defender max HP) + crit block.
 
-    ``immune`` is True and all damage is 0 when the move cannot hit the defender.
+    ``immune`` is True and all damage is 0 when the move cannot hit the defender —
+    including TYPE IMMUNITY, which the fork applies to every move (e.g. Super Fang
+    vs Ghost, Night Shade vs Normal, Fissure vs Flying/Levitate, Psywave vs Dark;
+    fork-exact per-gen facts in ``special_move_immunity.json``).
 
-    Special-damage moves (no base power — ``superfang``, ``ruination``,
-    ``naturesmadness``, ``guardianofalola``, ``finalgambit``, ``endeavor``,
-    ``psywave``, and the reflectors ``counter``/``mirrorcoat``/``metalburst``/
-    ``comeuppance``) are completed with their official fork-verified formula
-    (@smogon/calc has no formula for these); the reflectors need
-    ``move={'name':..., 'lastHitDamage': <prior hit damage>}``.
+    Special-damage moves (no base power) are completed with their official
+    fork-verified formulas (@smogon/calc has no formula for these):
+      * HP fractions / state: ``superfang``, ``ruination``, ``naturesmadness``,
+        ``guardianofalola``, ``finalgambit``, ``endeavor``;
+      * fixed level: ``nightshade``, ``seismictoss``;
+      * OHKO (``ohko`` flag, guaranteed KO): ``fissure``, ``guillotine``,
+        ``horndrill``, ``sheercold`` (immune vs Ice types);
+      * random: ``psywave``;
+      * reflectors — need ``move={'name':..., 'lastHitDamage': <prior hit>}`` —
+        ``counter``, ``mirrorcoat``, ``metalburst``, ``comeuppance``.
+    Formula moves respect type immunity but NOT 0.5x/2x multipliers or STAB
+    (fork-verified). Explosion moves and faint-support moves
+    (``healingwish``/``lunardance``/``memento``) report 0 damage as usual.
 
     Pass ``fmt`` (a format id, e.g. ``"gen9bss3v3"``) so the correct engine is
     selected per format (champions formats use the library's champions

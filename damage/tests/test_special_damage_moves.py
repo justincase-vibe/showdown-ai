@@ -12,8 +12,15 @@ tests pin:
   * the HP-fraction / state formulas (``superfang``/``ruination``/``naturesmadness``/
     ``guardianofalola``/``finalgambit``/``endeavor``) at their fork-verified numbers;
   * ``psywave``'s random range;
-  * Super Fang's **gen-aware Ghost immunity** — it is Normal-typed fixed damage, so
-    it is immune vs Ghost in gen 2+, but gen 1 ignores Ghost immunity and it hits;
+  * type immunity on formula moves — the fork's ``runImmunity`` precedes every
+    damage formula, so e.g. Night Shade (Ghost) is immune vs Normal, Fissure
+    (Ground) vs Flying, and the Normal formula moves vs Ghost (gen 2+); the fork
+    does NOT apply 0.5x/2x multipliers or STAB to these moves;
+  * T2 fixed-level moves (``nightshade``/``seismictoss`` = attacker level);
+  * T3 OHKO moves (``fissure``/``guillotine``/``horndrill``/``sheercold``):
+    guaranteed KO (max HP, ``ohko`` flag), ``sheercold`` immune vs Ice;
+  * T4 (``explosion``/``selfdestruct``/``mistyexplosion`` non-zero;
+    ``healingwish``/``lunardance``/``memento`` deal no damage);
   * the reflectors (``counter``/``mirrorcoat``/``metalburst``/``comeuppance``),
     which scale off the *prior hit* — the belief state passes that as
     ``lastHitDamage``; without it the move fails (0), matching the fork's thisTurn gate.
@@ -155,3 +162,119 @@ def test_normal_move_still_routes_through_library():
     r = dmg(garchomp, "earthquake")
     assert r["max"] > 0
     assert r["min"] <= r["max"]
+
+
+# ── T2: fixed-level damage (damage = attacker's level) ─────────────────
+# Fork dispatch: move.damage === "level" -> source.level (battle-actions getDamage).
+
+def test_nightshade_deals_attacker_level():
+    # vs a Ghost-type defender (Normal would be immune); hits for PLAIN level
+    # (no Ghost 2x multiplier — fork-verified).
+    gengar = {"name": "gengar", "level": 50, "nature": "Docile", "evs": dict(EV)}
+    assert rng(dmg(user("chansey"), "nightshade", defn=gengar)) == (50, 50)
+    low = {"name": "chansey", "level": 10, "nature": "Docile", "evs": dict(EV)}
+    assert rng(dmg(low, "nightshade", defn=gengar)) == (10, 10)
+
+
+def test_seismictoss_deals_attacker_level():
+    assert rng(dmg(user("mew"), "seismictoss")) == (50, 50)
+    high = {"name": "mew", "level": 100, "nature": "Docile", "evs": dict(EV)}
+    assert rng(dmg(high, "seismictoss")) == (100, 100)
+
+
+# ── T3: OHKO moves (guaranteed KO on hit; accuracy is move data) ──────
+# Fork dispatch: move.ohko -> target.maxhp. ``sheercold`` (ohko: "Ice") is
+# immune vs Ice types (fork hitStepAccuracy), not via the type chart (Ice resists
+# Ice 0.5x) — handled as its own case.
+
+def test_ohko_moves_guarantee_ko():
+    for name, att in (("fissure", "garchomp"), ("guillotine", "machamp"),
+                      ("horndrill", "machamp"), ("sheercold", "chansey")):
+        r = dmg(user(att), name)
+        assert rng(r) == (CHANSEY_MAXHP, CHANSEY_MAXHP), name
+        assert r["ohko"] is True, name
+        assert r["immune"] is False, name
+
+
+def test_ohko_still_kos_at_partial_hp():
+    # OHKO deals max HP regardless of current HP (fork: target.maxhp).
+    low = {**CHANSEY, "hp": 0.5}
+    r = dmg(user("garchomp"), "fissure", defn=low)
+    assert rng(r) == (CHANSEY_MAXHP, CHANSEY_MAXHP)
+    assert r["ohko"] is True
+
+
+def test_sheercold_immune_vs_ice():
+    articuno = {"name": "articuno", "level": 50, "nature": "Docile", "evs": dict(EV)}
+    r = dmg(user("chansey"), "sheercold", defn=articuno)
+    assert rng(r) == (0, 0)
+    assert r["immune"] is True
+
+
+# ── T4: explosions (standard base power, calc library) + faint support ─
+# Fork cross-check (same attacker/defender): explosion 457, selfdestruct 351,
+# mistyexplosion 36 — all inside the calc ranges below.
+
+def test_explosion_moves_deal_real_damage():
+    r = dmg(user("pikachu"), "explosion")
+    assert (r["min"], r["max"]) == (401, 472)      # fork sample 457 in range
+    r = dmg(user("pikachu"), "selfdestruct")
+    assert (r["min"], r["max"]) == (321, 378)      # fork sample 351 in range
+    r = dmg(user("pikachu"), "mistyexplosion")
+    assert (r["min"], r["max"]) == (31, 37)        # fork sample 36 in range
+
+
+def test_faint_support_moves_deal_no_damage():
+    for name in ("healingwish", "lunardance", "memento"):
+        r = dmg(user("blissey"), name)
+        assert rng(r) == (0, 0), name
+
+
+# ── Type immunity on formula moves ─────────────────────────────────────
+# Fork runImmunity precedes the formula dispatch for EVERY move. The fork does
+# NOT apply 0.5x/2x multipliers or STAB to non-basePower moves (fork-verified:
+# Night Shade vs Ghost = level, not 2x; Super Fang vs Steel/Rock = plain half HP).
+GENGAR = {"name": "gengar", "level": 50, "nature": "Docile", "evs": dict(EV)}
+AERODACTYL = {"name": "aerodactyl", "level": 50, "nature": "Docile", "evs": dict(EV)}
+AGGRON = {"name": "aggron", "level": 50, "nature": "Docile", "evs": dict(EV)}
+
+
+def test_normal_formula_moves_immune_vs_ghost():
+    for name, att in (("seismictoss", "mew"), ("guillotine", "machamp"),
+                      ("horndrill", "machamp"), ("endeavor", "pikachu")):
+        r = dmg(user(att), name, defn=GENGAR)
+        assert rng(r) == (0, 0), name
+        assert r["immune"] is True, name
+
+
+def test_nightshade_immune_vs_normal():
+    r = dmg(user("chansey"), "nightshade")  # defender chansey is Normal-typed
+    assert rng(r) == (0, 0)
+    assert r["immune"] is True
+
+
+def test_fissure_immune_vs_flying():
+    r = dmg(user("garchomp"), "fissure", defn=AERODACTYL)
+    assert rng(r) == (0, 0)
+    assert r["immune"] is True
+
+
+def test_fissure_immune_vs_levitate_but_not_iron_ball():
+    # Fork isGrounded: Levitate makes a non-Flying defender airborne (immune);
+    # Iron Ball grounds it first, so Fissure hits again (KO).
+    floaty = {"name": "gengar", "level": 50, "nature": "Docile", "evs": dict(EV),
+              "ability": "levitate"}
+    r = dmg(user("garchomp"), "fissure", defn=floaty)
+    assert rng(r) == (0, 0)
+    assert r["immune"] is True
+    ball = {"name": "gengar", "level": 50, "nature": "Docile", "evs": dict(EV),
+            "ability": "levitate", "item": "iron ball"}
+    r = dmg(user("garchomp"), "fissure", defn=ball)
+    assert rng(r) == (135, 135)  # gengar max HP, KO
+    assert r["ohko"] is True
+
+
+def test_formula_moves_respect_immunity_but_not_multipliers():
+    # Positive controls: hits for the PLAIN formula value (no 2x, no 0.25x).
+    assert rng(dmg(user("chansey"), "nightshade", defn=GENGAR)) == (50, 50)   # no Ghost 2x
+    assert rng(dmg(user("sandshrew"), "superfang", defn=AGGRON)) == (72, 72)  # no Steel/Rock 0.25x

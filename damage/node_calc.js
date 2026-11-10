@@ -139,24 +139,86 @@ function effectiveSpeed(gen, o, tailwind) {
 //
 // lastHit = the damage the USER last took (belief-state state). Required by the
 // reflectors; without it the move fails (0 damage), matching the fork's thisTurn gate.
-// Gen-aware: Super Fang is Normal-typed fixed damage, so it is immune vs Ghost in
-// gen 2+ (gen 1 ignores Ghost immunity); Strong Jaw does NOT boost it (no base power).
+// Gen-aware: these moves still respect TYPE IMMUNITY exactly like any other move
+// (fork `runImmunity` precedes the formula dispatch): e.g. Super Fang (Normal) vs
+// Ghost (gen 2+), Night Shade (Ghost) vs Normal, Fissure (Ground) vs Flying/
+// Levitate, Psywave (Psychic) vs Dark. The fork does NOT apply 0.5x/2x
+// multipliers or STAB to formula moves (fork-verified: Night Shade vs Ghost =
+// level, not 2x level; Super Fang vs Steel/Rock = plain half HP). In gen 1 some
+// formula moves carry ignoreImmunity (fork data: Super Fang / Night Shade /
+// Seismic Toss hit Ghost types there). Strong Jaw does NOT boost them (no base
+// power). All immunity facts come from special_move_immunity.json (fork-exact,
+// see below).
 const SPECIAL_DAMAGE_MOVES = new Set([
   'superfang', 'ruination', 'naturesmadness', 'guardianofalola', 'finalgambit',
   'endeavor', 'psywave', 'counter', 'mirrorcoat', 'metalburst', 'comeuppance',
+  'nightshade', 'seismictoss', 'fissure', 'guillotine', 'horndrill', 'sheercold',
 ]);
 
+// Type-immunity facts for these moves, precomputed PER ENGINE KEY from the
+// fork's own dex data (type chart + move type + ignoreImmunity + ohko) — the
+// fork is the source of truth for raw game data and the battle environment the
+// calc must match. Regenerate with:  node scratch/gen_special_move_immunity.js
+// (schema: { "<engine key>": { "<move id>": { "immune": [defender types],
+//   "ground"?: true, "ohkoIce"?: true } } }).
+//
+// Why a table instead of recomputing from the chart at call time: (a) it is a
+// static lookup — the AI calls this deep in its search tree and the calc must
+// stay quick; (b) it captures fork quirks a hand-rolled chart walk misses (gen 1
+// ignoreImmunity, per-gen move types); (c) it keeps the calc fork-exact by
+// construction, since the fork's runImmunity is a pure function of (gen, move,
+// defender types/ability/item).
+const SPECIAL_MOVE_IMMUNITY = require('./special_move_immunity.json');
+
+// True when the fork's runImmunity (pokemon.js:1664) would block this special
+// move against this defender. Chart immunities come from the table; the two
+// request-data-dependent rules are applied here, mirroring the fork:
+//   * Ground moves: immune vs a grounded check — the defender is AIRBORNE (so
+//     immune) when Flying-typed, or has Levitate/Eelevate, or holds Air
+//     Balloon; Iron Ball grounds it (fork isGrounded, pokemon.js:1592).
+//     Volatile-based grounding (Gravity/Ingrain/Smackdown/Magnet Rise/
+//     Telekinesis) is battle state the belief state would have to report; the
+//     static calc assumes they are not active.
+//   * Sheer Cold: its "ohko: Ice" rule makes Ice types immune (the chart only
+//     resists Ice 0.5x) — handled in the move's own case below.
+function specialMoveImmune(gen, moveId, defender) {
+  const entry = (SPECIAL_MOVE_IMMUNITY[String(gen)] || {})[moveId];
+  if (!entry) return false;
+  const defTypes = (defender.species && defender.species.types) || [];
+  if (entry.ground) {
+    // Fork: Ground moves bypass the type chart entirely — only the grounded
+    // check applies (isGrounded), and its FIRST rule is Iron Ball -> grounded
+    // (which therefore overrides Flying type AND Levitate).
+    const item = String(defender.item || '').toLowerCase();
+    if (item === 'iron ball' || item === 'ironball') return false;
+    if (defTypes.includes('Flying')) return true;
+    const ability = String(defender.ability || '').toLowerCase();
+    if (ability === 'levitate' || ability === 'eelevate') return true;
+    if (item === 'air balloon' || item === 'airballoon') return true;
+    return false;
+  }
+  return !!(entry.immune && defTypes.some(t => entry.immune.includes(t)));
+}
+
 function specialMoveDamage(gen, moveId, attacker, defender, lastHit) {
-  // -> { min, max, immune } or null (not a special move we handle).
+  // -> { min, max, immune, ohko } or null (not a special move we handle).
   const defHP = defender.curHP ? defender.curHP() : defender.maxHP();
+  const defMaxHP = defender.maxHP ? defender.maxHP() : (defHP || 1);
   const attHP = attacker.curHP ? attacker.curHP() : attacker.maxHP();
   const defTypes = (defender.species && defender.species.types) || [];
-  const hasGhost = defTypes.includes('Ghost');
+  const hasIce = defTypes.includes('Ice');
   const attLevel = attacker.level || 100;
+
+  // Type-immunity gate: the fork's runImmunity applies to EVERY move, formula
+  // moves included (see specialMoveImmune). Multipliers (0.5x/2x) and STAB are
+  // deliberately NOT applied (fork-verified immunity-only behaviour for
+  // non-basePower moves).
+  if (specialMoveImmune(gen, moveId, defender)) {
+    return { min: 0, max: 0, immune: true };
+  }
 
   switch (moveId) {
     case 'superfang':
-      if (hasGhost && gen >= 2) return { min: 0, max: 0, immune: true };
       return { min: Math.max(1, Math.floor(defHP / 2)), max: Math.max(1, Math.floor(defHP / 2)), immune: false };
     case 'ruination':
     case 'naturesmadness':
@@ -179,16 +241,31 @@ function specialMoveDamage(gen, moveId, attacker, defender, lastHit) {
     case 'comeuppance':
       if (lastHit == null || lastHit <= 0) return { min: 0, max: 0, immune: true };
       return { min: Math.max(1, Math.floor(1.5 * lastHit)), max: Math.max(1, Math.floor(1.5 * lastHit)), immune: false };
+    case 'nightshade':
+    case 'seismictoss':
+      // T2: damage = attacker's level (fork: move.damage === "level" -> source.level).
+      // Unified for both (the calc covered Seismic Toss but not Night Shade).
+      return { min: attLevel, max: attLevel, immune: false };
+    case 'fissure':
+    case 'guillotine':
+    case 'horndrill':
+      // T3 OHKO: guaranteed KO on hit (fork: move.ohko -> target.maxhp). Accuracy is
+      // in the move data; the calc reports the KO so the AI knows it faints the target.
+      return { min: defMaxHP, max: defMaxHP, immune: false, ohko: true };
+    case 'sheercold':
+      // OHKO "Ice": immune vs Ice types (fork hitStepAccuracy [ohko]), else a KO.
+      if (hasIce) return { min: 0, max: 0, immune: true };
+      return { min: defMaxHP, max: defMaxHP, immune: false, ohko: true };
   }
   return null;
 }
 
-function responseFromRange(min, max, immune, maxhp, desc) {
+function responseFromRange(min, max, immune, maxhp, desc, extra) {
   const expected = (min + max) / 2;
   const pct = (v) => (maxhp ? Math.round((v / maxhp) * 10000) / 100 : 0);
   const block = { min, max, expected, min_pct: pct(min), max_pct: pct(max), expected_pct: pct(expected) };
-  // Fixed/state damage: a critical hit does not change the value (no base power).
-  return Object.assign({ crit: { min, max, expected } }, block, { immune, maxhp, desc: desc || (immune ? 'immune' : '') });
+  // Fixed/state/OHKO damage: a critical hit does not change the value (no base power).
+  return Object.assign({ crit: { min, max, expected } }, block, { immune, maxhp, desc: desc || (immune ? 'immune' : '') }, extra || {});
 }
 
 function handleDamage(req) {
@@ -207,7 +284,12 @@ function handleDamage(req) {
   const lastHit = (req.move && typeof req.move === 'object') ? req.move.lastHitDamage : null;
   if (SPECIAL_DAMAGE_MOVES.has(moveId)) {
     const r = specialMoveDamage(gen, moveId, attacker, defender, lastHit);
-    if (r !== null) return responseFromRange(r.min, r.max, !!r.immune, maxHP);
+    if (r !== null) {
+      const extra = r.ohko ? { ohko: true } : {};
+      const desc = r.ohko ? 'OHKO — guaranteed KO if it hits (accuracy in move data)'
+        : (r.immune ? 'immune' : '');
+      return responseFromRange(r.min, r.max, !!r.immune, maxHP, desc, extra);
+    }
   }
 
   function rangeFor(crit) {

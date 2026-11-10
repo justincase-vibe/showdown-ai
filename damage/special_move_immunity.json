@@ -1,0 +1,758 @@
+{
+  "0": {
+    "superfang": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "ruination": {
+      "immune": []
+    },
+    "naturesmadness": {
+      "immune": []
+    },
+    "guardianofalola": {
+      "immune": []
+    },
+    "finalgambit": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "endeavor": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "psywave": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "counter": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "mirrorcoat": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "metalburst": {
+      "immune": []
+    },
+    "comeuppance": {
+      "immune": []
+    },
+    "nightshade": {
+      "immune": [
+        "Normal"
+      ]
+    },
+    "seismictoss": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "fissure": {
+      "immune": [
+        "Flying"
+      ],
+      "ground": true
+    },
+    "guillotine": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "horndrill": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "sheercold": {
+      "immune": [],
+      "ohkoIce": true
+    }
+  },
+  "1": {
+    "superfang": {
+      "immune": []
+    },
+    "ruination": {
+      "immune": []
+    },
+    "naturesmadness": {
+      "immune": []
+    },
+    "guardianofalola": {
+      "immune": []
+    },
+    "finalgambit": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "endeavor": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "psywave": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "counter": {
+      "immune": []
+    },
+    "mirrorcoat": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "metalburst": {
+      "immune": []
+    },
+    "comeuppance": {
+      "immune": []
+    },
+    "nightshade": {
+      "immune": []
+    },
+    "seismictoss": {
+      "immune": []
+    },
+    "fissure": {
+      "immune": [
+        "Flying"
+      ],
+      "ground": true
+    },
+    "guillotine": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "horndrill": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "sheercold": {
+      "immune": []
+    }
+  },
+  "2": {
+    "superfang": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "ruination": {
+      "immune": []
+    },
+    "naturesmadness": {
+      "immune": []
+    },
+    "guardianofalola": {
+      "immune": []
+    },
+    "finalgambit": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "endeavor": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "psywave": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "counter": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "mirrorcoat": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "metalburst": {
+      "immune": []
+    },
+    "comeuppance": {
+      "immune": []
+    },
+    "nightshade": {
+      "immune": [
+        "Normal"
+      ]
+    },
+    "seismictoss": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "fissure": {
+      "immune": [
+        "Flying"
+      ],
+      "ground": true
+    },
+    "guillotine": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "horndrill": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "sheercold": {
+      "immune": []
+    }
+  },
+  "3": {
+    "superfang": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "ruination": {
+      "immune": []
+    },
+    "naturesmadness": {
+      "immune": []
+    },
+    "guardianofalola": {
+      "immune": []
+    },
+    "finalgambit": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "endeavor": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "psywave": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "counter": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "mirrorcoat": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "metalburst": {
+      "immune": []
+    },
+    "comeuppance": {
+      "immune": []
+    },
+    "nightshade": {
+      "immune": [
+        "Normal"
+      ]
+    },
+    "seismictoss": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "fissure": {
+      "immune": [
+        "Flying"
+      ],
+      "ground": true
+    },
+    "guillotine": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "horndrill": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "sheercold": {
+      "immune": []
+    }
+  },
+  "4": {
+    "superfang": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "ruination": {
+      "immune": []
+    },
+    "naturesmadness": {
+      "immune": []
+    },
+    "guardianofalola": {
+      "immune": []
+    },
+    "finalgambit": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "endeavor": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "psywave": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "counter": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "mirrorcoat": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "metalburst": {
+      "immune": []
+    },
+    "comeuppance": {
+      "immune": []
+    },
+    "nightshade": {
+      "immune": [
+        "Normal"
+      ]
+    },
+    "seismictoss": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "fissure": {
+      "immune": [
+        "Flying"
+      ],
+      "ground": true
+    },
+    "guillotine": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "horndrill": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "sheercold": {
+      "immune": []
+    }
+  },
+  "5": {
+    "superfang": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "ruination": {
+      "immune": []
+    },
+    "naturesmadness": {
+      "immune": []
+    },
+    "guardianofalola": {
+      "immune": []
+    },
+    "finalgambit": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "endeavor": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "psywave": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "counter": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "mirrorcoat": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "metalburst": {
+      "immune": []
+    },
+    "comeuppance": {
+      "immune": []
+    },
+    "nightshade": {
+      "immune": [
+        "Normal"
+      ]
+    },
+    "seismictoss": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "fissure": {
+      "immune": [
+        "Flying"
+      ],
+      "ground": true
+    },
+    "guillotine": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "horndrill": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "sheercold": {
+      "immune": []
+    }
+  },
+  "6": {
+    "superfang": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "ruination": {
+      "immune": []
+    },
+    "naturesmadness": {
+      "immune": []
+    },
+    "guardianofalola": {
+      "immune": []
+    },
+    "finalgambit": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "endeavor": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "psywave": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "counter": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "mirrorcoat": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "metalburst": {
+      "immune": []
+    },
+    "comeuppance": {
+      "immune": []
+    },
+    "nightshade": {
+      "immune": [
+        "Normal"
+      ]
+    },
+    "seismictoss": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "fissure": {
+      "immune": [
+        "Flying"
+      ],
+      "ground": true
+    },
+    "guillotine": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "horndrill": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "sheercold": {
+      "immune": []
+    }
+  },
+  "7": {
+    "superfang": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "ruination": {
+      "immune": []
+    },
+    "naturesmadness": {
+      "immune": []
+    },
+    "guardianofalola": {
+      "immune": []
+    },
+    "finalgambit": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "endeavor": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "psywave": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "counter": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "mirrorcoat": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "metalburst": {
+      "immune": []
+    },
+    "comeuppance": {
+      "immune": []
+    },
+    "nightshade": {
+      "immune": [
+        "Normal"
+      ]
+    },
+    "seismictoss": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "fissure": {
+      "immune": [
+        "Flying"
+      ],
+      "ground": true
+    },
+    "guillotine": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "horndrill": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "sheercold": {
+      "immune": [],
+      "ohkoIce": true
+    }
+  },
+  "8": {
+    "superfang": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "ruination": {
+      "immune": []
+    },
+    "naturesmadness": {
+      "immune": []
+    },
+    "guardianofalola": {
+      "immune": []
+    },
+    "finalgambit": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "endeavor": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "psywave": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "counter": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "mirrorcoat": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "metalburst": {
+      "immune": []
+    },
+    "comeuppance": {
+      "immune": []
+    },
+    "nightshade": {
+      "immune": [
+        "Normal"
+      ]
+    },
+    "seismictoss": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "fissure": {
+      "immune": [
+        "Flying"
+      ],
+      "ground": true
+    },
+    "guillotine": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "horndrill": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "sheercold": {
+      "immune": [],
+      "ohkoIce": true
+    }
+  },
+  "9": {
+    "superfang": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "ruination": {
+      "immune": []
+    },
+    "naturesmadness": {
+      "immune": []
+    },
+    "guardianofalola": {
+      "immune": []
+    },
+    "finalgambit": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "endeavor": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "psywave": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "counter": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "mirrorcoat": {
+      "immune": [
+        "Dark"
+      ]
+    },
+    "metalburst": {
+      "immune": []
+    },
+    "comeuppance": {
+      "immune": []
+    },
+    "nightshade": {
+      "immune": [
+        "Normal"
+      ]
+    },
+    "seismictoss": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "fissure": {
+      "immune": [
+        "Flying"
+      ],
+      "ground": true
+    },
+    "guillotine": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "horndrill": {
+      "immune": [
+        "Ghost"
+      ]
+    },
+    "sheercold": {
+      "immune": [],
+      "ohkoIce": true
+    }
+  }
+}
