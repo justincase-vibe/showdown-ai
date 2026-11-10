@@ -146,6 +146,39 @@ def test_reversal_increases_as_attacker_hp_drops():
     assert rng(dmg({**GARCH, "hp": 0.1}, TITAN, "reversal")) == (484, 572)
 
 
+# ── HP-based flat moves (invertible to HP — key for the belief state) ──
+def test_natures_madness_is_half_defender_current_hp():
+    # Nature's Madness = 1/2 of the defender's CURRENT HP (single value).
+    # Observed damage therefore reveals the defender's HP fraction (D36 belief use).
+    assert rng(dmg(GARCH, TITAN, "naturesmadness")) == (170, 170)            # full: 341/2
+    assert rng(dmg(GARCH, {**TITAN, "hp": 0.5}, "naturesmadness")) == (85, 85)  # 170/2
+
+
+def test_final_gambit_is_attacker_current_hp():
+    # Final Gambit = the attacker's CURRENT HP (single value).
+    assert rng(dmg(BLAS, TITAN, "finalgambit")) == (299, 299)   # Blastoise full HP
+    assert rng(dmg({**BLAS, "hp": 0.5}, TITAN, "finalgambit")) == (149, 149)
+
+
+def test_crush_grip_scales_with_defender_hp():
+    assert rng(dmg(GARCH, TITAN, "crushgrip")) == (48, 57)
+    assert rng(dmg(GARCH, {**TITAN, "hp": 0.5}, "crushgrip")) == (24, 28)
+
+
+def test_hard_press_scales_with_defender_hp():
+    assert rng(dmg(GARCH, TITAN, "hardpress")) == (162, 192)
+    assert rng(dmg(GARCH, {**TITAN, "hp": 0.5}, "hardpress")) == (80, 96)
+
+
+# ── abilityOn-gated abilities default to "not active" (correct belief default) ──
+def test_flashfire_no_boost_when_ability_off():
+    # The library defaults abilityOn=false, so Flash Fire does NOT boost by default
+    # (== plain Fire STAB). Modelling the *active* state is a Step 3 belief input (D36).
+    plain = dmg({**TORK}, MACH, "flamethrower")
+    ff = dmg({**TORK, "ability": "flashfire"}, MACH, "flamethrower")
+    assert rng(ff) == rng(plain) == (97, 115)
+
+
 # ── input handling & validation ───────────────────────────────────────
 def test_curhp_absolute_alias_works():
     # curHP is clamped to [1, maxHP]. A huge value == full HP (no Defeatist trigger).

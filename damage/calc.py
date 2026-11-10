@@ -32,6 +32,11 @@ attacker / defender / a / b are dicts using @smogon/calc option names:
 ``ability``, ``status`` ('par'/'brn'/...), ``boosts`` ({'atk':2,...}), ``teraType``,
 ``moves``.
 
+``move`` is a move-name string (or ``{'name':..., 'isCrit':bool,
+``lastHitDamage':int}``). ``lastHitDamage`` is the damage the user last took —
+required by the reflector moves (``counter``/``mirrorcoat``/``metalburst``/
+``comeuppance``), which scale off that prior hit; without it a reflector deals 0.
+
 ``hp`` (optional, AI-facing): the mon's CURRENT HP as a 0.0-1.0 fraction of its
 max HP. @smogon/calc gates several damage effects on current HP — attacker-side
 Defeatist (<=1/2, Atk&SpA x0.5), Overgrow/Blaze/Torrent/Swarm (<=1/3, x1.5 on the
@@ -39,7 +44,7 @@ matching type), Eruption/Water Spout/Flail/Reversal (BP scales with own HP); and
 defender-side Multiscale/Shadow Shield/Tera Shell (only AT FULL HP, x0.5), Brine
 (<=1/2, x1.5), Crush Grip/Wring Out/Hard Press (BP scales with the defender's HP).
 Without ``hp`` the mon is assumed at full HP (unchanged behaviour). ``curHP`` is
-accepted as a library-facing alias (absolute HP, clamped to the mon's max HP). ``move`` is a move-name string (or ``{'name':..., 'isCrit':bool}``).
+accepted as a library-facing alias (absolute HP, clamped to the mon's max HP).
 ``field`` (optional) may set ``weather`` (capitalised: 'Rain'/'Sun'/'Sand'/'Hail'),
 ``terrain``, ``attackerSide`` and ``defenderSide`` (e.g. ``{'isReflect': True}``).
 
@@ -112,7 +117,13 @@ def _normalise_move(move: MoveSpec) -> Dict[str, Any]:
         return {"name": move}
     if "name" not in move:
         raise ValueError("move must be a name or {'name': ...}")
-    return {"name": move["name"], "isCrit": bool(move.get("isCrit", False))}
+    out = {"name": move["name"], "isCrit": bool(move.get("isCrit", False))}
+    # Reflector moves (counter/mirrorcoat/metalburst/comeuppance) scale off the
+    # damage the USER last took. The belief state carries that as an integer; pass
+    # it through as-is. Absent -> the reflector fails (0), matching the fork.
+    if move.get("lastHitDamage") is not None:
+        out["lastHitDamage"] = int(move["lastHitDamage"])
+    return out
 
 
 def calc_damage(
@@ -126,6 +137,13 @@ def calc_damage(
     """Damage range (min/max/expected, in HP and % of defender max HP) + crit block.
 
     ``immune`` is True and all damage is 0 when the move cannot hit the defender.
+
+    Special-damage moves (no base power — ``superfang``, ``ruination``,
+    ``naturesmadness``, ``guardianofalola``, ``finalgambit``, ``endeavor``,
+    ``psywave``, and the reflectors ``counter``/``mirrorcoat``/``metalburst``/
+    ``comeuppance``) are completed with their official fork-verified formula
+    (@smogon/calc has no formula for these); the reflectors need
+    ``move={'name':..., 'lastHitDamage': <prior hit damage>}``.
 
     Pass ``fmt`` (a format id, e.g. ``"gen9bss3v3"``) so the correct engine is
     selected per format (champions formats use the library's champions

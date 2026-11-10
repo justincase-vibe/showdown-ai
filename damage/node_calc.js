@@ -130,6 +130,67 @@ function effectiveSpeed(gen, o, tailwind) {
   return Math.max(0, Math.min(10000, s));
 }
 
+// ── Special-damage moves (non-basePower formulas) ──────────────────────
+// @smogon/calc v0.12.0 returns 0 for these (they're absent from its mechanics).
+// We COMPLETE the calc with the official Smogon rules (Bulbapedia spec), fork-
+// verified integer-exact (scratch/sweep_t1.js). @smogon/calc stays the source of
+// truth for every other move; this only fills its documented gaps (D37). Rounding
+// mirrors the fork: damage is Math.floored then clamped to >= 1 (battle.js:1835).
+//
+// lastHit = the damage the USER last took (belief-state state). Required by the
+// reflectors; without it the move fails (0 damage), matching the fork's thisTurn gate.
+// Gen-aware: Super Fang is Normal-typed fixed damage, so it is immune vs Ghost in
+// gen 2+ (gen 1 ignores Ghost immunity); Strong Jaw does NOT boost it (no base power).
+const SPECIAL_DAMAGE_MOVES = new Set([
+  'superfang', 'ruination', 'naturesmadness', 'guardianofalola', 'finalgambit',
+  'endeavor', 'psywave', 'counter', 'mirrorcoat', 'metalburst', 'comeuppance',
+]);
+
+function specialMoveDamage(gen, moveId, attacker, defender, lastHit) {
+  // -> { min, max, immune } or null (not a special move we handle).
+  const defHP = defender.curHP ? defender.curHP() : defender.maxHP();
+  const attHP = attacker.curHP ? attacker.curHP() : attacker.maxHP();
+  const defTypes = (defender.species && defender.species.types) || [];
+  const hasGhost = defTypes.includes('Ghost');
+  const attLevel = attacker.level || 100;
+
+  switch (moveId) {
+    case 'superfang':
+      if (hasGhost && gen >= 2) return { min: 0, max: 0, immune: true };
+      return { min: Math.max(1, Math.floor(defHP / 2)), max: Math.max(1, Math.floor(defHP / 2)), immune: false };
+    case 'ruination':
+    case 'naturesmadness':
+      return { min: Math.max(1, Math.floor(defHP / 2)), max: Math.max(1, Math.floor(defHP / 2)), immune: false };
+    case 'guardianofalola':
+      return { min: Math.max(1, Math.floor(defHP * 3 / 4)), max: Math.max(1, Math.floor(defHP * 3 / 4)), immune: false };
+    case 'finalgambit':
+      return { min: attHP, max: attHP, immune: false };
+    case 'endeavor': {
+      const d = Math.max(0, defHP - attHP);
+      return { min: d, max: d, immune: d === 0 };
+    }
+    case 'psywave': // Past (gen 2-5): random(50,151) * level/100
+      return { min: Math.max(1, Math.floor(50 * attLevel / 100)), max: Math.floor(150 * attLevel / 100), immune: false };
+    case 'counter':
+    case 'mirrorcoat':
+      if (lastHit == null || lastHit <= 0) return { min: 0, max: 0, immune: true };
+      return { min: 2 * Math.round(lastHit), max: 2 * Math.round(lastHit), immune: false };
+    case 'metalburst':
+    case 'comeuppance':
+      if (lastHit == null || lastHit <= 0) return { min: 0, max: 0, immune: true };
+      return { min: Math.max(1, Math.floor(1.5 * lastHit)), max: Math.max(1, Math.floor(1.5 * lastHit)), immune: false };
+  }
+  return null;
+}
+
+function responseFromRange(min, max, immune, maxhp, desc) {
+  const expected = (min + max) / 2;
+  const pct = (v) => (maxhp ? Math.round((v / maxhp) * 10000) / 100 : 0);
+  const block = { min, max, expected, min_pct: pct(min), max_pct: pct(max), expected_pct: pct(expected) };
+  // Fixed/state damage: a critical hit does not change the value (no base power).
+  return Object.assign({ crit: { min, max, expected } }, block, { immune, maxhp, desc: desc || (immune ? 'immune' : '') });
+}
+
 function handleDamage(req) {
   const gen = req.gen ?? 9;
   const attacker = buildPokemon(gen, req.attacker);
@@ -138,6 +199,16 @@ function handleDamage(req) {
   if (!moveName) throw new Error('move name required');
   const field = buildField(req.field);
   const maxHP = defender.maxHP();
+
+  // Special-damage moves: @smogon/calc has no formula for these, so we complete the
+  // calc with the official (fork-verified) formula. `lastHitDamage` (belief-state
+  // state) feeds the reflectors. See SPECIAL_DAMAGE_MOVES / specialMoveDamage.
+  const moveId = String(moveName).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const lastHit = (req.move && typeof req.move === 'object') ? req.move.lastHitDamage : null;
+  if (SPECIAL_DAMAGE_MOVES.has(moveId)) {
+    const r = specialMoveDamage(gen, moveId, attacker, defender, lastHit);
+    if (r !== null) return responseFromRange(r.min, r.max, !!r.immune, maxHP);
+  }
 
   function rangeFor(crit) {
     const move = new Move(gen, moveName, crit ? { isCrit: true } : {});
