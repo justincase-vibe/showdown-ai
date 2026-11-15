@@ -123,6 +123,17 @@ def _normalise_move(move: MoveSpec) -> Dict[str, Any]:
     # it through as-is. Absent -> the reflector fails (0), matching the fork.
     if move.get("lastHitDamage") is not None:
         out["lastHitDamage"] = int(move["lastHitDamage"])
+    # T5 state-BP moves (bpCallback) — the transient battle state the belief state
+    # reports so the calc can apply the fork's base-power rule (D39). All optional;
+    # absent = the no-state baseline the fork would use.
+    for key in ("hitThisTurn", "lastMoveFailed", "pledgeCombo"):  # bools
+        if move.get(key) is not None:
+            out[key] = bool(move[key])
+    for key in ("allyFainted", "stockpileLayers"):  # ints
+        if move.get(key) is not None:
+            out[key] = int(move[key])
+    if move.get("beatupAllies") is not None:  # list of mon specs (incl. user)
+        out["beatupAllies"] = list(move["beatupAllies"])
     return out
 
 
@@ -154,6 +165,23 @@ def calc_damage(
     Formula moves respect type immunity but NOT 0.5x/2x multipliers or STAB
     (fork-verified). Explosion moves and faint-support moves
     (``healingwish``/``lunardance``/``memento``) report 0 damage as usual.
+
+    State-dependent base-power moves (``bpCallback``) — the fork re-scales their
+    base power from transient battle state; @smogon/calc has no formula for them
+    (it would return the static data base power, or 0 for the base-0 ones). We
+    complete the calc with the fork's formula (per-engine base powers in
+    ``special_bp_moves.json``) and hand the effective base power to the library,
+    which applies STAB/typing/boosts/immunity/crits normally (D39). Pass the
+    relevant state via ``move={...}`` (all optional; absent = no-state baseline):
+      * ``avalanche``            ``hitThisTurn=True``          (x2: user was hit this turn)
+      * ``stompingtantrum``      ``lastMoveFailed=True``       (x2: user's previous move failed)
+      * ``temperflare``          ``lastMoveFailed=True``       (x2: same)
+      * ``firepledge``/``grasspledge``/``waterpledge``
+                               ``pledgeCombo=True``            (BP 150: a compatible pledge hit this turn)
+      * ``lastrespects``         ``allyFainted=<n>``           (BP 50 + 50*n fainted allies)
+      * ``spitup``               ``stockpileLayers=<n>``       (BP 100*n; 0 -> the move fails)
+      * ``beatup``               ``beatupAllies=[<mon>,...]``  (each ally: BP 5 + floor(baseAtk/10), own stats)
+    Note: the pledges are banned in the champions engine (key 0), so they report 0 there.
 
     Pass ``fmt`` (a format id, e.g. ``"gen9bss3v3"``) so the correct engine is
     selected per format (champions formats use the library's champions

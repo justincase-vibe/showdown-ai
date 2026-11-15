@@ -1,0 +1,112 @@
+{
+  "0": {
+    "avalanche": 60,
+    "beatup": 0,
+    "firepledge": null,
+    "grasspledge": null,
+    "waterpledge": null,
+    "lastrespects": 50,
+    "spitup": 0,
+    "stompingtantrum": 75,
+    "temperflare": 75
+  },
+  "1": {
+    "avalanche": null,
+    "beatup": null,
+    "firepledge": null,
+    "grasspledge": null,
+    "waterpledge": null,
+    "lastrespects": null,
+    "spitup": null,
+    "stompingtantrum": null,
+    "temperflare": null
+  },
+  "2": {
+    "avalanche": null,
+    "beatup": 10,
+    "firepledge": null,
+    "grasspledge": null,
+    "waterpledge": null,
+    "lastrespects": null,
+    "spitup": null,
+    "stompingtantrum": null,
+    "temperflare": null
+  },
+  "3": {
+    "avalanche": null,
+    "beatup": 10,
+    "firepledge": null,
+    "grasspledge": null,
+    "waterpledge": null,
+    "lastrespects": null,
+    "spitup": 0,
+    "stompingtantrum": null,
+    "temperflare": null
+  },
+  "4": {
+    "avalanche": 60,
+    "beatup": 10,
+    "firepledge": null,
+    "grasspledge": null,
+    "waterpledge": null,
+    "lastrespects": null,
+    "spitup": 0,
+    "stompingtantrum": null,
+    "temperflare": null
+  },
+  "5": {
+    "avalanche": 60,
+    "beatup": 0,
+    "firepledge": 50,
+    "grasspledge": 50,
+    "waterpledge": 50,
+    "lastrespects": null,
+    "spitup": 0,
+    "stompingtantrum": null,
+    "temperflare": null
+  },
+  "6": {
+    "avalanche": 60,
+    "beatup": 0,
+    "firepledge": 80,
+    "grasspledge": 80,
+    "waterpledge": 80,
+    "lastrespects": null,
+    "spitup": 0,
+    "stompingtantrum": null,
+    "temperflare": null
+  },
+  "7": {
+    "avalanche": 60,
+    "beatup": 0,
+    "firepledge": 80,
+    "grasspledge": 80,
+    "waterpledge": 80,
+    "lastrespects": null,
+    "spitup": 0,
+    "stompingtantrum": 75,
+    "temperflare": null
+  },
+  "8": {
+    "avalanche": 60,
+    "beatup": 0,
+    "firepledge": 80,
+    "grasspledge": 80,
+    "waterpledge": 80,
+    "lastrespects": null,
+    "spitup": 0,
+    "stompingtantrum": 75,
+    "temperflare": null
+  },
+  "9": {
+    "avalanche": 60,
+    "beatup": 0,
+    "firepledge": 80,
+    "grasspledge": 80,
+    "waterpledge": 80,
+    "lastrespects": 50,
+    "spitup": 0,
+    "stompingtantrum": 75,
+    "temperflare": 75
+  }
+}

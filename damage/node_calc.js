@@ -19,7 +19,11 @@
 // (capitalised: "Rain"/"Sun"/"Sand"/"Hail"), terrain, attackerSide, defenderSide.
 
 const path = require('path');
-const { calculate, Pokemon, Move, Field, Side } = require('@smogon/calc');
+const { calculate, Pokemon, Move, Field, Side, Generations, toID } = require('@smogon/calc');
+// NOTE: `Generations` is an INSTANCE (not a class) exposing .get(gen).
+function speciesInEngine(gen, name) {
+  return !!Generations.get(gen).species.get(toID(name));
+}
 
 // @smogon/calc resolves `item` and `ability` by DISPLAY NAME (its item/ability
 // tables are keyed by name, not id). The AI / legality DB and the sim fork all
@@ -53,6 +57,14 @@ function clean(obj) {
 
 function buildPokemon(gen, o) {
   if (!o || !o.name) throw new Error('pokemon requires a "name"');
+  // Engines with a legal-species whitelist (e.g. the champions/BSS engine, gen
+  // key 0: 359 BSS-legal species) have NO entry for species outside the list;
+  // the library then crashes opaquely inside its Pokemon constructor (reading
+  // 'hp' of undefined). Fail loudly with a clean error instead — an illegal
+  // species must never silently produce numbers.
+  if (!speciesInEngine(gen, o.name)) {
+    throw new Error(`pokemon "${o.name}" is not legal in the gen-${gen} engine (not in its species table)`);
+  }
   const opts = clean({
     level: o.level,
     nature: o.nature,
@@ -260,6 +272,100 @@ function specialMoveDamage(gen, moveId, attacker, defender, lastHit) {
   return null;
 }
 
+// ── T5: state-dependent base-power moves (bpCallback) ──────────────────────────
+// @smogon/calc's gen789 mechanics has NO formula for these (they fall to
+// `default: basePower = move.bp`, i.e. the STATIC base power from the data). For
+// the moves whose data base power is 0 (beatup, spitup) the library therefore
+// returns 0 damage — a hard belief-state bug. For the others it returns the
+// correct no-state baseline but cannot see the transient battle state that the
+// fork uses to re-scale them (hit-this-turn, last-move-failed, pledge combo,
+// fainted allies, stockpile layers).
+//
+// We COMPLETE the calc the same way as the reflectors (D37): read the fork's
+// per-engine-key base power (special_bp_moves.json — the fork is the source of
+// truth for raw move data; champions bans the pledges so they are null there),
+// compute the effective base power from the belief-state flags (req.move.*), and
+// hand it to the library via `overrides.basePower`. The library then applies
+// STAB / typing / boosts / immunities / crits exactly as for any normal move, so
+// this stays the ONE unified damage pipeline (no second formula to maintain).
+//
+// State flags (all optional; absent = the no-state baseline the fork would use):
+//   move.hitThisTurn      bool  avalanche: user was hit by the target this turn (x2)
+//   move.lastMoveFailed   bool  stompingtantrum/temperflare: user's previous move failed (x2)
+//   move.pledgeCombo      bool  fire/grass/waterpledge: a compatible pledge already hit this turn (BP 150)
+//   move.allyFainted      int   lastrespects: number of the user's fainted allies (+50 BP each)
+//   move.stockpileLayers  int   spitup: Stockpile layers (+100 BP each; 0 => the move fails)
+//   move.beatupAllies     array beatup: participating allies (incl. user); each deals
+//                         5 + floor(baseAtk/10) BP using its OWN stats
+const SPECIAL_BP_MOVES = require('./special_bp_moves.json');
+const STATE_BP_MOVES = new Set([
+  'avalanche', 'beatup', 'firepledge', 'grasspledge', 'waterpledge',
+  'lastrespects', 'spitup', 'stompingtantrum', 'temperflare',
+]);
+
+// Effective base power for a single-hit state-BP move, or null if the move is
+// unusable/banned in this engine (the caller reports 0/immune — the normal
+// path crashes on the banned/inherit move data). Fork formulas: avalanche/ST/TF = basePower * 2 (relative); pledges =
+// absolute 150 on combo; lastrespects = 50 + 50*fainted (absolute); spitup =
+// 100*layers (absolute, 0 => fails). See scratch/probe_t5_formulas.js.
+function effectiveBP(gen, moveId, st) {
+  const row = SPECIAL_BP_MOVES[String(gen)] || {};
+  const baseBP = row[moveId];
+  if (baseBP === null || baseBP === undefined) return null;
+  switch (moveId) {
+    case 'avalanche':        return baseBP * (st.hitThisTurn ? 2 : 1);
+    case 'stompingtantrum':
+    case 'temperflare':      return baseBP * (st.lastMoveFailed ? 2 : 1);
+    case 'firepledge':
+    case 'grasspledge':
+    case 'waterpledge':      return st.pledgeCombo ? 150 : baseBP;
+    case 'lastrespects':     return 50 + 50 * (st.allyFainted || 0);
+    case 'spitup':           return 100 * (st.stockpileLayers || 0);
+  }
+  return null;
+}
+
+// Damage range for a state-BP move (normal + crit), or null if not applicable.
+// beatup is multi-hit with a per-ally base power (5 + floor(baseAtk/10)); the
+// total is the sum of each ally's own-stats hit (fork onModifyMove: allies are
+// the user + non-fainted, non-statused party).
+function stateMoveDamage(gen, moveId, attacker, defender, st, field) {
+  if (moveId === 'beatup') {
+    const allies = st.beatupAllies;
+    if (!Array.isArray(allies) || allies.length === 0) return { min: 0, max: 0, immune: true, crit: { min: 0, max: 0 } };
+    let nMin = 0, nMax = 0, cMin = 0, cMax = 0;
+    for (const ally of allies) {
+      const att = buildPokemon(gen, ally);
+      const baseAtk = (att.species && att.species.baseStats && att.species.baseStats.atk) || (ally.baseAtk || 0);
+      const bp = 5 + Math.floor(baseAtk / 10);
+      for (const crit of [false, true]) {
+        try {
+          const mv = new Move(gen, 'beatup', crit ? { overrides: { basePower: bp }, isCrit: true } : { overrides: { basePower: bp } });
+          const [mn, mx] = calculate(gen, att, defender, mv, field).range();
+          if (crit) { cMin += mn; cMax += mx; } else { nMin += mn; nMax += mx; }
+        } catch (e) { /* immune or unsupported -> contributes 0 */ }
+      }
+    }
+    return { min: nMin, max: nMax, immune: nMax === 0, crit: { min: cMin, max: cMax } };
+  }
+
+  const bp = effectiveBP(gen, moveId, st);
+  // Unusable/banned in this engine (e.g. pledges in champions: isNonstandard),
+  // or no state to act on (spitup with 0 layers) -> report 0/immune. MUST NOT
+  // return null here: the normal rangeFor path crashes on the banned/inherit
+  // move data (Cannot read properties of undefined (reading 'hp')).
+  if (bp === null || bp <= 0) return { min: 0, max: 0, immune: true, crit: { min: 0, max: 0 } };
+  const range = (crit) => {
+    try {
+      const mv = new Move(gen, moveId, crit ? { overrides: { basePower: bp }, isCrit: true } : { overrides: { basePower: bp } });
+      const [mn, mx] = calculate(gen, attacker, defender, mv, field).range();
+      return { min: mn, max: mx };
+    } catch (e) { return { min: 0, max: 0 }; }
+  };
+  const n = range(false), c = range(true);
+  return { min: n.min, max: n.max, immune: n.max === 0, crit: { min: c.min, max: c.max } };
+}
+
 function responseFromRange(min, max, immune, maxhp, desc, extra) {
   const expected = (min + max) / 2;
   const pct = (v) => (maxhp ? Math.round((v / maxhp) * 10000) / 100 : 0);
@@ -289,6 +395,26 @@ function handleDamage(req) {
       const desc = r.ohko ? 'OHKO — guaranteed KO if it hits (accuracy in move data)'
         : (r.immune ? 'immune' : '');
       return responseFromRange(r.min, r.max, !!r.immune, maxHP, desc, extra);
+    }
+  }
+
+  // T5 state-BP moves (bpCallback): the library has no formula for these, so we
+  // compute the effective base power from the belief-state flags (fork formulas)
+  // and hand it to the library, which applies STAB/typing/boosts/immunity/crits
+  // normally. See effectiveBP / stateMoveDamage / special_bp_moves.json (D39).
+  const st = (req.move && typeof req.move === 'object') ? req.move : {};
+  if (STATE_BP_MOVES.has(moveId)) {
+    const r = stateMoveDamage(gen, moveId, attacker, defender, st, field);
+    if (r !== null) {
+      const pct = (v) => (maxHP ? Math.round((v / maxHP) * 10000) / 100 : 0);
+      const cexp = ((r.crit && (r.crit.min + r.crit.max)) / 2) || 0;
+      return {
+        min: r.min, max: r.max, expected: (r.min + r.max) / 2,
+        min_pct: pct(r.min), max_pct: pct(r.max), expected_pct: pct((r.min + r.max) / 2),
+        crit: { min: r.crit.min, max: r.crit.max, expected: cexp },
+        immune: !!r.immune, maxhp: maxHP,
+        desc: r.immune ? 'immune' : '',
+      };
     }
   }
 
