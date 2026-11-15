@@ -89,6 +89,34 @@ from scratch, draft head) is **superseded** by the 10-step plan below.
 **Gate rule:** a step starts only when the previous step's tests are green and logged
 here (✅ + date + evidence). Failed gate = fix + re-run, never "proceed with caveats."
 
+**Step 3 execution plan (locked 2026-11-15; Bayesian core per user approval):**
+- **Architecture:** per-slot posterior over **full-set candidates** (correlations preserved
+  by construction — e.g. a Wish set already contains Protect) with weights; every event is a
+  **likelihood function** over candidates. **HARD evidence** (revealed move / ability /
+  Choice-lock / Tera) = exactly 0/1. **SOFT evidence** (damage window, speed order) = (0,1]
+  with an **ε floor** → the posterior can **never empty out** (off-DB sets survive). One
+  **shared evidence/window module** is used by both the set posterior and the HP/EV inference
+  (nothing written twice). Module: `belief/` (small, independent, Python; no DB, plain
+  dataclasses).
+- **3.1** belief state + event model + prior (Step-1 `get_common_sets`; bounded legal-move
+  fallback for set-less species) + **mini log→event adapter**, smoke-tested against one live
+  seeded fork battle → *gate: init tests (sums to 1, fallback, visibility dims) + event smoke*
+- **3.2** evidence engine (per-evidence likelihoods; HARD/SOFT split; ε floor; never-empty
+  guard) → *gate: per-evidence-function unit tests*
+- **3.3** `update()`: revealed move / ability / **Choice-lock (same move twice ⇒ Choice item)** /
+  Tera → *gate: the 4 spec tests (revealed in every sample; illegal = 0; sums to 1; Choice shift)*
+- **3.4** damage + speed-order evidence via the Step 2 calc (**KO-clip rule D40** baked in)
+  → *gate: in/out-of-window, KO-clip, speed-discrimination tests*
+- **3.5** `sample(n)` + `move_probabilities()` + correlation preservation → *gate: sampling
+  invariants + Wish⇒Protect-style correlation test*
+- **3.6** max-HP / EV-bucket inference on the shared window module (Seismic Toss case;
+  burned-but-hits-hard ⇒ Guts) → *gate: window, EV-narrowing, Guts tests*
+- **3.7** **whole-battle fuzz bug-catcher:** N seeded fork battles, real log → events →
+  `update` every turn, invariants asserted + **human-readable per-turn belief report**
+  (top candidates, top move per slot, entropy) → *gate: fuzz green + report artifact*
+- **3.8** perf bench (update + 100 samples per mon, ms-scale) + D43 entry + commit
+  → *gate: full pytest green*
+
 ## 4. Decision log
 
 Continues the old project's log (D1–D19 in the old `showdown AI/legality/PLAN.md`, still
@@ -153,6 +181,22 @@ Step 1 wrap-up.
   `DO UPDATE SET` ("incomplete input") — `api.ingest` now falls back to `DO NOTHING`.
 - Legacy `Hidden Power <type>` (16 variants) all carry server id `hiddenpower` →
   extractor skips name/id mismatches; the set ingester maps variant names → `hiddenpower`.
+- **Battle-log protocol (verified in this fork, 2026-11-16 — don't re-derive):**
+  - `|move|` line = `|move|source_slot|MoveName|target_slot` (battle-actions.js
+    `addMove("move", pokemon, movename, target)`) — move is payload **[1]**, target [2].
+  - **The `movefail` tag does NOT exist in this fork** (absent from `dist/sim` and the
+    client parser). A failed move logs the `|move|` announce line first, then
+    `|-fail|<user>` (NO move name) — so the move name is always in the announce, and
+    "no damage line followed the move" is the observable failure signal for the
+    belief evidence engine. The `|movefail|slot|MoveName|` handler in
+    `belief/log_events.py` is kept for upstream-format logs only.
+  - Each **switch-in is logged TWICE back-to-back** (`hp/maxhp` + a `% /100` dup), same
+    as HP lines; the adapter dedupes identical consecutive switch lines (the 3.1 smoke
+    test's ">= 2 p2 switch-ins" previously only passed via this dup bug).
+  - KO line = `|-damage|slot|0 fnt` (no denominator), emitted twice; true damage ≥ maxhp
+    (D40). Ability is NOT revealed at switch-in — contextually via
+    `[from] ability: Name` + `[of] holder_slot` (holder = the `[of]` slot, full entry
+    D43 lands at 3.8).
 
 ## 6. Step 1 deliverables (done — evidence)
 
