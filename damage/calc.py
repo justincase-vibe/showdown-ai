@@ -10,7 +10,26 @@ Python-friendly surface plus the speed-comparison helper.
         -> {'min','max','expected',            # damage in HP
             'min_pct','max_pct','expected_pct',# % of defender max HP
             'crit': {'min','max','expected'},  # critical-hit range (separate value)
-            'immune': bool, 'maxhp': int, 'desc': str}
+            'immune': bool, 'maxhp': int, 'desc': str,
+            # T6 attacker-side blocks (present only when the move has the effect
+            # in that engine — absent on immune/miss/no-effect responses):
+            'recoil':  {'min','max'},  # self-damage; fraction-of-damage-dealt
+                                       # (fork: gens 1-4 floor, gens 5-9/champions round)
+                                       # or fixed fraction of the USER's max HP
+                                       # (Struggle 1/4 gen 4+, Mind Blown 1/2);
+                                       # damage-dealt values are computed on the
+                                       # damage CLAMPED to the defender's
+                                       # remaining HP (pass defender 'hp'/'curHP')
+            'heal':    {'min','max'},  # drain healing (Drain Punch, Giga Drain…);
+                                       # net gain is additionally capped by the
+                                       # user's missing HP (belief state applies)
+            'lifeOrb': {'min','max'},  # Life Orb self-damage (10% of user max HP)
+                                       # — set 'item' on the attacker
+            'critChance': float | None # fork BASE crit rate for this move/engine
+                                       # (1/24 gens 7-9/champions, 1/16 gens <= 6,
+                                       # 1/8 critRatio-2 moves); battle-state
+                                       # modifiers (Super Luck, Scope Lens, …)
+                                       # are belief-state facts, not calc inputs}
 
     calc.compare_speed(a, b, fmt="gen9bss3v3", gen=9)
         -> {'a': int, 'b': int, 'faster': 'a' | 'b' | 'tie'}

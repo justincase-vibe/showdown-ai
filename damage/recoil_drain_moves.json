@@ -1,0 +1,1651 @@
+{
+  "0": {
+    "absorb": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "chloroblast": {
+      "chloroblastRecoil": true
+    },
+    "dreameater": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "lightofruin": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "megadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "takedown": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "bitterblade": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bouncybubble": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bravebird": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "doubleedge": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "drainingkiss": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "drainpunch": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "flareblitz": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "gigadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "headcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "headsmash": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "hornleech": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "leechlife": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "matchagotcha": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "mindblown": {
+      "mindBlownRecoil": true
+    },
+    "oblivionwing": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "paraboliccharge": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "steelbeam": {
+      "mindBlownRecoil": true
+    },
+    "struggle": {
+      "struggleRecoil": true
+    },
+    "submission": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "volttackle": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wavecrash": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wildcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "woodhammer": {
+      "recoil": [
+        33,
+        100
+      ]
+    }
+  },
+  "1": {
+    "doubleedge": {
+      "recoil": [
+        25,
+        100
+      ]
+    },
+    "struggle": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "absorb": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "gigadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "megadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "volttackle": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "bravebird": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "drainpunch": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "dreameater": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "flareblitz": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "woodhammer": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "hornleech": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "leechlife": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "submission": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "paraboliccharge": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bouncybubble": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "lightofruin": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "headcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "mindblown": {
+      "mindBlownRecoil": true
+    },
+    "oblivionwing": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "bitterblade": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "chloroblast": {
+      "chloroblastRecoil": true
+    },
+    "drainingkiss": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "headsmash": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "matchagotcha": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "steelbeam": {
+      "mindBlownRecoil": true
+    },
+    "takedown": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "wavecrash": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wildcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    }
+  },
+  "2": {
+    "doubleedge": {
+      "recoil": [
+        25,
+        100
+      ]
+    },
+    "absorb": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "gigadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "megadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "struggle": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "volttackle": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "bravebird": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "drainpunch": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "dreameater": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "flareblitz": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "woodhammer": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "hornleech": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "leechlife": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "submission": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "paraboliccharge": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bouncybubble": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "lightofruin": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "headcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "mindblown": {
+      "mindBlownRecoil": true
+    },
+    "oblivionwing": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "bitterblade": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "chloroblast": {
+      "chloroblastRecoil": true
+    },
+    "drainingkiss": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "headsmash": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "matchagotcha": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "steelbeam": {
+      "mindBlownRecoil": true
+    },
+    "takedown": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "wavecrash": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wildcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    }
+  },
+  "3": {
+    "absorb": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "gigadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "megadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "struggle": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "volttackle": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "bravebird": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "doubleedge": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "drainpunch": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "dreameater": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "flareblitz": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "woodhammer": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "hornleech": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "leechlife": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "submission": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "paraboliccharge": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bouncybubble": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "lightofruin": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "headcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "mindblown": {
+      "mindBlownRecoil": true
+    },
+    "oblivionwing": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "bitterblade": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "chloroblast": {
+      "chloroblastRecoil": true
+    },
+    "drainingkiss": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "headsmash": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "matchagotcha": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "steelbeam": {
+      "mindBlownRecoil": true
+    },
+    "takedown": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "wavecrash": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wildcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    }
+  },
+  "4": {
+    "bravebird": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "doubleedge": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "drainpunch": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "dreameater": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "flareblitz": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "gigadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "struggle": {
+      "struggleRecoil": true
+    },
+    "volttackle": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "woodhammer": {
+      "recoil": [
+        1,
+        3
+      ]
+    },
+    "absorb": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "hornleech": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "leechlife": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "megadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "submission": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "paraboliccharge": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bouncybubble": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "lightofruin": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "headcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "mindblown": {
+      "mindBlownRecoil": true
+    },
+    "oblivionwing": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "bitterblade": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "chloroblast": {
+      "chloroblastRecoil": true
+    },
+    "drainingkiss": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "headsmash": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "matchagotcha": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "steelbeam": {
+      "mindBlownRecoil": true
+    },
+    "takedown": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "wavecrash": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wildcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    }
+  },
+  "5": {
+    "absorb": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "drainpunch": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "dreameater": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "gigadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "hornleech": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "leechlife": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "megadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "submission": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "paraboliccharge": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bouncybubble": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "lightofruin": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "headcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "mindblown": {
+      "mindBlownRecoil": true
+    },
+    "oblivionwing": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "bitterblade": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bravebird": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "chloroblast": {
+      "chloroblastRecoil": true
+    },
+    "doubleedge": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "drainingkiss": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "flareblitz": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "headsmash": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "matchagotcha": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "steelbeam": {
+      "mindBlownRecoil": true
+    },
+    "struggle": {
+      "struggleRecoil": true
+    },
+    "takedown": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "volttackle": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wavecrash": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wildcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "woodhammer": {
+      "recoil": [
+        33,
+        100
+      ]
+    }
+  },
+  "6": {
+    "leechlife": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "paraboliccharge": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bouncybubble": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "lightofruin": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "headcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "mindblown": {
+      "mindBlownRecoil": true
+    },
+    "oblivionwing": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "submission": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "absorb": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bitterblade": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bravebird": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "chloroblast": {
+      "chloroblastRecoil": true
+    },
+    "doubleedge": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "drainingkiss": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "drainpunch": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "dreameater": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "flareblitz": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "gigadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "headsmash": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "hornleech": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "matchagotcha": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "megadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "steelbeam": {
+      "mindBlownRecoil": true
+    },
+    "struggle": {
+      "struggleRecoil": true
+    },
+    "takedown": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "volttackle": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wavecrash": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wildcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "woodhammer": {
+      "recoil": [
+        33,
+        100
+      ]
+    }
+  },
+  "7": {
+    "bouncybubble": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "lightofruin": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "headcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "mindblown": {
+      "mindBlownRecoil": true
+    },
+    "oblivionwing": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "submission": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "absorb": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bitterblade": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bravebird": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "chloroblast": {
+      "chloroblastRecoil": true
+    },
+    "doubleedge": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "drainingkiss": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "drainpunch": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "dreameater": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "flareblitz": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "gigadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "headsmash": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "hornleech": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "leechlife": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "matchagotcha": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "megadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "paraboliccharge": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "steelbeam": {
+      "mindBlownRecoil": true
+    },
+    "struggle": {
+      "struggleRecoil": true
+    },
+    "takedown": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "volttackle": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wavecrash": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wildcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "woodhammer": {
+      "recoil": [
+        33,
+        100
+      ]
+    }
+  },
+  "8": {
+    "headcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "mindblown": {
+      "mindBlownRecoil": true
+    },
+    "oblivionwing": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "submission": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "absorb": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bitterblade": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bouncybubble": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bravebird": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "chloroblast": {
+      "chloroblastRecoil": true
+    },
+    "doubleedge": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "drainingkiss": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "drainpunch": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "dreameater": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "flareblitz": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "gigadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "headsmash": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "hornleech": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "leechlife": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "lightofruin": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "matchagotcha": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "megadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "paraboliccharge": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "steelbeam": {
+      "mindBlownRecoil": true
+    },
+    "struggle": {
+      "struggleRecoil": true
+    },
+    "takedown": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "volttackle": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wavecrash": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wildcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "woodhammer": {
+      "recoil": [
+        33,
+        100
+      ]
+    }
+  },
+  "9": {
+    "absorb": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bitterblade": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bouncybubble": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "bravebird": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "chloroblast": {
+      "chloroblastRecoil": true
+    },
+    "doubleedge": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "drainingkiss": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "drainpunch": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "dreameater": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "flareblitz": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "gigadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "headcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "headsmash": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "hornleech": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "leechlife": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "lightofruin": {
+      "recoil": [
+        1,
+        2
+      ]
+    },
+    "matchagotcha": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "megadrain": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "mindblown": {
+      "mindBlownRecoil": true
+    },
+    "oblivionwing": {
+      "drain": [
+        3,
+        4
+      ]
+    },
+    "paraboliccharge": {
+      "drain": [
+        1,
+        2
+      ]
+    },
+    "steelbeam": {
+      "mindBlownRecoil": true
+    },
+    "struggle": {
+      "struggleRecoil": true
+    },
+    "submission": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "takedown": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "volttackle": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wavecrash": {
+      "recoil": [
+        33,
+        100
+      ]
+    },
+    "wildcharge": {
+      "recoil": [
+        1,
+        4
+      ]
+    },
+    "woodhammer": {
+      "recoil": [
+        33,
+        100
+      ]
+    }
+  }
+}

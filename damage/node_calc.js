@@ -182,6 +182,138 @@ const SPECIAL_DAMAGE_MOVES = new Set([
 // defender types/ability/item).
 const SPECIAL_MOVE_IMMUNITY = require('./special_move_immunity.json');
 
+// ── T6: recoil / drain (attacker-side self-damage and healing) ─────────────
+// @smogon/calc returns only the DAMAGE DEALT (defender side) and does not model
+// move recoil, drain healing, or Life Orb self-damage. The AI needs those for
+// move evaluation (e.g. "Brave Bird KOs but I lose 33% — is it worth it?"), so
+// we COMPLETE the calc with the fork-exact attacker-side effects. The fork is
+// the source of truth for the raw move/item data (per-engine values) and the
+// application semantics (verified in dist code):
+//   recoil (applyRecoilDamage; called ONLY when the move DEALT damage —
+//   miss/immune => none). TWO formula variants exist in the fork: gens 5-9
+//   and the champions engine use the base version (battle-actions.js:1216,
+//   Math.round); gens 1-4 inherit the gen4 override (mods/gen4/scripts.js:167,
+//   Math.floor — inheritance chain gen1->gen2->gen3->gen4). Live-verified:
+//   gen1 Struggle dealt 29, recoil [1,2] -> floor(14.5) = 14 (not round = 15):
+//     struggleRecoil        -> g1-4 clamp(floor(baseMaxhp/4),1)
+//                              g5-9/champ clamp(round(baseMaxhp/4),1)
+//     mindBlown/chloroblast -> round(maxhp/2)  (same in both variants)
+//     recoil:[n,d]          -> g1-4 clamp(floor(damageDealt*n/d),1)
+//                              g5-9/champ clamp(round(damageDealt*n/d),1)
+//   drain (battle.js:1793-1800, inside battle.damage() so only on damage dealt):
+//     gen<=4 -> clamp(floor(damageDealt*n/d), 1) ; gen>4 -> round(damageDealt*n/d)
+//   Life Orb (items.js onAfterMoveSecondarySelf, uniform across this fork's
+//   gens incl. gen4/gen6 mods): baseMaxhp/10 (10% of the user's max HP), gated
+//   on `move.category !== "Status"` (and `!move.ohko` in the gen6 mod).
+// Static per-engine table (regenerate: node scratch/gen_recoil_drain.js), same
+// pattern as special_bp_moves.json — quick + API-reachable, no per-call fork.
+const RECOIL_DRAIN = require('./recoil_drain_moves.json');
+const OHKO_MOVES = new Set(['fissure', 'guillotine', 'horndrill', 'sheercold']);
+
+const _metaCache = new Map();
+// Fork-exact move metadata (the fork is the source of truth for raw game
+// data), lazily loaded per (engine, move) and cached:
+//   category  — the Life Orb "Status moves don't trigger it" guard;
+//   critRatio — the fork's dex default is `Number(data.critRatio) || 1`, i.e.
+//               EVERY base-power move rolls a base crit chance (official
+//               behaviour: 1/24 in gens 7-9/champions, 1/16 in gens <= 6);
+//   willCrit  — always-crit (Frost Breath, Storm Throw) / never-crit moves.
+function moveMeta(gen, moveName) {
+  const key = String(gen) + ':' + moveName;
+  if (_metaCache.has(key)) return _metaCache.get(key);
+  const meta = { category: 'Damage', critRatio: null, willCrit: null };
+  try {
+    const Sim = require(path.join(__dirname, '..', 'pokemon-showdown', 'dist', 'sim'));
+    const fmt = ({ '0': 'bss', '1': 'gen1randombattle', '2': 'gen2randombattle', '3': 'gen3randombattle',
+      '4': 'gen4randombattle', '5': 'gen5randombattle', '6': 'gen6randombattle', '7': 'gen7randombattle',
+      '8': 'gen8randombattle', '9': 'gen9randombattle' })[String(gen)];
+    const m = Sim.Dex.forFormat(fmt).moves.get(moveName);
+    if (m) {
+      if (m.category) meta.category = m.category;
+      meta.critRatio = Number(m.critRatio) || 1;
+      meta.willCrit = m.willCrit === true ? 'always' : (m.willCrit === false ? 'never' : null);
+    }
+  } catch (e) { /* unknown move -> defaults (damaging, unknown crit data) */ }
+  _metaCache.set(key, meta);
+  return meta;
+}
+
+// Fork critical-hit rate tables (battle-actions.js getDamage): rate = 1/critMult[ratio],
+// ratio clamped to the table. gen <= 5: [0,16,8,4,3,2] ; gen 6: [0,16,8,2,1] ;
+// gens 7-9 AND the champions engine (gen 9 + mod): [0,24,8,2,1]. Verified live
+// (champions Brave Bird crits at 1.5x, base roll consistent with 1/24).
+const CRIT_MULT = {
+  '0': [0, 24, 8, 2, 1], '1': [0, 16, 8, 4, 3, 2], '2': [0, 16, 8, 4, 3, 2],
+  '3': [0, 16, 8, 4, 3, 2], '4': [0, 16, 8, 4, 3, 2], '5': [0, 16, 8, 4, 3, 2],
+  '6': [0, 16, 8, 2, 1], '7': [0, 24, 8, 2, 1], '8': [0, 24, 8, 2, 1], '9': [0, 24, 8, 2, 1],
+};
+// BASE critical-hit chance for a base-power move in this engine (fork-exact),
+// or null when the fork would never roll a crit for it. Battle-state modifiers
+// (Super Luck, Scope Lens, Focus Energy, Laser Focus, Merciless, Lucky Chant,
+// Battle/Shell Armor) are belief-state facts the AI applies on top — the calc
+// reports the fork's base rate only, same pattern as the T5 state flags.
+function baseCritChance(gen, moveName) {
+  const meta = moveMeta(gen, moveName);
+  if (meta.willCrit === 'never') return 0;
+  const mult = CRIT_MULT[String(gen)];
+  if (!mult || meta.critRatio === null) return null;
+  const r = Math.max(0, Math.min(meta.critRatio, mult.length - 1));
+  return mult[r] === 0 ? null : 1 / mult[r];
+}
+
+// Attacker-side blocks for a damage response. The fork applies recoil/drain to
+// the damage ACTUALLY DEALT, and it deals damage in two ways that change the
+// span of outcomes (both fork-verified):
+//   1. `battle.damage` clamps dealt damage to the target's REMAINING HP (an
+//      overkill hit deals less), and recoil/drain are computed on that clamped
+//      value (live: champions Brave Bird computed 237 vs 154-HP Blastoise ->
+//      dealt 154 -> recoil round(154*33/100) = 51, not round(237*33/100) = 78);
+//   2. every base-power move rolls a base crit chance (see baseCritChance) and
+//      a crit deals more — so the MAX recoil/heal spans the crit outcome.
+// The response therefore brackets [f(min(normalMin, remHP)), f(min(critMax, remHP))].
+// `heal` is the healing amount (net gain is additionally capped by the user's
+// remaining HP — the AI's belief state knows current HP and caps it).
+function selfEffectBlocks(gen, moveId, moveName, attMaxHP, dmgMin, dmgMax, critMax, defRemHP, attackerItem) {
+  const out = {};
+  const row = (RECOIL_DRAIN[String(gen)] || {})[moveId];
+  const genNum = Number(gen);
+  const lo = Math.max(0, Math.min(dmgMin, defRemHP));
+  const hi = Math.max(0, Math.min(critMax || dmgMax, defRemHP));
+  if (row) {
+    if (row.struggleRecoil) {
+      // g1-4: FLOOR (gen4 override) ; g5-9/champions: ROUND (base)
+      const v = (genNum >= 1 && genNum <= 4)
+        ? Math.max(1, Math.floor(attMaxHP / 4))
+        : Math.max(1, Math.round(attMaxHP / 4));
+      out.recoil = { min: v, max: v };
+    } else if (row.mindBlownRecoil || row.chloroblastRecoil) {
+      const v = Math.round(attMaxHP / 2);
+      out.recoil = { min: v, max: v };
+    } else if (row.recoil && hi > 0) {
+      const [n, d] = row.recoil;
+      const f = (dmg) => (dmg > 0
+        ? ((genNum >= 1 && genNum <= 4) ? Math.max(1, Math.floor(dmg * n / d)) : Math.max(1, Math.round(dmg * n / d)))
+        : 0);
+      out.recoil = { min: f(lo), max: f(hi) };
+    }
+    if (row.drain && hi > 0) {
+      const [n, d] = row.drain;
+      const f = (dmg) => (dmg > 0
+        ? ((genNum >= 1 && genNum <= 4) ? Math.max(1, Math.floor(dmg * n / d)) : Math.round(dmg * n / d))
+        : 0);
+      out.heal = { min: f(lo), max: f(hi) };
+    }
+  }
+  if (attackerItem && normItem(attackerItem) === 'Life Orb' && hi > 0) {
+    const ohko = genNum === 6 && OHKO_MOVES.has(moveId); // gen6 mod guard `!move.ohko`
+    if (moveMeta(gen, moveName).category !== 'Status' && !ohko) {
+      const v = Math.floor(attMaxHP / 10);
+      if (v > 0) out.lifeOrb = { min: v, max: v };
+    }
+  }
+  return out;
+}
+
 // True when the fork's runImmunity (pokemon.js:1664) would block this special
 // move against this defender. Chart immunities come from the table; the two
 // request-data-dependent rules are applied here, mirroring the fork:
@@ -382,16 +514,26 @@ function handleDamage(req) {
   if (!moveName) throw new Error('move name required');
   const field = buildField(req.field);
   const maxHP = defender.maxHP();
+  const attMaxHP = attacker.maxHP();
+  const attItem = (req.attacker && req.attacker.item) || null;
+  const moveId = String(moveName).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const lastHit = (req.move && typeof req.move === 'object') ? req.move.lastHitDamage : null;
+  // T6: attacker-side self-damage/healing blocks (recoil, drain, Life Orb).
+  // defRemHP = the defender's REMAINING HP (belief-state `hp` if given, else
+  // full HP): the fork clamps dealt damage to it before computing recoil/drain.
+  const defRemHP = defender.curHP ? defender.curHP() : maxHP;
+  const selfFx = (dmgMin, dmgMax, critMax) =>
+    selfEffectBlocks(gen, moveId, moveName, attMaxHP, dmgMin, dmgMax, critMax, defRemHP, attItem);
 
   // Special-damage moves: @smogon/calc has no formula for these, so we complete the
   // calc with the official (fork-verified) formula. `lastHitDamage` (belief-state
   // state) feeds the reflectors. See SPECIAL_DAMAGE_MOVES / specialMoveDamage.
-  const moveId = String(moveName).toLowerCase().replace(/[^a-z0-9]/g, '');
-  const lastHit = (req.move && typeof req.move === 'object') ? req.move.lastHitDamage : null;
+  // These moves CANNOT crit in the fork (the formula dispatch returns before the
+  // crit roll), so there is no crit outcome to span and no critChance field.
   if (SPECIAL_DAMAGE_MOVES.has(moveId)) {
     const r = specialMoveDamage(gen, moveId, attacker, defender, lastHit);
     if (r !== null) {
-      const extra = r.ohko ? { ohko: true } : {};
+      const extra = Object.assign(r.ohko ? { ohko: true } : {}, selfFx(r.min, r.max, r.max));
       const desc = r.ohko ? 'OHKO — guaranteed KO if it hits (accuracy in move data)'
         : (r.immune ? 'immune' : '');
       return responseFromRange(r.min, r.max, !!r.immune, maxHP, desc, extra);
@@ -408,13 +550,18 @@ function handleDamage(req) {
     if (r !== null) {
       const pct = (v) => (maxHP ? Math.round((v / maxHP) * 10000) / 100 : 0);
       const cexp = ((r.crit && (r.crit.min + r.crit.max)) / 2) || 0;
-      return {
+      const out = Object.assign({
         min: r.min, max: r.max, expected: (r.min + r.max) / 2,
         min_pct: pct(r.min), max_pct: pct(r.max), expected_pct: pct((r.min + r.max) / 2),
         crit: { min: r.crit.min, max: r.crit.max, expected: cexp },
         immune: !!r.immune, maxhp: maxHP,
         desc: r.immune ? 'immune' : '',
-      };
+      }, selfFx(r.min, r.max, r.crit && r.crit.max));
+      // T5 moves are base-power moves in the fork -> they roll the base crit
+      // chance like any other (avalanche crits, etc.).
+      const cc = baseCritChance(gen, moveName);
+      if (cc !== null && !r.immune) out.critChance = cc;
+      return out;
     }
   }
 
@@ -431,7 +578,7 @@ function handleDamage(req) {
 
   const immune = normal.max === 0;
   const pct = (v) => (maxHP ? Math.round((v / maxHP) * 10000) / 100 : 0);
-  return {
+  const out = Object.assign({
     min: normal.min,
     max: normal.max,
     expected: normal.expected,
@@ -442,7 +589,15 @@ function handleDamage(req) {
     immune,
     maxhp: maxHP,
     desc: normal.desc || (immune ? 'immune' : ''),
-  };
+  }, selfFx(normal.min, normal.max, crit.max));
+  // Base-power moves roll the fork's base crit chance (1/24 in gens 7-9 and
+  // champions, 1/16 in gens <= 6; higher-crit moves like Slash = 1/8). The AI
+  // needs it to weight the crit outcome in expected-value math; battle-state
+  // modifiers (Super Luck, Scope Lens, Focus Energy, Laser Focus, Merciless,
+  // Lucky Chant, Battle/Shell Armor) are applied by the belief state on top.
+  const cc = baseCritChance(gen, moveName);
+  if (cc !== null && !immune) out.critChance = cc;
+  return out;
 }
 
 function main() {
