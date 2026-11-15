@@ -49,7 +49,11 @@ default level 100).
 attacker / defender / a / b are dicts using @smogon/calc option names:
 ``name`` (required), and any of ``level``, ``nature``, ``evs``, ``ivs``, ``item``,
 ``ability``, ``status`` ('par'/'brn'/...), ``boosts`` ({'atk':2,...}), ``teraType``,
-``moves``.
+``moves``, plus the belief-state flags ``abilityOn`` (bool: Unburden/Slow Start
+active, QP-eligible) and ``boostedStat`` ('auto' or a stat name: Quark Drive /
+Protosynthesis). A defender's ``teraType`` (gen 9 / champions only) replaces its
+base types for the special-move immunity check — matching the fork's
+getTypes-based runImmunity and the library's own effectiveness (PLAN.md D42).
 
 ``move`` is a move-name string (or ``{'name':..., 'isCrit':bool,
 ``lastHitDamage':int}``). ``lastHitDamage`` is the damage the user last took —
@@ -67,9 +71,17 @@ accepted as a library-facing alias (absolute HP, clamped to the mon's max HP).
 ``field`` (optional) may set ``weather`` (capitalised: 'Rain'/'Sun'/'Sand'/'Hail'),
 ``terrain``, ``attackerSide`` and ``defenderSide`` (e.g. ``{'isReflect': True}``).
 
-Speed model (see PLAN.md D30): base stat -> stat boosts -> Tailwind (x2) ->
-Choice Scarf (x1.5) -> paralysis (x0.5 for gen>=7, matching @smogon/calc and this
-project's sim fork).
+Speed model (see PLAN.md D30, D42): FULL mirror of @smogon/calc
+``getFinalSpeed`` — base stat -> stat boosts (gen-aware table) -> Tailwind (x2)
+-> ability chain (Unburden / Chlorophyll+Sun / Sand Rush+Sand / Swift Swim+Rain /
+Slush Rush+Hail|Snow / Surge Surfer+Electric terrain: x2; else Quick Feet+status:
+x1.5; else Slow Start: x0.5; else Quark Drive / Protosynthesis: x1.5 when the
+boosted stat is Spe) -> item chain (Choice Scarf x1.5; else Iron Ball or an EV
+item x0.5; else Quick Powder on Ditto x2) -> paralysis (Quick Feet exempt; the
+per-gen factor is FORK-EXACT: gens 1-4 x0.25, gen 5 x0.5, gen 6 x0.25, gens 7-9
+and champions x0.5 — @smogon/calc differs only for gen 5, where the fork, the
+battle environment, wins) -> cap 999 (gen 1-2) / 10000. Pass ``field`` for the
+weather/terrain speed abilities.
 """
 from __future__ import annotations
 
@@ -223,10 +235,17 @@ def effective_speed(
     fmt: Optional[str] = None,
     gen: int = 9,
     tailwind: bool = False,
+    field: Optional[Dict[str, Any]] = None,
 ) -> int:
-    """Effective action speed for a mon, applying boosts/item/Tailwind/paralysis."""
+    """Effective action speed for a mon (full @smogon/calc mirror, see module docstring).
+
+    ``field`` may set ``weather``/``terrain`` for the weather/terrain speed
+    abilities (Swift Swim, Chlorophyll, Sand Rush, Slush Rush, Surge Surfer);
+    the mon may set ``abilityOn``/``boostedStat`` for the state-gated abilities
+    (Unburden, Slow Start, Quark Drive/Protosynthesis).
+    """
     req = {"type": "speed", "gen": _engine_key(gen, fmt),
-           "pokemon": _resolve_mon(mon, fmt), "tailwind": tailwind}
+           "pokemon": _resolve_mon(mon, fmt), "tailwind": tailwind, "field": field}
     return int(_node(req)["speed"])
 
 
@@ -237,9 +256,11 @@ def compare_speed(
     gen: int = 9,
     a_tailwind: bool = False,
     b_tailwind: bool = False,
+    a_field: Optional[Dict[str, Any]] = None,
+    b_field: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Compare two mons' effective speed. ``faster`` is 'a', 'b', or 'tie'."""
-    sa = effective_speed(a, fmt, gen, a_tailwind)
-    sb = effective_speed(b, fmt, gen, b_tailwind)
+    sa = effective_speed(a, fmt, gen, a_tailwind, a_field)
+    sb = effective_speed(b, fmt, gen, b_tailwind, b_field)
     faster = "a" if sa > sb else ("b" if sb > sa else "tie")
     return {"a": sa, "b": sb, "faster": faster}

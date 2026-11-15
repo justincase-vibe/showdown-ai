@@ -11,12 +11,15 @@
 //   { type:"damage", gen, attacker:{...}, defender:{...}, move:{name,isCrit?}, field?{...} }
 //     -> { min,max,expected, min_pct,max_pct,expected_pct,
 //          crit:{min,max,expected}, immune, maxhp, desc }
-//   { type:"speed", gen, pokemon:{...}, tailwind? }
+//   { type:"speed", gen, pokemon:{...}, tailwind?, field?{weather?,terrain?} }
 //     -> { base, speed }
 //
 // attacker/defender/pokemon option keys follow @smogon/calc: level, nature, evs,
-// ivs, item, ability, status, boosts, teraType, moves. field keys: weather
-// (capitalised: "Rain"/"Sun"/"Sand"/"Hail"), terrain, attackerSide, defenderSide.
+// ivs, item, ability, status, boosts, teraType, moves, plus the belief-state
+// flags abilityOn (bool: Unburden/Slow Start active, QP-eligible) and
+// boostedStat ('auto' or a stat name: Quark Drive / Protosynthesis). field keys:
+// weather (capitalised: "Rain"/"Sun"/"Sand"/"Hail"), terrain, attackerSide,
+// defenderSide.
 
 const path = require('path');
 const { calculate, Pokemon, Move, Field, Side, Generations, toID } = require('@smogon/calc');
@@ -76,6 +79,9 @@ function buildPokemon(gen, o) {
     boosts: o.boosts || {},
     teraType: o.teraType,
     moves: o.moves,
+    // belief-state flags (library options; absent = off, as before):
+    abilityOn: o.abilityOn,
+    boostedStat: o.boostedStat,
   });
 
   // Current HP (optional). @smogon/calc gates several damage-affecting effects on
@@ -119,27 +125,106 @@ function buildField(f) {
   });
 }
 
-// Modern-gen (3+) stat-stage table: +1..+6 => x1.5..x4 ; -1..-6 => /1.5../4.
-// Mirrors @smogon/calc `getModifiedStat`.
-function applyBoost(stat, boost) {
-  if (!boost) return stat;
-  const table = [1, 1.5, 2, 2.5, 3, 3.5, 4];
-  const b = Math.max(-6, Math.min(6, boost));
-  if (b >= 0) return Math.floor(stat * table[b]);
-  return Math.floor(stat / table[-b]);
+// ── Speed ─────────────────────────────────────────────────────────────────────
+// FULL mirror of @smogon/calc `getFinalSpeed` (dist/mechanics/util.js:131) —
+// same tables, same order, same rounding (chainMods + pokeRound) — so the AI's
+// turn-order predictions match the official calc exactly:
+//   boosts (getModifiedStat, gen-aware) -> Tailwind (x2) -> ability chain
+//   (Unburden+abilityOn / Chlorophyll+Sun / Sand Rush+Sand / Swift Swim+Rain /
+//   Slush Rush+Hail|Snow / Surge Surfer+Electric terrain: x2; else Quick Feet
+//   +status: x1.5; else Slow Start+abilityOn: x0.5; else Quark Drive /
+//   Protosynthesis: x1.5 when the boosted stat is Spe) -> item chain (Choice
+//   Scarf x1.5; else Iron Ball or an EV item x0.5; else Quick Powder on Ditto
+//   x2) -> THEN paralysis (Quick Feet exempt) -> cap 999 (gen 1-2) / 10000.
+//
+// Paralysis factor per ENGINE — FORK-EXACT (fork `par.onModifySpe`):
+//   base conditions.js x0.5 (gens 5-9 + champions), mods/gen4/conditions.js:30
+//   x0.25 (gens 1-4, inherited), mods/gen6/conditions.js:31 x0.25 (gen 6).
+//   @smogon/calc agrees on every engine EXCEPT gen 5 (library x0.25 vs fork
+//   x0.5) — the fork is the battle environment the AI fights in, so the fork
+//   value wins (documented in calc.py / PLAN.md D42).
+const PAR_SPEED_PCT = { '0': 50, '1': 25, '2': 25, '3': 25, '4': 25, '5': 50, '6': 25, '7': 50, '8': 50, '9': 50 };
+// @smogon/calc util.js EV_ITEMS (the "Iron Ball or an EV item" speed x0.5 branch).
+const EV_ITEMS = ['Macho Brace', 'Power Anklet', 'Power Band', 'Power Belt', 'Power Bracer', 'Power Lens', 'Power Weight'];
+// library pokeRound (util.js:696) — half-up; OF16 (util.js:700) — 16-bit overflow.
+const pokeRound = (n) => (n % 1 > 0.5 ? Math.ceil(n) : Math.floor(n));
+const OF16 = (n) => (n > 65535 ? n % 65536 : n);
+
+// Mirrors @smogon/calc `getModifiedStat` (util.js:58) exactly: gen 1-2 use the
+// explicit % numerators (and cap 999); modern gens use the [num,den] table.
+function modifiedStat(stat, boost, gen) {
+  const b = Math.max(-6, Math.min(6, boost || 0));
+  if (Number(gen) === 1 || Number(gen) === 2) {
+    if (b >= 0) stat = Math.floor(stat * [1, 1.5, 2, 2.5, 3, 3.5, 4][b]);
+    else stat = Math.floor((stat * [100, 66, 50, 40, 33, 28, 25][-b]) / 100);
+    return Math.min(999, Math.max(1, stat));
+  }
+  const [n, d] = [[2, 8], [2, 7], [2, 6], [2, 5], [2, 4], [2, 3], [2, 2], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2]][6 + b];
+  stat = OF16(stat * n);
+  return Math.floor(stat / d);
 }
 
-// Effective action speed, mirroring @smogon/calc `getFinalSpeed` for the common
-// modifiers (boosts, Choice Scarf, Tailwind, paralysis). Gen 7+ paralysis = x0.5
-// (matching both this library and this project's sim fork; see PLAN.md D30).
-function effectiveSpeed(gen, o, tailwind) {
+// Mirrors @smogon/calc `isQPActive` / `getQPBoostedStat` (util.js:512-549):
+// Quark Drive (Electric terrain or Booster Energy) and Protosynthesis (Sun or
+// Booster Energy) boost the mon's highest stat x1.5. The belief state reports
+// `boostedStat` ('auto' or a stat name); absent => the QP effect is off, exactly
+// as in the library (which keys off the same option).
+function qpActive(p, weather, terrain) {
+  if (!p.boostedStat) return false;
+  return ((p.hasAbility('Protosynthesis') && (weather.includes('Sun') || p.hasItem('Booster Energy'))) ||
+          (p.hasAbility('Quark Drive') && (terrain === 'Electric' || p.hasItem('Booster Energy'))) ||
+          p.boostedStat !== 'auto');
+}
+function qpBoostedStat(p, gen) {
+  if (p.boostedStat && p.boostedStat !== 'auto') return p.boostedStat;
+  let best = 'atk';
+  for (const s of ['def', 'spa', 'spd', 'spe']) {
+    if (modifiedStat(p.rawStats[s], (p.boosts && p.boosts[s]) || 0, gen) >
+        modifiedStat(p.rawStats[best], (p.boosts && p.boosts[best]) || 0, gen)) best = s;
+  }
+  return best;
+}
+
+// Effective action speed — see the block comment above for the full model.
+function effectiveSpeed(gen, o, tailwind, field) {
   const p = buildPokemon(gen, o);
-  let s = p.stats.spe; // base stat (nature + EV), NOT including boosts
-  s = applyBoost(s, (o.boosts || {}).spe || 0);
-  if (tailwind) s = Math.floor(s * 2);
-  if (normItem(o.item) === 'Choice Scarf') s = Math.floor(s * 1.5);
-  if (o.status === 'par' && normAbility(o.ability) !== 'Quick Feet') s = Math.floor(s * 0.5);
-  return Math.max(0, Math.min(10000, s));
+  const f = field || {};
+  const weather = f.weather || '';
+  const terrain = f.terrain || '';
+  let speed = modifiedStat(p.rawStats.spe, (p.boosts && p.boosts.spe) || 0, gen);
+  const mods = [];
+  if (tailwind) mods.push(8192);
+  if ((p.hasAbility('Unburden') && p.abilityOn) ||
+      (p.hasAbility('Chlorophyll') && weather.includes('Sun')) ||
+      (p.hasAbility('Sand Rush') && weather === 'Sand') ||
+      (p.hasAbility('Swift Swim') && weather.includes('Rain')) ||
+      (p.hasAbility('Slush Rush') && (weather === 'Hail' || weather === 'Snow')) ||
+      (p.hasAbility('Surge Surfer') && terrain === 'Electric')) {
+    mods.push(8192);
+  } else if (p.hasAbility('Quick Feet') && p.status) {
+    mods.push(6144);
+  } else if (p.hasAbility('Slow Start') && p.abilityOn) {
+    mods.push(2048);
+  } else if (qpActive(p, weather, terrain) && qpBoostedStat(p, gen) === 'spe') {
+    mods.push(6144);
+  }
+  if (!(p.hasAbility('Unburden') && p.abilityOn)) {
+    if (p.hasItem('Choice Scarf')) {
+      mods.push(6144);
+    } else if (p.hasItem('Iron Ball', ...EV_ITEMS)) {
+      mods.push(2048);
+    } else if (p.hasItem('Quick Powder') && p.named && p.named('Ditto')) {
+      mods.push(8192);
+    }
+  }
+  // library chainMods (util.js:487) + pokeRound — exact for these dyadic mods.
+  let M = 4096;
+  for (const m of mods) if (m !== 4096) M = (M * m + 2048) >> 12;
+  speed = pokeRound((speed * M) / 4096);
+  if (p.hasStatus('par') && !p.hasAbility('Quick Feet')) {
+    speed = Math.floor(speed * (PAR_SPEED_PCT[String(gen)] || 50) / 100);
+  }
+  return Math.max(0, Math.min(Number(gen) <= 2 ? 999 : 10000, speed));
 }
 
 // ── Special-damage moves (non-basePower formulas) ──────────────────────
@@ -314,6 +399,22 @@ function selfEffectBlocks(gen, moveId, moveName, attMaxHP, dmgMin, dmgMax, critM
   return out;
 }
 
+// Effective defender types for the immunity checks below. The fork's
+// runImmunity path (dex.getImmunity, dist/sim/dex.js:226) uses
+// `target.getTypes()`, which returns the TERASTALLIZED type (replacing the
+// base types) when the mon is terastallized and not Stellar
+// (dist/sim/pokemon.js:1583) — and @smogon/calc's effectiveness overrides with
+// `defender.teraType` the same way (dist/mechanics/gen789.js:292-294).
+// Terastallization only exists in this fork's gen 9 and the champions engine,
+// so the override applies there alone (a teraType passed for gen 1-8 is
+// ignored, as in the library's gen 1-6 mechanics).
+function effectiveTypes(gen, mon) {
+  const base = (mon.species && mon.species.types) || [];
+  const t = mon.teraType;
+  if ((Number(gen) === 9 || Number(gen) === 0) && t && String(t) !== 'Stellar') return [String(t)];
+  return base;
+}
+
 // True when the fork's runImmunity (pokemon.js:1664) would block this special
 // move against this defender. Chart immunities come from the table; the two
 // request-data-dependent rules are applied here, mirroring the fork:
@@ -325,23 +426,27 @@ function selfEffectBlocks(gen, moveId, moveName, attMaxHP, dmgMin, dmgMax, critM
 //     static calc assumes they are not active.
 //   * Sheer Cold: its "ohko: Ice" rule makes Ice types immune (the chart only
 //     resists Ice 0.5x) — handled in the move's own case below.
+// Tera-aware: a terastallized defender's Tera type stands in for its base
+// types (see effectiveTypes) — matching BOTH the fork's getTypes-based
+// immunity and the library's own effectiveness pipeline.
 function specialMoveImmune(gen, moveId, defender) {
   const entry = (SPECIAL_MOVE_IMMUNITY[String(gen)] || {})[moveId];
   if (!entry) return false;
-  const defTypes = (defender.species && defender.species.types) || [];
+  const defTids = effectiveTypes(gen, defender).map(toID);
   if (entry.ground) {
     // Fork: Ground moves bypass the type chart entirely — only the grounded
     // check applies (isGrounded), and its FIRST rule is Iron Ball -> grounded
     // (which therefore overrides Flying type AND Levitate).
     const item = String(defender.item || '').toLowerCase();
     if (item === 'iron ball' || item === 'ironball') return false;
-    if (defTypes.includes('Flying')) return true;
+    if (defTids.includes('flying')) return true;
     const ability = String(defender.ability || '').toLowerCase();
     if (ability === 'levitate' || ability === 'eelevate') return true;
     if (item === 'air balloon' || item === 'airballoon') return true;
     return false;
   }
-  return !!(entry.immune && defTypes.some(t => entry.immune.includes(t)));
+  const immuneTids = (entry.immune || []).map(toID);
+  return defTids.some((t) => immuneTids.includes(t));
 }
 
 function specialMoveDamage(gen, moveId, attacker, defender, lastHit) {
@@ -349,8 +454,9 @@ function specialMoveDamage(gen, moveId, attacker, defender, lastHit) {
   const defHP = defender.curHP ? defender.curHP() : defender.maxHP();
   const defMaxHP = defender.maxHP ? defender.maxHP() : (defHP || 1);
   const attHP = attacker.curHP ? attacker.curHP() : attacker.maxHP();
-  const defTypes = (defender.species && defender.species.types) || [];
-  const hasIce = defTypes.includes('Ice');
+  // Tera-aware Ice check for Sheer Cold (see effectiveTypes): a terastallized
+  // Ice defender is immune even if its base types are not Ice.
+  const hasIce = effectiveTypes(gen, defender).some((t) => toID(t) === 'ice');
   const attLevel = attacker.level || 100;
 
   // Type-immunity gate: the fork's runImmunity applies to EVERY move, formula
@@ -498,10 +604,12 @@ function stateMoveDamage(gen, moveId, attacker, defender, st, field) {
   return { min: n.min, max: n.max, immune: n.max === 0, crit: { min: c.min, max: c.max } };
 }
 
+// % of defender max HP, rounded to 2 decimals (shared by all response paths).
+const pctOf = (v, maxhp) => (maxhp ? Math.round((v / maxhp) * 10000) / 100 : 0);
+
 function responseFromRange(min, max, immune, maxhp, desc, extra) {
   const expected = (min + max) / 2;
-  const pct = (v) => (maxhp ? Math.round((v / maxhp) * 10000) / 100 : 0);
-  const block = { min, max, expected, min_pct: pct(min), max_pct: pct(max), expected_pct: pct(expected) };
+  const block = { min, max, expected, min_pct: pctOf(min, maxhp), max_pct: pctOf(max, maxhp), expected_pct: pctOf(expected, maxhp) };
   // Fixed/state/OHKO damage: a critical hit does not change the value (no base power).
   return Object.assign({ crit: { min, max, expected } }, block, { immune, maxhp, desc: desc || (immune ? 'immune' : '') }, extra || {});
 }
@@ -548,11 +656,10 @@ function handleDamage(req) {
   if (STATE_BP_MOVES.has(moveId)) {
     const r = stateMoveDamage(gen, moveId, attacker, defender, st, field);
     if (r !== null) {
-      const pct = (v) => (maxHP ? Math.round((v / maxHP) * 10000) / 100 : 0);
       const cexp = ((r.crit && (r.crit.min + r.crit.max)) / 2) || 0;
       const out = Object.assign({
         min: r.min, max: r.max, expected: (r.min + r.max) / 2,
-        min_pct: pct(r.min), max_pct: pct(r.max), expected_pct: pct((r.min + r.max) / 2),
+        min_pct: pctOf(r.min, maxHP), max_pct: pctOf(r.max, maxHP), expected_pct: pctOf((r.min + r.max) / 2, maxHP),
         crit: { min: r.crit.min, max: r.crit.max, expected: cexp },
         immune: !!r.immune, maxhp: maxHP,
         desc: r.immune ? 'immune' : '',
@@ -577,14 +684,13 @@ function handleDamage(req) {
   try { crit = rangeFor(true); } catch (e) { crit = { min: 0, max: 0, expected: 0 }; }
 
   const immune = normal.max === 0;
-  const pct = (v) => (maxHP ? Math.round((v / maxHP) * 10000) / 100 : 0);
   const out = Object.assign({
     min: normal.min,
     max: normal.max,
     expected: normal.expected,
-    min_pct: pct(normal.min),
-    max_pct: pct(normal.max),
-    expected_pct: pct(normal.expected),
+    min_pct: pctOf(normal.min, maxHP),
+    max_pct: pctOf(normal.max, maxHP),
+    expected_pct: pctOf(normal.expected, maxHP),
     crit,
     immune,
     maxhp: maxHP,
@@ -618,7 +724,7 @@ function main() {
       if (req.type === 'damage') res = handleDamage(req);
       else if (req.type === 'speed') {
         const gen = req.gen ?? 9;
-        res = { base: buildPokemon(gen, req.pokemon).stats.spe, speed: effectiveSpeed(gen, req.pokemon, !!req.tailwind) };
+        res = { base: buildPokemon(gen, req.pokemon).stats.spe, speed: effectiveSpeed(gen, req.pokemon, !!req.tailwind, req.field) };
       } else {
         throw new Error('unknown request type: ' + req.type);
       }
