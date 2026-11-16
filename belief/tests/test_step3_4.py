@@ -546,6 +546,59 @@ def test_last_move_failed_set_and_turn_reset():
     assert bs.own_facts["p1a"].last_move_failed is False
 
 
+def test_stockpile_layers_track_cap_and_switch_clear():
+    """T5 wiring (2026-11-16): Stockpile adds one layer per use (fork cap 3 —
+    moves.ts:17956-17966: the 4th use fails, adding nothing). The LAYERS
+    PERSIST ACROSS TURNS (fork: the stockpile volatile has no duration — it is
+    cleared only by switch-out / a new mon), a re-entering mon starts at 0,
+    and the layers feed the calc's Spit Up (BP 100*layers) via the pipe."""
+    own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
+                   "item": "lifeorb", "ability": "solarpower"}}
+    bs = BeliefState("gen9ou", own_team=own)
+    sb = install(bs, "p2a", "seadra", [cand()])
+    for _ in range(3):
+        bs.update(E.MoveUsed(side="p2", slot="p2a", move="stockpile"))
+    assert sb.facts.stockpile_layers == 3
+    # cap: the 4th use fails in the fork — no 4th layer
+    bs.update(E.MoveUsed(side="p2", slot="p2a", move="stockpile"))
+    assert sb.facts.stockpile_layers == 3
+    # PERSISTS across turns (fork: a volatile, no duration) — a turn wipe would
+    # have broken a multi-turn Stockpile → Spit Up sequence
+    bs.update(E.Turn(n=2))
+    assert sb.facts.stockpile_layers == 3
+    # the state pipe hands the layers to the calc (Spit Up reads stockpileLayers)
+    spec = _move_with_state("spitup", sb.facts)
+    assert spec["stockpileLayers"] == 3
+    # switch-out cleared the volatile: a re-entering mon starts at 0
+    bs.update(E.SwitchIn(side="p2", slot="p2a", species="seadra", hp=100, maxhp=150))
+    assert sb.facts.stockpile_layers == 0
+
+
+def test_last_move_failed_from_real_log_lines():
+    """End-to-end regression (the 2026-11-16 bug: the flag was unreachable from
+    real logs — the fork never emits `movefail`). The fork's real failure
+    lines are `|-fail|<user>` (after the |move| announce) and
+    `|cant|<user>|<reason>` (aborted attempt) — both must land on
+    facts.last_move_failed via the adapter and clear on E.Turn."""
+    own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
+                   "item": "lifeorb", "ability": "solarpower"}}
+    bs = BeliefState("gen9ou", own_team=own)
+    sb = install(bs, "p2a", "blastoise", [cand()])
+    a = LogAdapter()
+    a.feed_lines([
+        "|move|p2a: Blastoise|Stomping Tantrum|p1a: Charizard",
+        "|-fail|p2a: Blastoise",
+    ])
+    failed = a.events[-1]
+    assert failed.type == "move_failed" and failed.move == "stompingtantrum"
+    assert bs.update(failed) is False            # facts only, no set evidence
+    assert sb.facts.last_move_failed is True
+    spec = _move_with_state("stompingtantrum", sb.facts)
+    assert spec["lastMoveFailed"] is True        # ...and the calc sees it
+    bs.update(E.Turn(n=2))
+    assert sb.facts.last_move_failed is False
+
+
 def _run_smoke_battle():
     """Run the seeded fork battle keeper and return its raw log lines (shared with
     the 3.1 smoke test's pattern)."""

@@ -79,8 +79,10 @@ IGNORED_TAGS = frozenset({
     # `-sidestart` is NOT here — it is checked first in _map (the Tailwind
     # start line is the speed-order input for 3.4; other side-condition
     # starts stay ignored).
-    "split", "upkeep", "fail", "-fail", "-start", "-end", "-miss",
-    "-transform", "-primal", "-formechange", "-enditem", "swap", "cant",
+    # `-fail` / `cant` are NOT here — they map to MoveFailed (the fork's
+    # move-attempt-failure lines; see the handlers below).
+    "split", "upkeep", "-start", "-end", "-miss",
+    "-transform", "-primal", "-formechange", "-enditem", "swap",
     # non-BSS / gen-specific (no 3.1 evidence)
     "-mega", "-zpower", "-zbroken", "-burst", "-candynamax",
     # damage MODIFIERS — the lines themselves carry no set evidence, and none of
@@ -302,13 +304,40 @@ class LogAdapter:
             self._last_move = (side, slot, move, t_slot)
             return MoveUsed(side=side, slot=slot, move=move,
                             target_side=t_side, target_slot=t_slot)
+        if tag == "-fail" and len(p) >= 1:
+            # this fork's "the announced move attempt FAILED" line
+            # (battle-actions.ts:656-659): the move is announced (|move|) and
+            # then fails (miss, immunity, Protect, blocked) -> `|-fail|<user>`
+            # with NO move name in the payload. The fork sets
+            # moveThisTurnResult=false on this path, so the NEXT turn's Stomping
+            # Tantrum / Temper Flare doubles (moves.ts:18050/19186). The move
+            # name comes from the user's own announce line — the fail line
+            # always immediately follows it (a move executes atomically).
+            side, slot = _slot_of(p[0])
+            lm = self._last_move
+            move = lm[2] if (lm is not None and lm[1] == slot) else ""
+            return MoveFailed(side=side, slot=slot, move=move)
+        if tag == "cant" and len(p) >= 2:
+            # status/PP move-attempt ABORTs — logged BEFORE any |move| line (the
+            # BeforeMove / nopp paths never announce): par (conditions.ts:42),
+            # slp (:76), frz (:103), flinch (:203), recharge (:369), nopp
+            # (battle-actions.ts:340 — the move name IS in the line). The fork
+            # sets moveThisTurnResult=false on ALL of these (runMove line 319 /
+            # 331 / 342) -> the next turn's ST / Temper Flare doubles. Other cant
+            # reasons (trp, ability blocks, ...) are NOT move-attempt failures
+            # and stay ignored (return None below).
+            reason = p[1]
+            if reason not in ("par", "slp", "frz", "flinch", "recharge", "nopp"):
+                return None
+            side, slot = _slot_of(p[0])
+            move = to_id(p[2]) if (reason == "nopp" and len(p) >= 3) else ""
+            return MoveFailed(side=side, slot=slot, move=move)
         if tag == "movefail" and len(p) >= 2:
             # Upstream log format |movefail|slot|MoveName. NOTE: this fork never
-            # emits `movefail` (verified in dist/sim + client parser) — a failed
-            # move logs the `|move|` announce line first, then `|-fail|<user>`
-            # (no move name; stays in IGNORED_TAGS). The move name is already in
-            # the announce, and the absence of a following damage line IS the
-            # observable failure signal the 3.2 evidence engine consumes.
+            # emits `movefail` (verified in dist/sim + client parser) — this
+            # fork's failure lines are `|-fail|<user>` (after the |move| announce)
+            # and `|cant|<user>|<reason>` (before it); both map to MoveFailed
+            # above. Kept for protocol completeness.
             side, slot = _slot_of(p[0])
             return MoveFailed(side=side, slot=slot, move=to_id(p[1]))
 

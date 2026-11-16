@@ -68,9 +68,11 @@ class Facts:
     moves_used: set = _dc_field(default_factory=set)
     tera: Optional[str] = None
     last_hit: Optional[int] = None
-    # T5 state (per-turn, consumed by _move_with_state for state-BP moves)
-    hit_this_turn: bool = False
-    last_move_failed: bool = False
+    # T5 state (consumed by _move_with_state for state-BP moves)
+    hit_this_turn: bool = False          # per-turn (fork: thisTurn resets end of turn)
+    last_move_failed: bool = False       # per-turn (fork: moveLastTurnResult)
+    # Stockpile LAYERS — a fork VOLATILE (no duration): they persist across
+    # turns, cleared only by switch-out (clearVolatiles) or a new mon.
     stockpile_layers: int = 0
 
     def reset(self) -> None:
@@ -82,14 +84,16 @@ class Facts:
         self.moves_used = set()
         self.tera = None
         self.last_hit = None
+        self.stockpile_layers = 0
         self.turn_reset()
 
     def turn_reset(self) -> None:
         """Per-turn state wipe (called on E.Turn). Persists across turns:
-        last_hit (reflector memory), hp, maxhp, statuses, boosts, moves_used, tera."""
+        last_hit (reflector memory), stockpile_layers (fork: the stockpile
+        volatile has no duration — layers survive turns, cleared only by a
+        switch-out / new mon), hp, maxhp, statuses, boosts, moves_used, tera."""
         self.hit_this_turn = False
         self.last_move_failed = False
-        self.stockpile_layers = 0
 
 #: EV stat tokens as they appear in the DB spread strings ("252 HP / 216 Def")
 _EV_TOKEN = {"hp": "hp", "atk": "atk", "def": "def", "spa": "spa", "spd": "spd", "spe": "spe"}
@@ -535,6 +539,16 @@ class BeliefState:
             return False
         if isinstance(event, E.MoveUsed):
             self._turn_buffer.append(("m", event.side, event.slot, event.move))
+            # Stockpile (fork moves.ts:17956-17966 + conditions.ts volatile): each
+            # successful use adds one layer, cap 3 (the 4th use fails — onTry /
+            # onRestart return false — and adds nothing). The layers feed the
+            # calc's Spit Up (BP 100*layers) via _move_with_state. A FAILED use
+            # leaves one phantom layer (blocked Stockpile — rare-in-BSS edge,
+            # accepted: rollback can't tell a capped failure from a real one).
+            if event.move == "stockpile":
+                facts = self._facts_for(event.side, event.slot)
+                if facts is not None and facts.stockpile_layers < 3:
+                    facts.stockpile_layers += 1
             return self._route_set_evidence(event)
         if isinstance(event, E.MoveFailed):
             # stompingtantrum/temperflare gate (fork moves.ts:18050/19186:
@@ -645,6 +659,9 @@ class BeliefState:
             if ev.maxhp:
                 facts.maxhp = ev.maxhp
             facts.boosts = {}
+            # switch-out cleared the mon's volatiles (fork clearVolatiles):
+            # Stockpile layers are gone even for a re-entering mon
+            facts.stockpile_layers = 0
             return
         facts.reset()
         facts.maxhp = ev.maxhp or None

@@ -298,6 +298,50 @@ def test_adapter_residual_not_attributed_to_move():
     assert dmg[1].move is None and dmg[1].source_slot is None
 
 
+def test_adapter_move_failure_lines_to_movefailed():
+    """Fork move-attempt-failure protocol (fork-verified 2026-11-16):
+
+    * an ANNOUNCED move that fails (miss / immunity / Protect / blocked)
+      logs ``|move|...`` then ``|-fail|<user>`` (battle-actions.ts:656-659 —
+      NO move name in the fail payload); the move name is recovered from the
+      user's own announce line;
+    * an ABORTED attempt (par/slp/frz/flinch/recharge — conditions.ts
+      onBeforeMove; nopp — battle-actions.ts:340, move name in the line)
+      logs ``|cant|<user>|<reason>[|Move]`` with NO announce.
+
+    Both are the fork's ``moveThisTurnResult=false`` paths (runMove lines
+    319/331/342) — the next turn's Stomping Tantrum / Temper Flare doubles
+    (moves.ts:18050/19186). Non-move-failure cant reasons (trp, ability
+    blocks, ...) must stay silent.
+    """
+    # announced then failed: move name recovered from the announce line
+    a = LogAdapter()
+    a.feed_lines([
+        "|move|p2a: Blastoise|Stomping Tantrum|p1a: Charizard",
+        "|-fail|p2a: Blastoise",
+    ])
+    ev = a.events[-1]
+    assert ev.type == "move_failed"
+    assert (ev.side, ev.slot, ev.move) == ("p2", "p2a", "stompingtantrum")
+
+    # aborted before the announce: no move name available
+    a2 = LogAdapter()
+    a2.feed_lines(["|cant|p2a: Blastoise|par"])
+    assert a2.events[-1].type == "move_failed"
+    assert a2.events[-1].move == ""
+
+    # nopp carries the move name in the line
+    a3 = LogAdapter()
+    a3.feed_lines(["|cant|p2a: Blastoise|nopp|Stomping Tantrum"])
+    assert a3.events[-1].type == "move_failed"
+    assert a3.events[-1].move == "stompingtantrum"
+
+    # non-move-attempt cant reasons stay silent (no event at all)
+    a4 = LogAdapter()
+    a4.feed_lines(["|cant|p2a: Blastoise|trp"])
+    assert a4.events == []
+
+
 def test_adapter_slot_reuse_updates_maxhp():
     # p2a is Garchomp (183), then a new mon (Blastoise, 150) takes the active
     # slot after a faint. The slot's max HP must follow the new mon.
