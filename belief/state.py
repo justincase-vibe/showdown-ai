@@ -28,7 +28,9 @@ Prior (D43, 2026-11-15):
 """
 from __future__ import annotations
 
+import copy
 import itertools
+import random
 import re
 from dataclasses import dataclass, field as _dc_field
 from typing import Dict, List, Optional
@@ -231,6 +233,43 @@ class SlotBelief:
     def mass(self, predicate) -> float:
         """Total posterior mass over candidates satisfying ``predicate``."""
         return sum(c["weight"] for c in self.candidates if predicate(c))
+
+    def sample(self, n: int, seed: Optional[int] = None) -> List[Dict]:
+        """Draw ``n`` full-set candidates from this slot's posterior — a multinomial
+        draw (with replacement) over the candidates, using a SEEDABLE RNG so the bot
+        can reproduce a decision. Full sets (not per-move marginals) is the point:
+        within-set move CORRELATIONS are preserved by construction — a Wish set you
+        draw already contains its Protect (user invariant, 3.3/3.5).
+
+        Reproducible: the same ``seed`` + the same posterior -> the same samples
+        (the RNG is a fresh ``random.Random(seed)``, so samples never leak state
+        across calls or slots). Returns COPIES, so mutating a sample cannot touch
+        the belief's live candidates.
+        """
+        if n < 0:
+            raise ValueError(f"sample count must be >= 0, got {n}")
+        rng = random.Random(seed)
+        idxs = rng.choices(range(len(self.candidates)),
+                           weights=[c["weight"] for c in self.candidates], k=n)
+        return [copy.deepcopy(self.candidates[i]) for i in idxs]
+
+    def move_probabilities(self) -> Dict[str, float]:
+        """Posterior mass over the sets CONTAINING each move (membership, order-blind
+        — the 3.3 moveset-is-a-set invariant). A move's probability is the mass of the
+        full sets that include it, so correlated moves (Wish+Protect) are NOT treated
+        as independent — this is the belief-facing view the policy samples from.
+
+        PP is unobservable in the log, so it is deliberately ignored. Every value is in
+        [0, 1]; they sum to the posterior-expected number of moves (4 for a 4-move set),
+        not 1 — a mon carries several moves, and the mass of a move is the mass of the
+        sets that hold it.
+        """
+        out: Dict[str, float] = {}
+        for c in self.candidates:
+            w = c["weight"]
+            for m in set(c.get("moves", [])):
+                out[m] = out.get(m, 0.0) + w
+        return out
 
     def update(self, event) -> bool:
         """Apply one observed event to this slot's posterior (3.3 HARD evidence).
