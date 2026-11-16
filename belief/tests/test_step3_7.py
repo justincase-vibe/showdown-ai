@@ -78,8 +78,11 @@ def _slot_specs(side: str, team) -> dict:
 
 def _entropy(weights) -> float:
     """Shannon entropy (log2) over the positive posterior masses — a belief spread
-    measure: high = still uncertain, low = narrowed."""
-    return -sum(w * math.log2(w) for w in weights if w > 0.0)
+    measure: high = still uncertain, low = narrowed. Clamped to ``>= 0``: entropy is
+    mathematically non-negative, so a degenerate (single-candidate) distribution has
+    exactly zero entropy and the sign of the floating-point ``-0.0`` must not leak
+    into the report as ``entropy=-0.000``."""
+    return max(0.0, -sum(w * math.log2(w) for w in weights if w > 0.0))
 
 
 def _fmt_candidate(c: dict) -> str:
@@ -120,11 +123,13 @@ def _run_battle(bs: BeliefState, battle: dict, bi: int):
                 top = max(sb.candidates, key=lambda c: c["weight"])
                 mp = sb.move_probabilities()
                 top_move = max(mp.items(), key=lambda kv: kv[1])[0] if mp else "-"
+                ent = _entropy(sb.posterior)
+                assert ent >= 0.0, f"battle {bi} turn {ev.n}: {slot} entropy {ent!r} < 0"
                 report_lines.append(
                     f"  b{bi} turn {ev.n:>2} {slot} [{sb.species}] "
                     f"top={top['weight']:.3f} {_fmt_candidate(top)} "
                     f"| topmove={top_move}({mp.get(top_move, 0.0):.3f}) "
-                    f"| entropy={_entropy(sb.posterior):.3f}")
+                    f"| entropy={ent:.3f}")
     return unknown, report_lines
 
 
