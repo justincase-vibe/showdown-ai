@@ -220,6 +220,28 @@ class TerrainChanged(Event):
 
 
 @dataclass
+class FieldEffectChanged(Event):
+    """A field or side effect starts or ends.
+
+    Covers pseudo-weather (Trick Room, Wonder Room, Gravity, Magic Room, …)
+    AND side conditions (Reflect, Light Screen, Aurora Veil, Spikes, Stealth
+    Rock, Toxic Spikes, Sticky Web, Safeguard, …). ``side`` is ``""`` for
+    field-wide effects, ``"p1"/"p2"`` for per-side. ``layers`` is the count
+    for Spikes (1-3) / Toxic Spikes (1-2); 1 for all others.
+
+    Fork log lines:
+      * Pseudo-weather: ``|-fieldstart|move: Trick Room`` / ``|-fieldend|...``
+      * Side conditions: ``|-sidestart|p1|move: Reflect`` / ``|-sideend|...``
+    """
+
+    type: ClassVar[str] = "field_effect_changed"
+    name: str = ""       # 'trickroom', 'reflect', 'spikes', 'auroraveil', ...
+    side: str = ""       # '' = field-wide; 'p1'/'p2' = per-side
+    active: bool = True  # True = started, False = ended
+    layers: int = 1      # Spikes 1-3, Toxic Spikes 1-2, others 1
+
+
+@dataclass
 class BattleEnd(Event):
     type: ClassVar[str] = "battle_end"
     winner_side: Optional[str] = None  # None = tie
@@ -240,5 +262,5 @@ EVENT_TYPES = [
     BattleStart, Turn, SwitchIn, SwitchOut, Faint, AbilityRevealed, MoveUsed,
     MoveFailed, HitCount, DamageObserved, HealObserved, StatusApplied,
     StatusCured, BoostChanged, TeraUsed, ItemRevealed, WeatherChanged,
-    TerrainChanged, TailwindChanged, BattleEnd, Unknown,
+    TerrainChanged, TailwindChanged, FieldEffectChanged, BattleEnd, Unknown,
 ]

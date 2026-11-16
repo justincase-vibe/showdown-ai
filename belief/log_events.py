@@ -47,6 +47,7 @@ from .events import (
     DamageObserved,
     Event,
     Faint,
+    FieldEffectChanged,
     HealObserved,
     HitCount,
     ItemRevealed,
@@ -268,14 +269,27 @@ class LogAdapter:
             return AbilityRevealed(side=side, slot=slot, ability=to_id(p[1]))
 
         if tag == "-sidestart" and len(p) >= 2:
-            # Side-condition start. Evidence: Tailwind (a speed multiplier —
-            # 3.4 speed-order evidence). Reflect/Light Screen starts carry no
-            # set evidence of their own here (a screen is a candidate's move or
-            # item; the damage window picks them up via the field in 3.6).
+            # Side-condition start (Reflect, Light Screen, Aurora Veil, Spikes,
+            # Stealth Rock, Toxic Spikes, Sticky Web, Tailwind, Safeguard, …).
+            # Tailwind is special-cased (the 3.4 speed-order evidence); all
+            # others emit the generic FieldEffectChanged for the AI's context.
             if "move: Tailwind" in p[1]:
                 side, _ = _slot_of(p[0])
                 return TailwindChanged(side=side, active=True)
-            return None
+            side, _ = _slot_of(p[0])
+            name = to_id(p[1].replace("move: ", "").split(",")[0])
+            return FieldEffectChanged(name=name, side=side, active=True)
+        if tag == "-sideend" and len(p) >= 2:
+            side, _ = _slot_of(p[0])
+            name = to_id(p[1].replace("move: ", "").split(",")[0])
+            return FieldEffectChanged(name=name, side=side, active=False)
+        if tag in ("-fieldstart", "-fieldactivate") and len(p) >= 1:
+            # Pseudo-weather: Trick Room, Wonder Room, Gravity, Magic Room, …
+            name = to_id(p[0].replace("move: ", "").split(",")[0])
+            return FieldEffectChanged(name=name, side="", active=True)
+        if tag == "-fieldend" and len(p) >= 1:
+            name = to_id(p[0].replace("move: ", "").split(",")[0])
+            return FieldEffectChanged(name=name, side="", active=False)
         if tag == "move" and len(p) >= 2:
             # |move|source|MoveName|target — battle-actions.js logs
             # addMove("move", pokemon, movename, target): move is p[1].

@@ -68,8 +68,13 @@ class Facts:
     moves_used: set = _dc_field(default_factory=set)
     tera: Optional[str] = None
     last_hit: Optional[int] = None
+    # T5 state (per-turn, consumed by _move_with_state for state-BP moves)
+    hit_this_turn: bool = False
+    last_move_failed: bool = False
+    stockpile_layers: int = 0
 
     def reset(self) -> None:
+        """Full wipe (a NEW mon takes the slot)."""
         self.hp = None
         self.maxhp = None
         self.statuses = set()
@@ -77,6 +82,14 @@ class Facts:
         self.moves_used = set()
         self.tera = None
         self.last_hit = None
+        self.turn_reset()
+
+    def turn_reset(self) -> None:
+        """Per-turn state wipe (called on E.Turn). Persists across turns:
+        last_hit (reflector memory), hp, maxhp, statuses, boosts, moves_used, tera."""
+        self.hit_this_turn = False
+        self.last_move_failed = False
+        self.stockpile_layers = 0
 
 #: EV stat tokens as they appear in the DB spread strings ("252 HP / 216 Def")
 _EV_TOKEN = {"hp": "hp", "atk": "atk", "def": "def", "spa": "spa", "spd": "spd", "spe": "spe"}
@@ -100,7 +113,12 @@ def _move_with_state(move_name: str, facts: Optional[Facts]) -> Union[str, Dict]
     state: Dict[str, Any] = {}
     if facts.last_hit is not None:
         state["lastHitDamage"] = facts.last_hit
-    # P2: state["hitThisTurn"], state["lastMoveFailed"], state["allyFainted"], ...
+    if facts.hit_this_turn:
+        state["hitThisTurn"] = True
+    if facts.last_move_failed:
+        state["lastMoveFailed"] = True
+    if facts.stockpile_layers > 0:
+        state["stockpileLayers"] = facts.stockpile_layers
     if not state:
         return move_name
     return {"name": move_name, **state}
@@ -355,8 +373,27 @@ class BeliefState:
         self.own_team: Dict[str, Dict] = dict(own_team or {})
         self.own_facts: Dict[str, Facts] = {}
         # shared field — the calc's field inputs (3.4):
-        self.field = {"weather": None, "terrain": None,
-                      "tailwind_side": None, "tailwind_turns": 0}
+        self.field = {
+            "weather": None, "terrain": None,
+            "tailwind_side": None, "tailwind_turns": 0,
+            # pseudo-weather (field-wide): True = active
+            "trickroom": False, "wonderroom": False,
+            "gravity": False, "magicroom": False,
+            # side conditions: side -> active (True/False)
+            "reflect": {"p1": False, "p2": False},
+            "lightscreen": {"p1": False, "p2": False},
+            "auroraveil": {"p1": False, "p2": False},
+            # entry hazards: side -> layers (0 = none)
+            "spikes": {"p1": 0, "p2": 0},
+            "toxicspikes": {"p1": 0, "p2": 0},
+            "stealthrock": {"p1": False, "p2": False},
+            "stickyweb": {"p1": False, "p2": False},
+            "safeguard": {"p1": False, "p2": False},
+        }
+        # battle-level state
+        self.turn: int = 0
+        self.fainted: Dict[str, int] = {"p1": 0, "p2": 0}
+        self.active: Dict[str, Optional[str]] = {"p1": None, "p2": None}
         # per-turn move-order buffer (speed-order evidence, 3.4-4): entries are
         # ('m', side, slot, move) and order-breakers ('sw',) / ('break',).
         # Flushed on Turn / BattleEnd — the moves of ONE turn only.
@@ -377,6 +414,97 @@ class BeliefState:
         self._slots[slot] = sb
         return sb
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    #  get_context() — the single API the AI (Step 4/5) consumes.
+    #  JSON-serializable, complete battle state, one call.
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def get_context(self) -> Dict:
+        """Full battle-state snapshot for the observation encoder (Step 4) and
+        the policy network (Step 5). JSON-safe (all primitives / lists / dicts).
+
+        Structure:
+          * ``turn`` — the current turn number
+          * ``fainted`` — {"p1": int, "p2": int}
+          * ``active``  — {"p1": slot or None, "p2": slot or None}
+          * ``field``   — weather, terrain, Trick Room, screens, hazards, Tailwind
+          * ``own``     — per-slot: HP fraction, status, boosts, moves, state
+          * ``opponent``— per-slot: species, HP fraction, status, boosts, moves,
+                         posterior (top-K), top moves, confidence
+        """
+        def _mon_block(facts: Optional[Facts], team_spec: Optional[Dict]) -> Dict:
+            if facts is None:
+                return {"hp_frac": 0.0, "statuses": [], "boosts": {},
+                        "moves": [], "last_hit": 0, "hit_this_turn": False,
+                        "last_move_failed": False, "stockpile": 0}
+            hp_frac = (facts.hp / facts.maxhp) if (facts.hp is not None and facts.maxhp) else 0.0
+            return {
+                "hp_frac": round(hp_frac, 4),
+                "statuses": sorted(facts.statuses),
+                "boosts": dict(facts.boosts),
+                "moves": sorted(facts.moves_used),
+                "tera": facts.tera or "",
+                "last_hit": facts.last_hit or 0,
+                "hit_this_turn": facts.hit_this_turn,
+                "last_move_failed": facts.last_move_failed,
+                "stockpile": facts.stockpile_layers,
+            }
+
+        ctx: Dict = {
+            "turn": self.turn,
+            "fainted": dict(self.fainted),
+            "active": dict(self.active),
+            "field": {
+                "weather": self.field["weather"] or "",
+                "terrain": self.field["terrain"] or "",
+                "trickroom": self.field["trickroom"],
+                "wonderroom": self.field["wonderroom"],
+                "tailwind_side": self.field["tailwind_side"] or "",
+                "reflect": {k: v for k, v in self.field["reflect"].items() if v},
+                "lightscreen": {k: v for k, v in self.field["lightscreen"].items() if v},
+                "auroraveil": {k: v for k, v in self.field["auroraveil"].items() if v},
+                "spikes": dict(self.field["spikes"]),
+                "stealthrock": {k: v for k, v in self.field["stealthrock"].items() if v},
+                "stickyweb": {k: v for k, v in self.field["stickyweb"].items() if v},
+            },
+            "own": {},
+            "opponent": {},
+        }
+        # own side (exactly known)
+        for slot, spec in self.own_team.items():
+            ctx["own"][slot] = _mon_block(
+                self.own_facts.get(slot), spec)
+            ctx["own"][slot]["name"] = spec.get("name", "")
+            ctx["own"][slot]["ability"] = spec.get("ability", "")
+            ctx["own"][slot]["item"] = spec.get("item", "")
+        # opponent side (belief)
+        for slot, sb in sorted(self._slots.items()):
+            block = _mon_block(sb.facts, None)
+            block["species"] = sb.species
+            # posterior summary (top-K by weight)
+            sorted_cands = sorted(enumerate(sb.candidates), key=lambda x: -x[1]["weight"])
+            top_k = 5
+            block["posterior"] = [
+                {"ability": c["ability"], "moves": c["moves"], "weight": round(w, 4)}
+                for _, c in sorted_cands[:top_k]
+                for w in [c["weight"]]
+            ]
+            # top moves (marginal over the posterior)
+            move_counts: Dict[str, float] = {}
+            for c in sb.candidates:
+                for m in c["moves"]:
+                    move_counts[m] = move_counts.get(m, 0) + c["weight"]
+            block["top_moves"] = [
+                m for m, _ in sorted(move_counts.items(), key=lambda x: -x[1])[:4]
+            ]
+            # confidence (1 - normalized entropy)
+            import math
+            p = sb.posterior
+            ent = -sum(pi * math.log2(pi) for pi in p if pi > 0) / max(1, math.log2(len(p)))
+            block["confidence"] = round(1.0 - ent, 4)
+            ctx["opponent"][slot] = block
+        return ctx
+
     # ══════════════════════════ event dispatch (3.3 + 3.4) ══════════════════════
 
     def update(self, event) -> bool:
@@ -392,6 +520,7 @@ class BeliefState:
             self._turn_buffer.append(("sw",))
             if event.side == "p2":
                 self.add_opponent(event.slot, event.species)
+            self.active[event.side] = event.slot
             self._set_switch_facts(event)
             return False
         if isinstance(event, E.SwitchOut):
@@ -399,6 +528,9 @@ class BeliefState:
             return False
         if isinstance(event, E.Faint):
             self._set_hp(event.side, event.slot, 0)
+            self.fainted[event.side] = self.fainted.get(event.side, 0) + 1
+            if self.active.get(event.side) == event.slot:
+                self.active[event.side] = None
             self._turn_buffer.append(("break",))
             return False
         if isinstance(event, E.MoveUsed):
@@ -437,12 +569,21 @@ class BeliefState:
                 self.field["tailwind_side"] = None
                 self.field["tailwind_turns"] = 0
             return False
+        if isinstance(event, E.FieldEffectChanged):
+            return self._apply_field_effect(event)
         if isinstance(event, (E.Turn, E.BattleEnd)):
             applied = self._flush_speed_buffer()  # the moves of the turn just ended
             if self.field.get("tailwind_side") and self.field.get("tailwind_turns", 0) > 0:
                 self.field["tailwind_turns"] -= 1
                 if self.field["tailwind_turns"] <= 0:
                     self.field["tailwind_side"] = None
+            if isinstance(event, E.Turn):
+                self.turn = event.n
+                # per-turn state wipe for all tracked mons (opponent + own)
+                for sb in self._slots.values():
+                    sb.facts.turn_reset()
+                for f in self.own_facts.values():
+                    f.turn_reset()
             return applied
         return False
 
@@ -529,6 +670,28 @@ class BeliefState:
         facts = self._facts_for(ev.side, ev.slot)
         if facts is not None:
             facts.tera = ev.tera_type
+
+    def _apply_field_effect(self, ev: E.FieldEffectChanged) -> bool:
+        """Track a field/side effect (Trick Room, Reflect, Spikes, …).
+        Facts-only (no set evidence — a screen is not set evidence)."""
+        name = ev.name
+        side = ev.side or None
+        # field-wide (pseudo-weather)
+        if side is None:
+            if name in self.field:
+                self.field[name] = ev.active
+            return False
+        # per-side: boolean conditions
+        if name in ("reflect", "lightscreen", "auroraveil", "stealthrock", "stickyweb", "safeguard"):
+            if name in self.field:
+                self.field[name][side] = ev.active
+            return False
+        # per-side: layered (spikes 1-3, toxic spikes 1-2)
+        if name in ("spikes", "toxicspikes"):
+            if name in self.field:
+                self.field[name][side] = 1 if ev.active else 0
+            return False
+        return False
 
     # ══════════════════ 3.4 SOFT evidence: damage window (3.4-1..3) ══════════════════
 
