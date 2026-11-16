@@ -39,9 +39,14 @@ def to_id(name: str) -> str:
 
 
 # ── moves ────────────────────────────────────────────────────────────
-#: data columns a move_gen override may carry (the rest — id/name/desc/
-#: side_condition/boosts/drain/recoil — stay on the gen-9 base row).
-_MOVE_GEN_OVERRIDES = ("type", "category", "power", "accuracy", "pp", "priority")
+#: data columns a move_gen override may carry (the rest — id/name/desc — stay on
+#: the gen-9 base row). A2 (v6) added the effect flags to this set: they change
+#: per gen in early gens (gen-1 Light Screen is a boost, not a side condition;
+#: Tail Glow +2 not +3; Double Edge 1/4 not 1/3 recoil).
+_MOVE_GEN_OVERRIDES = (
+    "type", "category", "power", "accuracy", "pp", "priority",
+    "side_condition", "side_status", "boosts", "drain", "recoil",
+)
 
 
 def get_move(name: str, gen: int = 9) -> Dict[str, Any]:
@@ -52,8 +57,9 @@ def get_move(name: str, gen: int = 9) -> Dict[str, Any]:
     ``move_gen`` override (extract_move_gen.js, fork-sourced) replaces the
     per-gen data where the move changed — e.g. Dragon Claw is Special in gen
     1-3, Protect is pri 2 in gen 1-2 / pri 3 in gen 3-4, Slash is 80 BP in
-    champions. Effect flags (side_condition/boosts/drain/recoil) stay gen-9 on
-    the base row (the calc models those per-gen via its JSON tables).
+    champions, and the effect flags change too (gen-1 Light Screen is a stat
+    boost, not a side condition; Tail Glow +2 not +3). The gen-9 ``move`` row is
+    the base; a ``move_gen`` override replaces any column that differs.
 
     Returns a dict with: id, name, type, category, power, accuracy, pp,
     priority, desc, boosts (parsed JSON, e.g. {"atk": 2} or None),

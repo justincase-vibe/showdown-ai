@@ -52,9 +52,20 @@ const ENGINE_FMT = {
   5: 'gen5ou', 6: 'gen6ou', 7: 'gen7ou', 8: 'gen8ou', 9: 'gen9ou',
 };
 
-// The 6 data columns we track per gen (desc is prose, not logic; effect flags
-// side_condition/boosts/drain/recoil stay gen-9 on the base row — the calc
-// models those per-gen via its JSON tables).
+// The data columns we track per gen. A1 (v5): type/category/power/accuracy/pp/
+// priority. A2 (v6): the effect flags side_condition/side_status/boosts/drain/
+// recoil — these DO change per gen in early gens (gen-1 Light Screen is a stat
+// boost, not a side condition; Tail Glow +2 not +3; Double Edge 1/4 not 1/3
+// recoil). desc is prose (not logic) so it stays excluded. ``boosts`` key order
+// is normalized (sorted) so the "does it differ?" compare is order-stable.
+const frac100 = (v) => {
+  if (v == null) return null;
+  if (Array.isArray(v) && v.length === 2 && v[1]) return Math.round(100 * v[0] / v[1]);
+  if (typeof v === 'number') return v;
+  return null;
+};
+const boostsStr = (m) => (m.boosts && Object.keys(m.boosts).length)
+  ? JSON.stringify(m.boosts, Object.keys(m.boosts).sort()) : null;
 const norm = (m) => ({
   type: m.type || null,
   category: m.category || null,
@@ -62,10 +73,18 @@ const norm = (m) => ({
   accuracy: m.accuracy === true ? 100 : (m.accuracy == null ? null : m.accuracy),
   pp: m.pp == null ? null : m.pp,
   priority: m.priority == null ? 0 : m.priority,
+  // A2 (v6): effect flags
+  side_condition: m.sideCondition || null,
+  side_status: m.sideStatus || null,
+  boosts: boostsStr(m),
+  drain: frac100(m.drain),
+  recoil: frac100(m.recoil),
 });
 const same = (a, b) =>
   a.type === b.type && a.category === b.category && a.power === b.power &&
-  a.accuracy === b.accuracy && a.pp === b.pp && a.priority === b.priority;
+  a.accuracy === b.accuracy && a.pp === b.pp && a.priority === b.priority &&
+  a.side_condition === b.side_condition && a.side_status === b.side_status &&
+  a.boosts === b.boosts && a.drain === b.drain && a.recoil === b.recoil;
 
 // gen-9 base values (the reference for "does this change per gen?").
 const baseDex = Dex.forFormat(ENGINE_FMT[9]);
@@ -96,8 +115,9 @@ for (const [key, fmt] of Object.entries(ENGINE_FMT)) {
 
 const payload = {
   source: 'showdown',
-  note: 'A1: per-gen move overrides (type/category/power/accuracy/pp/priority) ' +
-        'from the fork, keyed by engine key (0=champions,1-9=gen); base row is gen 9',
+  note: 'A1+A2: per-gen move overrides (type/category/power/accuracy/pp/priority ' +
+        '+ side_condition/side_status/boosts/drain/recoil) from the fork, keyed by ' +
+        'engine key (0=champions,1-9=gen); base row is gen 9',
   rows,
 };
 fs.mkdirSync(path.dirname(OUT), { recursive: true });

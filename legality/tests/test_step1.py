@@ -104,6 +104,45 @@ def test_per_gen_default_gen9_and_flags_preserved():
     assert g1["category"] == "Special" and g1["is_hazard"] is False
 
 
+def test_per_gen_flags_lightscreen_is_not_a_screen_in_gen1():
+    # A2 (2026-11-16): in gen 1 Light Screen was a stat-boost move (no side
+    # condition), so it is NOT a "screen" that gen — the gen-9 base flag would
+    # have misclassified it. Gen 4+ it sets a side condition. (fork-verified)
+    g1 = lookup.get_move("Light Screen", 1)
+    assert g1["is_screen"] is False and g1["side_condition"] is None
+    assert lookup.get_move("Light Screen", 9)["is_screen"] is True
+    assert lookup.get_move("Light Screen", 4)["is_screen"] is True
+
+
+def test_per_gen_flags_boost_magnitude():
+    # A2: Tail Glow boosts +3 in gen 5+, +2 in gen 1-4; Amnesia boosts BOTH SpA
+    # and SpD in gen 1 (pre type-split) but only SpD in gen 9. (fork-verified)
+    assert lookup.get_move("Tail Glow", 9)["boosts"] == {"spa": 3}
+    assert lookup.get_move("Tail Glow", 1)["boosts"] == {"spa": 2}
+    assert lookup.get_move("Amnesia", 9)["boosts"] == {"spd": 2}
+    assert lookup.get_move("Amnesia", 1)["boosts"] == {"spa": 2, "spd": 2}
+    # champions (engine key 0) doubles Toxic Thread's speed drop
+    assert lookup.get_move("Toxic Thread", 0)["boosts"] == {"spe": -2}
+    assert lookup.get_move("Toxic Thread", 9)["boosts"] == {"spe": -1}
+
+
+def test_per_gen_flags_recoil():
+    # A2: recoil changes per gen — Double Edge 1/4 (gen 1) vs 1/3 (gen 9);
+    # Struggle 1/2 (gen 1) vs none (gen 9). (fork-verified)
+    assert lookup.get_move("Double Edge", 9)["recoil"] == 33
+    assert lookup.get_move("Double Edge", 1)["recoil"] == 25
+    assert lookup.get_move("Struggle", 9)["recoil"] is None
+    assert lookup.get_move("Struggle", 1)["recoil"] == 50
+
+
+def test_per_gen_flags_gen6_plus_unchanged():
+    # A2: gen 6-8 have NO effect-flag diffs vs the gen-9 base (all per-gen flag
+    # changes are in gen 1-5 + champions), so the base row is already correct
+    # and no override is needed for these.
+    assert lookup.get_move("Light Screen", 6)["is_screen"] is True
+    assert lookup.get_move("Tail Glow", 7)["boosts"] == {"spa": 3}
+
+
 def test_hiddenpower_variants_collapse_to_base_id():
     m = lookup.get_move("Hidden Power")
     assert m["id"] == "hiddenpower"
