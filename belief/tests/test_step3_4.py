@@ -1,0 +1,451 @@
+"""Step 3.4 gate — SOFT evidence (damage window + speed order) via the Step-2
+calc, plus the per-slot fact sheet.
+
+Run from the project root:
+
+    python -m pytest belief/tests -v
+
+Sub-step 3.4 (PLAN.md §3): make the belief consume the Step-2 damage calc as a
+SOFT signal. The observed hit is consistent with a candidate iff it falls inside
+that candidate's calc window (normal OR crit range); a KO line (D40) is consistent
+iff the candidate COULD have KO'd. The speed-order signal: for equal-priority
+moves the first mover is faster (a tie is consistent); different priority means
+priority decided the order, so the order carries no speed evidence. Both are
+computed by the ONE shared window module (evidence.py) over the Step-2 calc, so
+the set posterior (3.3–3.5) and the HP/EV inference (3.6) consume the same number.
+
+The damage windows below are verified against the Step-2 calc (@smogon/calc =
+source of truth for the damage model; the fork is the battle environment + the
+validation oracle) — the pinned observed deltas are chosen to sit comfortably
+inside one candidate's window and outside the other's, so a calc drift that moves
+the windows is caught here too.
+
+  * defender direction  — the candidate is the victim; the attacker is exactly
+                          known (own team). SpD EVs hidden: 0-SpD [88,105] vs
+                          252-SpD [70,84] (Blastoise max HP 299).
+  * attacker direction  — the candidate is the attacker; the victim is exactly
+                          known. Atk EVs hidden: 0-atk [135,160] vs 252-atk
+                          [180,213].
+  * KO-clip (D40)       — a KO line discriminates a KO-capable config from one
+                          that cannot KO even on a crit; an always-KO config is
+                          inconsistent with any surviving hit.
+  * immunity            — an immune candidate is ruled out by a real hit.
+  * speed order         — first mover faster / second mover faster / priority
+                          differs → no evidence.
+  * fact sheet          — hp/maxhp (switch-in), damage, statuses, boosts, Tera,
+                          move history, last-hit; own-side facts; field + Tailwind.
+  * live integration    — one real seeded fork battle fed through the full
+                          log→event→belief pipeline stays sane and fires evidence.
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from belief import events as E
+from belief import evidence as ev
+from belief.log_events import LogAdapter
+from belief.state import BeliefState, SlotBelief
+
+ROOT = Path(__file__).resolve().parents[2]  # belief/tests/x.py -> project root
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def cand(**kw):
+    """A valid belief candidate (the schema build_prior produces, minus name —
+    the species lives on SlotBelief.species, not in the candidate)."""
+    base = {"moves": ["tackle", "a", "b", "c"], "item": "", "ability": "x",
+            "nature": "Hardy", "evs": {}, "tera": None, "weight": 1.0}
+    base.update(kw)
+    return base
+
+
+def install(bs: BeliefState, slot: str, species: str, cands) -> SlotBelief:
+    """White-box: put a controlled candidate set into a belief slot (3.3 tests
+    manipulate .candidates the same way)."""
+    sb = SlotBelief(slot, species, cands)
+    bs._slots[slot] = sb
+    return sb
+
+
+def weights(bs, slot):
+    return {i: c["weight"] for i, c in enumerate(bs._slots[slot].candidates)}
+
+
+def approx_one(w):  # a HARD match after renormalization
+    return w > 0.999
+
+
+def approx_eps(w):  # a HARD non-match floors at EPS -> ~0 after renormalization
+    return 0 < w < 1e-6
+
+
+# ══════════════════════════ damage window: pure rule ══════════════════════════
+
+def test_damage_likelihood_rule():
+    """The KO-clip rule (D40) + the normal/crit/miss window logic, in isolation
+    (no Node) — this is the contract both directions and the 3.6 EV inference use."""
+    maxhp = 301
+    ko_capable = {"min": 286, "max": 339, "crit_min": 430, "crit_max": 508}  # max 339 >= 301
+    never_ko   = {"min": 166, "max": 196, "crit_min": 250, "crit_max": 294}  # crit 294 < 301
+    always_ko  = {"min": 320, "max": 400, "crit_min": 480, "crit_max": 560}  # min 320 > 301
+
+    # KO line: consistent iff the candidate COULD KO (max>=maxhp OR crit_max>=maxhp)
+    assert ev.damage_likelihood(ko_capable, 0, ko=True, maxhp=maxhp) == 1.0
+    assert ev.damage_likelihood(never_ko, 0, ko=True, maxhp=maxhp) == 0.0
+    assert ev.damage_likelihood(always_ko, 0, ko=True, maxhp=maxhp) == 1.0
+
+    # an always-KO candidate (min > maxhp) is INCONSISTENT with a surviving hit
+    assert ev.damage_likelihood(always_ko, 250, ko=False, maxhp=maxhp) == 0.0
+    # a normal surviving hit inside the window is consistent
+    assert ev.damage_likelihood(never_ko, 180, ko=False, maxhp=maxhp) == 1.0
+    # a hit BELOW the window's min would have KO'd -> ruled out
+    assert ev.damage_likelihood(ko_capable, 250, ko=False, maxhp=maxhp) == 0.0
+    # a hit inside the CRIT range is consistent (the sim can crit)
+    assert ev.damage_likelihood(ko_capable, 470, ko=False, maxhp=maxhp) == 1.0
+    # a miss (observed_delta <= 0) is consistent with everything
+    assert ev.damage_likelihood(never_ko, 0, ko=False, maxhp=maxhp) == 1.0
+
+
+# ══════════════════════ damage window: defender direction ═════════════════════
+
+def test_damage_defender_direction():
+    """Own Charizard (Modest 252 SpA + Life Orb) hits the opponent's Blastoise with
+    Flamethrower. The Blastoise's SpD is hidden: 0-SpD deals [88,105], 252-SpD
+    deals [70,84] (disjoint). The observed delta selects exactly one candidate."""
+    own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
+                   "item": "lifeorb", "ability": "solarpower"}}
+
+    def fresh():
+        bs = BeliefState("gen9ou", own_team=own)
+        return bs, install(bs, "p2a", "blastoise", [cand(evs={"spd": 0}), cand(evs={"spd": 252})])
+
+    def hit(delta):
+        bs, sb = fresh()
+        applied = bs.update(E.DamageObserved(
+            target_side="p2", target_slot="p2a", hp_after=299 - delta, maxhp=299,
+            ko=False, source_kind="move", move="flamethrower",
+            source_side="p1", source_slot="p1a"))
+        return applied, sb
+
+    # delta 95 is in 0-SpD [88,105], outside 252-SpD [70,84]
+    applied, sb = hit(95)
+    assert applied is True
+    assert approx_one(sb.candidates[0]["weight"]) and approx_eps(sb.candidates[1]["weight"])
+
+    # delta 75 is in 252-SpD [70,84], outside 0-SpD [88,105]
+    applied, sb = hit(75)
+    assert applied is True
+    assert approx_eps(sb.candidates[0]["weight"]) and approx_one(sb.candidates[1]["weight"])
+
+    # the posterior is a valid distribution after a SOFT update
+    assert sum(sb.posterior) == pytest.approx(1.0, abs=1e-9)
+
+
+# ══════════════════════ damage window: attacker direction ═════════════════════
+
+def test_damage_attacker_direction():
+    """The opponent's Garchomp hits our Blastoise with Earthquake. The Garchomp's
+    Atk is hidden: Hardy/0-atk deals [135,160], Adamant/252-atk deals [180,213]."""
+    own = {"p1a": {"name": "blastoise", "nature": "Hardy"}}
+
+    def fresh():
+        bs = BeliefState("gen9ou", own_team=own)
+        return bs, install(bs, "p2a", "garchomp",
+                           [cand(nature="Hardy", evs={"atk": 0}),
+                            cand(nature="Adamant", evs={"atk": 252})])
+
+    def hit(delta):
+        bs, sb = fresh()
+        applied = bs.update(E.DamageObserved(
+            target_side="p1", target_slot="p1a", hp_after=299 - delta, maxhp=299,
+            ko=False, source_kind="move", move="earthquake",
+            source_side="p2", source_slot="p2a"))
+        return applied, sb
+
+    # delta 150 is in 0-atk [135,160], outside 252-atk [180,213]
+    applied, sb = hit(150)
+    assert applied is True
+    assert approx_one(sb.candidates[0]["weight"]) and approx_eps(sb.candidates[1]["weight"])
+
+    # delta 190 is in 252-atk [180,213], outside 0-atk [135,160]
+    applied, sb = hit(190)
+    assert applied is True
+    assert approx_eps(sb.candidates[0]["weight"]) and approx_one(sb.candidates[1]["weight"])
+
+
+# ══════════════════════════════ damage window: KO-clip ════════════════════════
+
+def test_ko_clip_integration():
+    """D40: a KO line (`0 fnt`) means the true damage was >= max HP. A KO-capable
+    config is consistent with a KO; a config that cannot KO even on a crit is not.
+    Reverse: a surviving hit below a config's min means that config would have KO'd.
+
+    Garchomp Earthquake vs our Golduck (max HP 301): the strong config (Adamant
+    252 Atk + Life Orb) deals [286,339] — a KO; the weak config (Hardy, 0 Atk)
+    deals [166,196] and its crit tops out at 294 < 301, so it can NEVER KO."""
+    own = {"p1a": {"name": "golduck", "nature": "Hardy"}}
+
+    def fresh():
+        bs = BeliefState("gen9ou", own_team=own)
+        return bs, install(bs, "p2a", "garchomp",
+                           [cand(nature="Adamant", evs={"atk": 252}, item="lifeorb"),
+                            cand(nature="Hardy", evs={}, item="")])
+
+    # KO line -> the KO-capable config wins
+    bs, sb = fresh()
+    applied = bs.update(E.DamageObserved(
+        target_side="p1", target_slot="p1a", hp_after=0, maxhp=301, ko=True,
+        source_kind="move", move="earthquake", source_side="p2", source_slot="p2a"))
+    assert applied is True
+    assert approx_one(sb.candidates[0]["weight"]) and approx_eps(sb.candidates[1]["weight"])
+
+    # surviving hit delta 180 (in [166,196]) -> the weak config wins; the strong
+    # config's min (286) > 180, so it would have KO'd and is ruled out
+    bs, sb = fresh()
+    applied = bs.update(E.DamageObserved(
+        target_side="p1", target_slot="p1a", hp_after=301 - 180, maxhp=301, ko=False,
+        source_kind="move", move="earthquake", source_side="p2", source_slot="p2a"))
+    assert applied is True
+    assert approx_eps(sb.candidates[0]["weight"]) and approx_one(sb.candidates[1]["weight"])
+
+
+# ══════════════════════════════ damage window: immunity ═══════════════════════
+
+def test_immune_candidate_ruled_out():
+    """A Ground hit on a Levitate Duskull does 0 (immune) — so a real observed
+    delta rules the immune candidate out and confirms the one that hits
+    (Insomnia, [68,81]). This is the fork-exact type-immunity gate from Step 2,
+    consumed as belief evidence here."""
+    own = {"p1a": {"name": "charizard", "nature": "Hardy"}}
+    bs = BeliefState("gen9ou", own_team=own)
+    sb = install(bs, "p2a", "duskull",
+                 [cand(ability="levitate"), cand(ability="insomnia")])
+    applied = bs.update(E.DamageObserved(
+        target_side="p2", target_slot="p2a", hp_after=181 - 75, maxhp=181, ko=False,
+        source_kind="move", move="earthquake", source_side="p1", source_slot="p1a"))
+    assert applied is True
+    assert approx_eps(sb.candidates[0]["weight"])  # Levitate (immune) ruled out
+    assert approx_one(sb.candidates[1]["weight"])   # Insomnia confirmed
+
+
+# ════════════════════════════════ speed order ═════════════════════════════════
+
+def test_speed_first_mover_faster():
+    """Our Garchomp (speed 240) moves first, then the opponent's Blastoise. Equal
+    priority (both 0) -> the first mover is faster -> Blastoise is slower, so the
+    0-Spe candidate (192) is confirmed and the 252-Spe one (255) is ruled out."""
+    bs = BeliefState("gen9ou", own_team={"p1a": {"name": "garchomp", "evs": {"spe": 0}}})
+    sb = install(bs, "p2a", "blastoise", [cand(evs={"spe": 0}), cand(evs={"spe": 252})])
+    bs.update(E.MoveUsed(side="p1", slot="p1a", move="earthquake"))
+    bs.update(E.MoveUsed(side="p2", slot="p2a", move="surf"))
+    assert bs.update(E.Turn(n=1)) is True
+    assert approx_one(sb.candidates[0]["weight"]) and approx_eps(sb.candidates[1]["weight"])
+
+
+def test_speed_second_mover_faster():
+    """Reversed: the opponent's Blastoise moves first -> it is faster -> the
+    252-Spe candidate (255) is confirmed and the 0-Spe one (192) is ruled out."""
+    bs = BeliefState("gen9ou", own_team={"p1a": {"name": "garchomp", "evs": {"spe": 0}}})
+    sb = install(bs, "p2a", "blastoise", [cand(evs={"spe": 0}), cand(evs={"spe": 252})])
+    bs.update(E.MoveUsed(side="p2", slot="p2a", move="surf"))
+    bs.update(E.MoveUsed(side="p1", slot="p1a", move="earthquake"))
+    assert bs.update(E.Turn(n=1)) is True
+    assert approx_eps(sb.candidates[0]["weight"]) and approx_one(sb.candidates[1]["weight"])
+
+
+def test_speed_priority_differs_no_evidence():
+    """Different priority (Aqua Jet +1 vs Surf 0) means priority decided the order —
+    the order carries NO speed evidence, so the posterior must be unchanged."""
+    bs = BeliefState("gen9ou", own_team={"p1a": {"name": "garchomp", "evs": {"spe": 0}}})
+    sb = install(bs, "p2a", "blastoise", [cand(evs={"spe": 0}), cand(evs={"spe": 252})])
+    before = list(sb.posterior)
+    bs.update(E.MoveUsed(side="p1", slot="p1a", move="aquajet"))
+    bs.update(E.MoveUsed(side="p2", slot="p2a", move="surf"))
+    assert bs.update(E.Turn(n=1)) is False
+    assert sb.posterior == before
+
+
+def test_speed_switch_between_moves_no_evidence():
+    """A switch between the two moves breaks the speed-order semantics (the second
+    mover is a different mon), so no speed evidence is applied."""
+    bs = BeliefState("gen9ou", own_team={"p1a": {"name": "garchomp", "evs": {"spe": 0}}})
+    sb = install(bs, "p2a", "blastoise", [cand(evs={"spe": 0}), cand(evs={"spe": 252})])
+    before = list(sb.posterior)
+    bs.update(E.MoveUsed(side="p2", slot="p2a", move="surf"))
+    bs.update(E.SwitchOut(side="p2", slot="p2a"))   # order-breaker between the two moves
+    bs.update(E.MoveUsed(side="p1", slot="p1a", move="earthquake"))
+    assert bs.update(E.Turn(n=1)) is False
+    assert sb.posterior == before
+
+
+# ═══════════════════════════════ fact sheet ══════════════════════════════════
+
+def test_facts_bookkeeping():
+    """The per-slot fact sheet (PLAN.md §3a 3.4-5): every turn adds information and
+    this is where it is held. Own-side facts are tracked too; the field is shared."""
+    bs = BeliefState("gen9ou", own_team={"p1a": {"name": "garchomp", "evs": {"spe": 0}}})
+    sb = install(bs, "p2a", "blastoise", [cand(), cand()])
+
+    # switch-in reveals hp/maxhp
+    bs.update(E.SwitchIn(side="p2", slot="p2a", species="blastoise", hp=183, maxhp=183))
+    assert sb.facts.hp == 183 and sb.facts.maxhp == 183
+
+    # damage updates hp and records the last hit (the 3.6 reflector input)
+    bs.update(E.DamageObserved(target_side="p2", target_slot="p2a", hp_after=120, maxhp=183,
+                               ko=False, source_kind="move", move="flamethrower",
+                               source_side="p1", source_slot="p1a"))
+    assert sb.facts.hp == 120 and sb.facts.last_hit == 63  # 183 - 120
+
+    # statuses add / cure
+    bs.update(E.StatusApplied(side="p2", slot="p2a", status="brn"))
+    assert sb.facts.statuses == {"brn"}
+    bs.update(E.StatusCured(side="p2", slot="p2a", status="brn"))
+    assert sb.facts.statuses == set()
+
+    # boosts accumulate and clear back to 0 (kept out of the sheet)
+    bs.update(E.BoostChanged(side="p2", slot="p2a", stat="atk", delta=1))
+    bs.update(E.BoostChanged(side="p2", slot="p2a", stat="atk", delta=1))
+    assert sb.facts.boosts == {"atk": 2}
+    bs.update(E.BoostChanged(side="p2", slot="p2a", stat="atk", delta=-2))
+    assert sb.facts.boosts == {}
+
+    # boosts clamp at +/-6
+    for _ in range(8):
+        bs.update(E.BoostChanged(side="p2", slot="p2a", stat="def", delta=1))
+    assert sb.facts.boosts == {"def": 6}
+
+    # Tera is recorded
+    bs.update(E.TeraUsed(side="p2", slot="p2a", tera_type="fire"))
+    assert sb.facts.tera == "fire"
+
+    # a NEW mon taking the slot gets a fresh sheet; the SAME mon keeps its facts
+    install(bs, "p2a", "gengar", [cand(), cand()])
+    bs._slots["p2a"].facts.hp = 50
+    bs.add_opponent("p2a", "gengar")  # same species -> keep
+    assert bs._slots["p2a"].facts.hp == 50
+
+    # own-side facts are tracked exactly
+    bs.update(E.DamageObserved(target_side="p1", target_slot="p1a", hp_after=90, maxhp=183,
+                               ko=False, source_kind="move", move="earthquake",
+                               source_side="p2", source_slot="p2a"))
+    assert bs.own_facts["p1a"].hp == 90
+
+
+def test_field_and_tailwind_expiry():
+    """Weather / terrain / Tailwind land in the shared field; Tailwind expires on a
+    turn count (the exact off-by-one is irrelevant — it only ever makes a mon faster)."""
+    bs = BeliefState("gen9ou", own_team={})
+    bs.update(E.WeatherChanged(weather="rain"))
+    bs.update(E.TerrainChanged(terrain="electric"))
+    bs.update(E.TailwindChanged(side="p2", active=True))
+    assert bs.field["weather"] == "rain" and bs.field["terrain"] == "electric"
+    assert bs.field["tailwind_side"] == "p2" and bs.field["tailwind_turns"] == 4
+
+    for _ in range(4):
+        bs.update(E.Turn(n=1))
+    assert bs.field["tailwind_side"] is None and bs.field["tailwind_turns"] == 0
+
+    # clearing the weather resets the field slot
+    bs.update(E.WeatherChanged(weather="none"))
+    assert bs.field["weather"] is None
+
+
+def test_residual_damage_updates_fact_but_no_set_evidence():
+    """Residual / unattributable damage (no move source) still updates the HP fact
+    and records the last hit, but produces NO set-belief evidence (3.4-6: deferred
+    to 3.6)."""
+    bs = BeliefState("gen9ou", own_team={})
+    sb = install(bs, "p2a", "blastoise", [cand(), cand()])
+    bs.update(E.SwitchIn(side="p2", slot="p2a", species="blastoise", hp=183, maxhp=183))
+    before = list(sb.posterior)
+    applied = bs.update(E.DamageObserved(target_side="p2", target_slot="p2a", hp_after=170,
+                                         maxhp=183, ko=False, source_kind="residual"))
+    assert applied is False                 # no set evidence
+    assert sb.posterior == before           # ...belief untouched
+    assert sb.facts.hp == 170               # ...but the fact is recorded
+
+
+# ═══════════════════════════════ live integration ═════════════════════════════
+
+def _run_smoke_battle():
+    """Run the seeded fork battle keeper and return its raw log lines (shared with
+    the 3.1 smoke test's pattern)."""
+    script = ROOT / "scratch" / "step3_1_battle_log.js"
+    proc = subprocess.run(["node", str(script)], cwd=str(ROOT),
+                          capture_output=True, text=True, timeout=120)
+    if proc.returncode != 0:
+        raise AssertionError(f"smoke keeper failed (rc={proc.returncode})\n{proc.stderr}")
+    lines, in_block = [], False
+    for raw in proc.stdout.splitlines():
+        if raw.strip() == "=== BATTLE LOG START ===":
+            in_block = True
+            continue
+        if raw.strip() == "=== BATTLE LOG END ===":
+            break
+        if in_block and raw.startswith("|"):
+            lines.append(raw)
+    return lines
+
+
+def test_live_log_belief_pipeline():
+    """The full pipeline on a real seeded BSS battle: log -> events -> BeliefState.
+    The belief must stay sane (non-empty, normalized) at every point, the damage
+    events must actually fire evidence, and no log line may be left unmapped.
+    The BSS teams (scratch/step3_1_battle_log.js) are our own side exactly, so the
+    damage windows are computed against real own-team specs."""
+    lines = _run_smoke_battle()
+    assert len(lines) > 5, "smoke battle log looks empty"
+
+    # our side (p1) from the keeper: Jolly 252/252/252, no items
+    own = {
+        "p1a": {"name": "garchomp", "nature": "Jolly", "evs": {"atk": 252, "spa": 252, "spe": 252}},
+        "p1b": {"name": "blastoise", "nature": "Jolly", "evs": {"atk": 252, "spa": 252, "spe": 252}},
+        "p1c": {"name": "tyranitar", "nature": "Jolly", "evs": {"atk": 252, "spa": 252, "spe": 252}},
+    }
+    bs = BeliefState("gen9bss3v3", own_team=own)
+    adapter = LogAdapter()
+
+    damage_events = 0
+    damage_evidence = 0
+    unknown = []
+    for line in lines:
+        e = adapter.feed_line(line)
+        if e is None:
+            continue
+        applied = bs.update(e)
+        if e.type == "damage_observed":
+            damage_events += 1
+            if applied:
+                damage_evidence += 1
+        if e.type == "unknown":
+            unknown.append(e.raw)
+
+    # the belief never empties and is always a valid distribution
+    assert bs.slots, "expected at least one opponent slot"
+    for slot in bs.slots:
+        sb = bs.slot(slot)
+        assert sb.candidates, f"{slot}: empty belief"
+        assert sum(sb.posterior) == pytest.approx(1.0, abs=1e-9), f"{slot}: posterior not normalized"
+        assert all(w > 0 for w in sb.posterior), f"{slot}: a weight went non-positive"
+
+    # damage happened AND produced evidence (the SOFT path fired on real data)
+    assert damage_events >= 1, "expected at least one damage observation"
+    assert damage_evidence >= 1, "expected at least one damage event to produce evidence"
+
+    # no log line was left unmapped (observable bug-catcher)
+    assert unknown == [], f"unmapped log lines: {unknown}"
+
+    # facts were populated for the active opponent slot
+    active = bs.slots[-1]
+    f = bs.slot(active).facts
+    assert f.maxhp is not None and f.maxhp > 0, "active slot max HP should be known"
+    json.dumps(bs.slot(active).candidates, default=list)  # candidates stay JSON-safe
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(pytest.main([__file__, "-v"]))

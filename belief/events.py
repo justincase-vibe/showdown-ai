@@ -51,12 +51,16 @@ class Turn(Event):
 
 @dataclass
 class SwitchIn(Event):
-    """A mon enters the field. Species + max HP are revealed (hp==max at entry)."""
+    """A mon enters the field. The line is `hp/maxhp`, so max HP (the
+    denominator) is always revealed; a fresh mon has hp==max, a re-switching
+    mon carries its current HP (e.g. `95/183`)."""
 
     type: ClassVar[str] = "switch_in"
     side: str = ""
     slot: str = ""
     species: str = ""
+    hp: int = 0     # current HP on entry
+    maxhp: int = 0  # max HP = the line's denominator (always revealed)"""
 
 
 @dataclass
@@ -188,6 +192,22 @@ class ItemRevealed(Event):
 
 
 @dataclass
+class TailwindChanged(Event):
+    """A side's Tailwind condition starts (x2 speed for the rest of its duration).
+
+    Fork log line: ``|-sidestart|<side>|move: Tailwind`` (``side.ts
+    addSideCondition`` + the move's ``onSideStart``; verified in the fork,
+    2026-11-16). Duration 4 turns (6 with Persistent — an edge the 3.7 fuzz
+    reports if it ever matters). The belief expires it on a turn count (see
+    ``BeliefState.field``); the exact off-by-one is irrelevant to the evidence
+    (Tailwind only ever makes a mon FASTER, and ties are consistent anyway)."""
+
+    type: ClassVar[str] = "tailwind_changed"
+    side: str = ""
+    active: bool = True
+
+
+@dataclass
 class WeatherChanged(Event):
     type: ClassVar[str] = "weather_changed"
     weather: str = ""  # 'rain' | 'sun' | 'sand' | 'hail' | 'snow' | 'none'
@@ -220,5 +240,5 @@ EVENT_TYPES = [
     BattleStart, Turn, SwitchIn, SwitchOut, Faint, AbilityRevealed, MoveUsed,
     MoveFailed, HitCount, DamageObserved, HealObserved, StatusApplied,
     StatusCured, BoostChanged, TeraUsed, ItemRevealed, WeatherChanged,
-    TerrainChanged, BattleEnd, Unknown,
+    TerrainChanged, TailwindChanged, BattleEnd, Unknown,
 ]

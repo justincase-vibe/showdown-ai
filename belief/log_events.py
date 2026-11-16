@@ -56,6 +56,7 @@ from .events import (
     StatusCured,
     SwitchIn,
     SwitchOut,
+    TailwindChanged,
     TeraUsed,
     TerrainChanged,
     Turn,
@@ -73,7 +74,10 @@ IGNORED_TAGS = frozenset({
     "bigerror", "detailschange",
     # visual/ambient effects (no set evidence)
     "-center", "-block", "-activate", "-clearmessage", "-singlemove",
-    "-mustrecharge", "-warpplate", "-clearspikes", "-sidestart",
+    "-mustrecharge", "-warpplate", "-clearspikes",
+    # `-sidestart` is NOT here — it is checked first in _map (the Tailwind
+    # start line is the speed-order input for 3.4; other side-condition
+    # starts stay ignored).
     "split", "upkeep", "fail", "-fail", "-start", "-end", "-miss",
     "-transform", "-primal", "-formechange", "-enditem", "swap", "cant",
     # non-BSS / gen-specific (no 3.1 evidence)
@@ -134,6 +138,12 @@ class LogAdapter:
         # switch-in dedupe (the sim logs each switch-in twice, back-to-back):
         self._prev_line_was_switch = False   # was the previous fed line a switch-in?
         self._last_switch_sig = None         # (slot, species) of that switch-in
+        # move-source attribution for damage lines (3.4): the most recent
+        # `|move|` line as (side, slot, move, target_slot). Damage lines follow
+        # their move's announce line (possibly with status/boost lines in
+        # between); the target check in _attribute_move_source keeps
+        # mis-attribution out.
+        self._last_move: Optional[Tuple[str, str, str, Optional[str]]] = None
         self.events: List[Event] = []
 
     # ── public ─────────────────────────────────────────────────────────
@@ -210,8 +220,13 @@ class LogAdapter:
             if self._prev_line_was_switch and self._last_switch_sig == (slot, species):
                 return None
             self.species_by_slot[slot] = species
-            self._learn_maxhp(slot, p[2])
-            return SwitchIn(side=side, slot=slot, species=species)
+            hp_payload = p[2] if len(p) >= 3 else ""
+            m = re.match(r"(\d+)\s*/\s*(\d+)", hp_payload.strip())
+            cur_hp = int(m.group(1)) if m else 0
+            max_hp = int(m.group(2)) if m else 0
+            self._learn_maxhp(slot, hp_payload)
+            return SwitchIn(side=side, slot=slot, species=species,
+                            hp=cur_hp, maxhp=max_hp)
         if tag == "leave":
             side, slot = _slot_of(p[0])
             return SwitchOut(side=side, slot=slot)
@@ -223,6 +238,15 @@ class LogAdapter:
             side, slot = _slot_of(p[0])
             return AbilityRevealed(side=side, slot=slot, ability=to_id(p[1]))
 
+        if tag == "-sidestart" and len(p) >= 2:
+            # Side-condition start. Evidence: Tailwind (a speed multiplier —
+            # 3.4 speed-order evidence). Reflect/Light Screen starts carry no
+            # set evidence of their own here (a screen is a candidate's move or
+            # item; the damage window picks them up via the field in 3.6).
+            if "move: Tailwind" in p[1]:
+                side, _ = _slot_of(p[0])
+                return TailwindChanged(side=side, active=True)
+            return None
         if tag == "move" and len(p) >= 2:
             # |move|source|MoveName|target — battle-actions.js logs
             # addMove("move", pokemon, movename, target): move is p[1].
@@ -232,6 +256,7 @@ class LogAdapter:
                 t_side, t_slot = _slot_of(p[2])
             else:
                 t_side = t_slot = None
+            self._last_move = (side, slot, move, t_slot)
             return MoveUsed(side=side, slot=slot, move=move,
                             target_side=t_side, target_slot=t_slot)
         if tag == "movefail" and len(p) >= 2:
@@ -359,10 +384,26 @@ class LogAdapter:
             return None
         self.maxhp_by_slot[slot] = maxhp
         if damage:
-            return DamageObserved(target_side=side, target_slot=slot, hp_after=hp,
-                                  maxhp=maxhp, ko=ko, source_kind="move")
+            ev = DamageObserved(target_side=side, target_slot=slot, hp_after=hp,
+                                maxhp=maxhp, ko=ko, source_kind="move")
+            self._attribute_move_source(ev)
+            return ev
         return HealObserved(target_side=side, target_slot=slot, hp_after=hp,
                             maxhp=maxhp, source_kind="move")
+
+    def _attribute_move_source(self, ev: DamageObserved) -> None:
+        """Attribute move-source damage to the most recent `|move|` line, when
+        that line plausibly targeted this slot (or was self-damage/recoil from
+        this slot). Residual damage (burn/poison) carries no `|move|` line in
+        this fork and is left source-less — the belief still records the HP
+        fact and defers that evidence to 3.6."""
+        lm = self._last_move
+        if lm is None:
+            return
+        side, slot, move, target = lm
+        if target != ev.target_slot and slot != ev.target_slot:
+            return
+        ev.source_side, ev.source_slot, ev.move = side, slot, move
 
 
 def events_from_log(lines: List[str]) -> List[Event]:

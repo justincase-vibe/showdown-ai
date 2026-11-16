@@ -30,12 +30,50 @@ from __future__ import annotations
 
 import itertools
 import re
+from dataclasses import dataclass, field as _dc_field
 from typing import Dict, List, Optional
 
 from legality import db, lookup
 
 from . import events as E          # typed events (3.1) — update() dispatches on these
-from . import evidence as ev      # shared evidence engine (3.2)
+from . import evidence as ev      # shared evidence engine (3.2) + SOFT calc bridge (3.4)
+
+
+@dataclass
+class Facts:
+    """Per-mon observation registry — the "make unknown gamestates known"
+    sheet (user, 2026-11-15): every turn adds information, and this is where it
+    is held. ONE instance per slot (opponent slots: ``SlotBelief.facts``;
+    own slots: ``BeliefState.own_facts``), reset when a NEW mon takes the slot.
+
+    * ``hp`` / ``maxhp`` — from the log (switch-in line reveals both; every
+      damage/heal line updates ``hp``). ``maxhp`` is ground truth in this fork.
+    * ``statuses`` / ``boosts`` — live condition state (calc inputs for the
+      damage window and the speed-order evidence).
+    * ``moves_used`` — the revealed-move history (drives the Choice-lock signal;
+      migrated from ``SlotBelief._used_moves`` in 3.4, 3.3 behaviour unchanged).
+    * ``tera`` — the observed Tera type (HARD evidence already pinned it to the
+      candidates in 3.3; kept here as the single observation record).
+    * ``last_hit`` — the damage this mon last took (the reflector input for 3.6
+      — counter/mirrorcoat scale off the prior hit).
+    """
+
+    hp: Optional[int] = None
+    maxhp: Optional[int] = None
+    statuses: set = _dc_field(default_factory=set)
+    boosts: Dict[str, int] = _dc_field(default_factory=dict)
+    moves_used: set = _dc_field(default_factory=set)
+    tera: Optional[str] = None
+    last_hit: Optional[int] = None
+
+    def reset(self) -> None:
+        self.hp = None
+        self.maxhp = None
+        self.statuses = set()
+        self.boosts = {}
+        self.moves_used = set()
+        self.tera = None
+        self.last_hit = None
 
 #: EV stat tokens as they appear in the DB spread strings ("252 HP / 216 Def")
 _EV_TOKEN = {"hp": "hp", "atk": "atk", "def": "def", "spa": "spa", "spd": "spd", "spe": "spe"}
@@ -169,9 +207,9 @@ class SlotBelief:
         self.slot = slot
         self.species = species
         self.candidates = list(candidates)
-        # per-mon observation history (reset by add_opponent when a NEW mon takes
-        # the slot): used_moves drives the Choice-lock signal (3.3).
-        self._used_moves: set = set()
+        # per-mon observation registry (3.4 fact sheet; reset when a NEW mon
+        # takes the slot). moves_used drives the Choice-lock signal (3.3).
+        self.facts = Facts()
         self._choice_locked = False
         self.normalize()
 
@@ -209,10 +247,10 @@ class SlotBelief:
         if isinstance(event, E.MoveUsed):
             move = event.move
             ev.apply_evidence(self.candidates, ev.revealed_move(move))
-            if move in self._used_moves and not self._choice_locked:
+            if move in self.facts.moves_used and not self._choice_locked:
                 ev.apply_evidence(self.candidates, ev.choice_lock())
                 self._choice_locked = True
-            self._used_moves.add(move)
+            self.facts.moves_used.add(move)
             return True
         if isinstance(event, E.AbilityRevealed):
             ev.apply_evidence(self.candidates, ev.revealed_ability(event.ability))
@@ -227,11 +265,28 @@ class SlotBelief:
 
 
 class BeliefState:
-    """The bot's belief about the opponent side (p2 slots) in one battle."""
+    """The bot's belief about the opponent side (p2 slots) in one battle.
 
-    def __init__(self, fmt: str):
+    Also carries the parts of the game state that are OBSERVABLE but not hidden
+    (3.4 fact sheet, PLAN.md §3a 3.4-5): the own side (p1*) — exactly known to
+    the bot, so it enters the calc as exact mon specs, never as a distribution
+    (3.4-2) — and the shared field (weather / terrain / Tailwind).
+    """
+
+    def __init__(self, fmt: str, own_team: Optional[Dict[str, Dict]] = None):
         self.fmt = fmt
         self._slots: Dict[str, SlotBelief] = {}
+        # own side (p1*): slot -> exact mon spec {'name', 'nature', 'evs',
+        # 'item', 'ability', 'tera'?}. The bot knows its own team.
+        self.own_team: Dict[str, Dict] = dict(own_team or {})
+        self.own_facts: Dict[str, Facts] = {}
+        # shared field — the calc's field inputs (3.4):
+        self.field = {"weather": None, "terrain": None,
+                      "tailwind_side": None, "tailwind_turns": 0}
+        # per-turn move-order buffer (speed-order evidence, 3.4-4): entries are
+        # ('m', side, slot, move) and order-breakers ('sw',) / ('break',).
+        # Flushed on Turn / BattleEnd — the moves of ONE turn only.
+        self._turn_buffer: List[tuple] = []
 
     def add_opponent(self, slot: str, species: str) -> SlotBelief:
         """Register an opponent mon (on switch-in) and give it its prior.
@@ -248,14 +303,77 @@ class BeliefState:
         self._slots[slot] = sb
         return sb
 
-    def update(self, event) -> bool:
-        """Route an event to the slot it concerns and apply it (3.3).
+    # ══════════════════════════ event dispatch (3.3 + 3.4) ══════════════════════
 
-        ``event.slot`` is the mon the evidence is about (the move USER for
-        MoveUsed, the holder for reveals) — own-side (p1*) and slot-less / field
-        events are not set-belief evidence here and are ignored (they feed 3.4/
-        3.6). Returns True if the event was applied to a slot's posterior.
+    def update(self, event) -> bool:
+        """Apply one event: fact/field bookkeeping (both sides, 3.4) AND
+        set-belief evidence (3.3 HARD + 3.4 SOFT).
+
+        Returns True only when a slot's SET POSTERIOR changed (the 3.3 contract
+        — the 3.3 tests pin it, incl. Weather/Turn/Damage-without-source
+        reading False). Fact and field bookkeeping happens regardless and is
+        observable on ``own_facts`` / ``slot.facts`` / ``field``.
         """
+        if isinstance(event, E.SwitchIn):
+            self._turn_buffer.append(("sw",))
+            if event.side == "p2":
+                self.add_opponent(event.slot, event.species)
+            self._set_switch_facts(event)
+            return False
+        if isinstance(event, E.SwitchOut):
+            self._turn_buffer.append(("sw",))  # a switch breaks move-order semantics
+            return False
+        if isinstance(event, E.Faint):
+            self._set_hp(event.side, event.slot, 0)
+            self._turn_buffer.append(("break",))
+            return False
+        if isinstance(event, E.MoveUsed):
+            self._turn_buffer.append(("m", event.side, event.slot, event.move))
+            return self._route_set_evidence(event)
+        if isinstance(event, (E.AbilityRevealed, E.ItemRevealed)):
+            return self._route_set_evidence(event)
+        if isinstance(event, E.TeraUsed):
+            self._record_tera(event)
+            return self._route_set_evidence(event)
+        if isinstance(event, E.DamageObserved):
+            return self._apply_damage(event)
+        if isinstance(event, E.HealObserved):
+            self._set_hp(event.target_side, event.target_slot, event.hp_after)
+            return False
+        if isinstance(event, (E.StatusApplied, E.StatusCured)):
+            self._apply_status(event)
+            return False
+        if isinstance(event, E.BoostChanged):
+            self._apply_boost(event)
+            return False
+        if isinstance(event, E.WeatherChanged):
+            # the clear-signal ('none') / empty means no weather -> None in the field
+            w = event.weather
+            self.field["weather"] = None if (not w or w == "none") else w
+            return False
+        if isinstance(event, E.TerrainChanged):
+            t = event.terrain
+            self.field["terrain"] = None if (not t or t == "none") else t
+            return False
+        if isinstance(event, E.TailwindChanged):
+            if event.active:
+                self.field["tailwind_side"] = event.side
+                self.field["tailwind_turns"] = 4  # fork duration (6 w/ Persistent; fuzz will flag)
+            elif event.side == self.field.get("tailwind_side"):
+                self.field["tailwind_side"] = None
+                self.field["tailwind_turns"] = 0
+            return False
+        if isinstance(event, (E.Turn, E.BattleEnd)):
+            applied = self._flush_speed_buffer()  # the moves of the turn just ended
+            if self.field.get("tailwind_side") and self.field.get("tailwind_turns", 0) > 0:
+                self.field["tailwind_turns"] -= 1
+                if self.field["tailwind_turns"] <= 0:
+                    self.field["tailwind_side"] = None
+            return applied
+        return False
+
+    def _route_set_evidence(self, event) -> bool:
+        """3.3 routing: reveal-style events apply to the p2 slot they name."""
         slot = getattr(event, "slot", None)
         if not slot or not slot.startswith("p2"):
             return False
@@ -263,6 +381,230 @@ class BeliefState:
             return self.slot(slot).update(event)
         except KeyError:
             return False
+
+    # ═══════════════════════════ 3.4 fact bookkeeping ═══════════════════════════
+
+    def _facts_for(self, side: str, slot: str) -> Optional[Facts]:
+        if side == "p2":
+            sb = self._slots.get(slot)
+            return sb.facts if sb is not None else None
+        return self.own_facts.get(slot)
+
+    def _set_hp(self, side: str, slot: str, hp: int) -> None:
+        facts = self._facts_for(side, slot)
+        if facts is None and side != "p2":
+            facts = self.own_facts.setdefault(slot, Facts())
+        if facts is not None:
+            facts.hp = hp
+
+    def _set_switch_facts(self, ev: E.SwitchIn) -> None:
+        """Switch-in line is `hp/maxhp`: set (or refresh) the slot's HP facts.
+
+        Same mon re-entering (switch-out then in): HP and status PERSIST
+        (game rule), boosts reset (switch-out clears them). A NEW mon: the sheet
+        resets — a new mon is a new set, a new HP line, a new move history.
+        """
+        if ev.side == "p2":
+            sb = self._slots.get(ev.slot)
+            if sb is None:
+                return
+            facts, known = sb.facts, sb.species
+        else:
+            facts = self.own_facts.setdefault(ev.slot, Facts())
+            known = lookup.to_id((self.own_team.get(ev.slot) or {}).get("name")) or None
+        same_mon = known is not None and lookup.to_id(ev.species) == known and facts.hp is not None
+        if same_mon:
+            if ev.hp:
+                facts.hp = ev.hp
+            if ev.maxhp:
+                facts.maxhp = ev.maxhp
+            facts.boosts = {}
+            return
+        facts.reset()
+        facts.maxhp = ev.maxhp or None
+        facts.hp = ev.hp or ev.maxhp or None
+
+    def _apply_status(self, ev) -> None:
+        facts = self._facts_for(ev.side, ev.slot)
+        if facts is None and ev.side != "p2":
+            facts = self.own_facts.setdefault(ev.slot, Facts())
+        if facts is None:
+            return
+        if isinstance(ev, E.StatusApplied):
+            facts.statuses.add(ev.status)
+        else:
+            facts.statuses.discard(ev.status)
+
+    def _apply_boost(self, ev: E.BoostChanged) -> None:
+        facts = self._facts_for(ev.side, ev.slot)
+        if facts is None and ev.side != "p2":
+            facts = self.own_facts.setdefault(ev.slot, Facts())
+        if facts is None:
+            return
+        cur = max(-6, min(6, facts.boosts.get(ev.stat, 0) + ev.delta))
+        if cur == 0:
+            facts.boosts.pop(ev.stat, None)  # keep the sheet clean (calc: absent = 0)
+        else:
+            facts.boosts[ev.stat] = cur
+
+    def _record_tera(self, ev: E.TeraUsed) -> None:
+        facts = self._facts_for(ev.side, ev.slot)
+        if facts is not None:
+            facts.tera = ev.tera_type
+
+    # ══════════════════ 3.4 SOFT evidence: damage window (3.4-1..3) ══════════════════
+
+    def _apply_damage(self, ev: E.DamageObserved) -> bool:
+        side, slot = ev.target_side, ev.target_slot
+        facts = self._facts_for(side, slot)
+        # capture the observation BEFORE overwriting facts.hp
+        maxhp = ev.maxhp or (facts.maxhp if facts is not None else 0) or 0
+        prev = facts.hp if facts is not None and facts.hp is not None else maxhp
+        delta = maxhp if ev.ko else max(0, prev - ev.hp_after)  # D40: a KO dealt >= maxhp
+        self._set_hp(side, slot, ev.hp_after)
+        if facts is not None:
+            if ev.maxhp:
+                facts.maxhp = ev.maxhp
+            facts.last_hit = delta  # the reflector input for 3.6
+        # evidence only for attributable MOVE-source damage with a DISTINCT
+        # attacker; residual/unattributable lines update the fact only (3.4-6)
+        if (ev.source_kind != "move" or not ev.move or not ev.source_slot
+                or ev.source_slot == slot):
+            return False
+        return self._damage_evidence(ev, facts, delta, maxhp, prev)
+
+    def _damage_evidence(self, dmg: E.DamageObserved, target_facts: Optional[Facts],
+                         delta: int, maxhp: int, prev: int) -> bool:
+        """Update the belief (p2) slot ONLY (3.4-2): the other mon is exactly
+        known (own team). Both-sides-belief (multi) is skipped for 3.4."""
+        target_p2 = dmg.target_side == "p2"
+        source_p2 = dmg.source_side == "p2"
+        if target_p2 == source_p2:
+            return False
+        field = ev.calc_field(self.field)
+        if target_p2:
+            # candidate = DEFENDER (p2); attacker = exact own mon
+            sb = self._slots.get(dmg.target_slot)
+            spec = self.own_team.get(dmg.source_slot)
+            if sb is None or spec is None:
+                return False
+            a_facts = self.own_facts.get(dmg.source_slot)
+            a_mon = ev.mon_options(spec, status=ev.status_of(a_facts.statuses if a_facts else None),
+                                  boosts=(a_facts.boosts if a_facts else {}),
+                                  hp_fraction=self._hp_fraction(a_facts))
+            d_status = ev.status_of(target_facts.statuses) if target_facts else None
+            d_boosts = target_facts.boosts if target_facts else {}
+            d_frac = (prev / maxhp) if maxhp else None
+
+            def lik(c: Dict) -> float:
+                w = ev.defender_window(c, sb.species, a_mon, d_status, d_boosts,
+                                       d_frac, dmg.move, field, self.fmt)
+                return ev.damage_likelihood(w, delta, ko=dmg.ko, maxhp=maxhp)
+        else:
+            # candidate = ATTACKER (p2); defender = exact own mon
+            sb = self._slots.get(dmg.source_slot)
+            spec = self.own_team.get(dmg.target_slot)
+            if sb is None or spec is None:
+                return False
+            d_facts = self.own_facts.get(dmg.target_slot)
+            d_mon = ev.mon_options(spec, status=ev.status_of(d_facts.statuses if d_facts else None),
+                                  boosts=(d_facts.boosts if d_facts else {}),
+                                  hp_fraction=self._hp_fraction(d_facts))
+            a_status = ev.status_of(sb.facts.statuses)
+            a_frac = self._hp_fraction(sb.facts)
+
+            def lik(c: Dict) -> float:
+                w = ev.attacker_window(c, sb.species, a_status, sb.facts.boosts, a_frac,
+                                      d_mon, dmg.move, field, self.fmt)
+                return ev.damage_likelihood(w, delta, ko=dmg.ko, maxhp=maxhp)
+        ev.apply_evidence(sb.candidates, lik)
+        return True
+
+    @staticmethod
+    def _hp_fraction(facts: Optional[Facts]) -> Optional[float]:
+        if facts is not None and facts.hp is not None and facts.maxhp:
+            return max(0.0, min(1.0, facts.hp / facts.maxhp))
+        return None
+
+    # ══════════════════ 3.4 SOFT evidence: speed order (3.4-4) ══════════════════
+
+    def _flush_speed_buffer(self) -> bool:
+        """On a Turn/BattleEnd, the moves buffered for the turn just ended are
+        in ACTION order (fork: the `|move|` announce lines fire in the order the
+        actions resolve). For each equal-priority pair with no switch/faint
+        between them: first mover's effective speed >= the second's; a tie is
+        CONSISTENT (the sim breaks ties randomly) — 3.4-4."""
+        buf, self._turn_buffer = self._turn_buffer, []
+        moves = [(i, e) for i, e in enumerate(buf) if e[0] == "m"]
+        applied = False
+        for i in range(len(moves)):
+            for j in range(i + 1, len(moves)):
+                ii, a = moves[i]
+                jj, b = moves[j]
+                if any(e[0] in ("sw", "break") for e in buf[ii + 1:jj]):
+                    continue  # order between them is no longer speed semantics
+                applied = self._pair_speed(a, b) or applied
+        return applied
+
+    def _pair_speed(self, a: tuple, b: tuple) -> bool:
+        _, side_a, slot_a, move_a = a
+        _, side_b, slot_b, move_b = b
+        try:
+            pa = lookup.get_move(move_a)["priority"]
+            pb = lookup.get_move(move_b)["priority"]
+        except KeyError:
+            return False  # unknown move — no priority, no evidence
+        if pa != pb:
+            return False  # priority decides the order — no speed evidence
+        a_belief, b_belief = side_a == "p2", side_b == "p2"
+        if a_belief == b_belief:
+            return False  # both own (no belief) or both belief (multi) — 3.4-2
+        field = ev.calc_field(self.field)
+
+        def known_speed(side: str, slot: str) -> Optional[int]:
+            spec = self.own_team.get(slot)
+            if spec is None:
+                return None
+            facts = self.own_facts.get(slot)
+            mon = ev.mon_options(spec, status=ev.status_of(facts.statuses if facts else None),
+                                boosts=(facts.boosts if facts else {}))
+            tw = self.field.get("tailwind_side") == side
+            return ev.speed_of(mon, fmt=self.fmt, tailwind=tw, field=field)
+
+        if a_belief:
+            # a moved first -> candidate speed >= other's speed
+            other = known_speed(side_b, slot_b)
+            if other is None:
+                return False
+            sb = self._slots.get(slot_a)
+            if sb is None:
+                return False
+            a_status = ev.status_of(sb.facts.statuses)
+            a_boosts = dict(sb.facts.boosts)
+            tw = self.field.get("tailwind_side") == side_a
+
+            def lik(c: Dict) -> float:
+                mon = ev.mon_options(c, status=a_status, boosts=a_boosts, name=sb.species)
+                return 1.0 if ev.speed_of(mon, fmt=self.fmt, tailwind=tw, field=field) >= other else 0.0
+        else:
+            # b moved first -> candidate speed <= other's speed
+            other = known_speed(side_a, slot_a)
+            if other is None:
+                return False
+            sb = self._slots.get(slot_b)
+            if sb is None:
+                return False
+            b_status = ev.status_of(sb.facts.statuses)
+            b_boosts = dict(sb.facts.boosts)
+            tw = self.field.get("tailwind_side") == side_b
+
+            def lik(c: Dict) -> float:
+                mon = ev.mon_options(c, status=b_status, boosts=b_boosts, name=sb.species)
+                return 1.0 if other >= ev.speed_of(mon, fmt=self.fmt, tailwind=tw, field=field) else 0.0
+        ev.apply_evidence(sb.candidates, lik)
+        return True
+
+    # ══════════════════════════════ accessors ══════════════════════════════
 
     def slot(self, slot: str) -> SlotBelief:
         try:

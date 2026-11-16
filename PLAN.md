@@ -121,6 +121,21 @@ here (✅ + date + evidence). Failed gate = fix + re-run, never "proceed with ca
   `belief/tests/test_step3_3.py` **9/9** (the 4 spec tests + routing/re-init integration).
 - **3.4** damage + speed-order evidence via the Step 2 calc (**KO-clip rule D40** baked in)
   → *gate: in/out-of-window, KO-clip, speed-discrimination tests*
+  → ✅ **2026-11-16** — SOFT evidence wired through `BeliefState.update` (**belief-slot-only**,
+  own side exact — no N×M coupling) over the ONE shared `evidence.py` window module. Damage window
+  = HARD window over the Step-2 calc's `[min,max]` **plus** its crit range, in BOTH directions
+  (candidate-as-victim and candidate-as-attacker); **KO-clip (D40)** = a KO line is consistent iff
+  the candidate *could* KO (`max>=maxhp or crit_max>=maxhp`); an always-KO config (`min>maxhp`)
+  is inconsistent with any surviving hit; an immune candidate is ruled out by a real hit. Speed
+  order = equal-priority moves, first mover is faster (a tie is consistent; different priority =
+  no speed evidence; a switch/faint between the two moves breaks the order). Per-slot **fact sheet**
+  (`Facts`: hp/maxhp, statuses, boosts, moves_used, tera, last_hit) + own-side facts + shared
+  field (weather/terrain/Tailwind with turn-count expiry). **Bug found & fixed (3.4-only, untested
+  until now):** `mon_options` required `spec["name"]` but belief candidates carry no `name`
+  (the species is `SlotBelief.species`), so every candidate window/speed raised `KeyError`; the
+  candidate callers now pass `name=species` (own-team specs still use their own `name`).
+  `belief/tests/test_step3_4.py` **13/13**; belief suite **64/64**; **full gate 286/286**;
+  keepers 40/40 + 29/29+20/20 + 14/14.
 - **3.5** `sample(n)` + `move_probabilities()` + correlation preservation → *gate: sampling
   invariants + Wish⇒Protect-style correlation test*
 - **3.6** max-HP / EV-bucket inference on the shared window module (Seismic Toss case;
@@ -130,6 +145,67 @@ here (✅ + date + evidence). Failed gate = fix + re-run, never "proceed with ca
   (top candidates, top move per slot, entropy) → *gate: fuzz green + report artifact*
 - **3.8** perf bench (update + 100 samples per mon, ms-scale) + D43 entry + commit
   → *gate: full pytest green*
+
+### 3a. Open decision options — 3.4–3.8 (2026-11-16, AWAITING USER REVIEW)
+
+> Written per user request (user asleep 2026-11-16): the **options** for each of the
+> next sub-steps plus my recommendation in **bold**. **3.4 will implement the bold
+> recommendation unless the user objects** (it is reversible — evidence is a pure
+> likelihood, so a different shape is a local change). 3.5–3.8 wait on the user.
+
+**3.4 — damage window + speed order (SOFT evidence via the Step-2 calc):**
+
+1. **Window likelihood shape:** **HARD window** (observed delta ∈ `[min,max]` OR ∈
+   `[crit.min,crit.max]` → 1, else 0→EPS floor) vs a soft falloff (e.g. Gaussian
+   around the window). Rec: hard — the Step-2 calc is verified against the sim
+   within rounding, so a hard window is decisive AND exactly testable; the crit
+   window is included as also-consistent (sim crit base rate 1/24 in gens 7–9).
+2. **Cross-slot coupling:** **update the belief (p2) slot ONLY** — the other mon is
+   exactly known (own team) or, if it is also a belief slot (multi-battle only),
+   its top candidate (mode) is used as the neutral stand-in. Never joint N×M
+   marginalization over both slots' candidates (bounded cost, no N×M calc blowup).
+3. **KO-clip (D40):** a KO line is consistent iff `max ≥ maxhp` (or `crit_max ≥
+   maxhp`); a candidate with `min > maxhp` (always-KO) is ALSO consistent with a KO
+   line but inconsistent with any surviving (non-KO) hit.
+4. **Speed-order signal:** **the order of `|move|` announce lines within a turn =
+   action order**; if the two moves have different priorities → no evidence; if equal
+   → the first mover's effective speed ≥ the second's (a TIE is consistent — the sim
+   resolves ties randomly, so either order is possible). Tailwind / boosts /
+   paralysis / weather enter via the calc's `effective_speed`; Quick Claw ignored
+   (rare, and this fork's log carries no observable Quick Claw signal).
+5. **Fact sheet — the "make unknown gamestates known" registry:**
+   **`SlotBelief.facts = {hp, maxhp, statuses, boosts, moves_used, tera, last_hit}`**
+   **+ `BeliefState.field = {weather, terrain, tailwind_side/turns}`**; `_used_moves`
+   migrates into `facts.moves_used` (single observation registry; 3.3 tests stay
+   green). `last_hit` (the damage this mon last took) is the reflector input for 3.6.
+6. **Residual damage (burn / poison / recoil / hazards): DEFERRED to 3.6** (HP/EV
+   inference) — 3.4 consumes move-source damage + speed order only; an unattributable
+   or non-move damage line still updates the HP fact, just produces no set evidence.
+7. **Perf:** **dedupe identical calc calls** — the window depends on the mon SPEC
+   (stats/item/ability/tera/status/boosts/hp) + move + field, not on the set, so
+   candidates sharing stats cost one Node spawn each. Per-call Node spawn stays for
+   3.4; a batch endpoint in `node_calc.js` only if the 3.8 bench is too slow.
+
+**3.5 — sampling:** **seeded multinomial `sample(n)`**; `move_probabilities()` =
+posterior mass over the sets containing the move (membership, order-blind —
+3.3 invariant); PP ignored (unobservable in the log).
+
+**3.6 — EV/nature/ability refinement:** max HP is **ALREADY revealed by the
+switch-in line in this fork** (the `hp/maxhp` denominator — verified 3.1), so 3.6 =
+EV/nature/ability refinement **on the same shared window module** (the Seismic
+Toss flat-damage case stays as a window regression; "burned-but-hits-hard ⇒ Guts"
+lands here). Residual-damage likelihoods (burn 1/16, poison, recoil) also land
+here per 3.4 decision #6.
+
+**3.7 — whole-battle fuzz bug-catcher:** N≈10–20 **seeded fork battles**, real log →
+events → `update` every turn, invariants asserted + **human-readable per-turn report**
+(top candidates, top move per slot, entropy) saved as an artifact; `Unknown` event
+count reported (the observable bug-catcher).
+
+**3.8 — perf bench + D43 + commit:** `update` + 100 samples per mon in the ms range;
+**D43** = the ability-reveal environment fact (ability NOT revealed at switch-in in
+this fork; revealed contextually via `[from] ability:` + `[of] holder` — the belief
+keeps ability hidden in the prior and narrows it only on reveal).
 
 ## 4. Decision log
 
@@ -163,6 +239,7 @@ Step 1 wrap-up.
 | D40 | **T1–T5 double-check COMPLETE (user: "please double check with the smogon damage calc all previous move types").** Re-verified every special move type shipped in Step 2 (T1 reflectors/fixed-damage, T2 level-scaling, T3 OHKO, T4 self-damage, T5 state-BP) with `scratch/verify_all_special_moves.js`: **29/29 scenarios PASS + 20/20 fork basePowerCallback (layer-A) checks PASS; full suite 163/163.** **Conclusion: zero calc bugs in T1–T5 — all 8 prior failures were harness/scenario artifacts** (fork and @smogon/calc agree in every case, evidence from fork code): (1) **fissure** — fork emits the OHKO KO damage line **twice** (`|-damage|…|0 fnt` ×2); harness was summing the phantom 0. (2) **guillotine/horndrill/sheercold** — 30%-accuracy OHKO missed under the fixed seed; harness now retries up to 100 seeds until the KO lands. (3) **mirrorcoat** — Mirror Coat only reflects **SPECIAL** moves; scenario used Aqua Jet (physical). (4) **lastrespects** — Tackle (Normal) is immune to Houndstone (Ghost), so nothing ever fainted; correct setup = ally faints at 1 HP, attacker then switches in (BP100). (5) **stompingtantrum / temperflare** — trigger is a failed **ATTACKING** move (fork `moveLastTurnResult===false`); a *successful* status move (Splash) does NOT set it — scenario premise was wrong, now a Normal-vs-Ghost miss. (6) **comeuppance** — KO clipping (see 8). (7) **avalanche** — the sim value was a **crit**; harness is now crit-range-aware. (8) **KO clipping = real log-semantics fact (keep for Step 3 belief state):** when a move KOs, the log line is `|-damage|…|0 fnt` and the measured "damage" is **maxhp, not the true (higher) damage** (Come Up Pance true 171 vs Samurott maxhp 170) → belief-state damage inference must treat a KO-hit as `damage ≥ maxhp`. No calc code changed this session; `node_calc.js`, data tables, and tests unchanged. | user: "yes please continue / but before, please double check with the smogon damage calc all previous move types" | 2026-11-15 |
 | D41 | **T6 recoil/drain sweep DONE (14/14 live-fork harness, 180/180 gate) + the gen1–4 FLOOR-recoil root cause found & fixed.** (a) **Scope:** the 29 recoil/drain moves form the SAME set in all 10 engines; per-engine values differ (fork-exact table `damage/recoil_drain_moves.json`, regenerate `scratch/gen_recoil_drain.js`): Struggle gen1 recoil [1,2] bp50 → gen2–3 [1,4] → gen4+ struggleRecoil; Double-Edge [25,100] gen1–2 → [1,3] gen3–4 → [33,100] gen5+; Drain Punch / Giga Drain drain [1,2] everywhere; Mind Blown / Chloroblast = `round(maxhp/2)` in all engines. (b) **ROOT CAUSE of the off-by-1 (headline):** the fork has TWO `applyRecoilDamage` variants — base uses `Math.round` (`dist/sim/battle-actions.js:1216`) and **`dist/data/mods/gen4/scripts.js:167` OVERRIDES it with `Math.floor`**; the mod inheritance chain is gen1→gen2→gen3→gen4→gen5→base, so **gens 1–4 use FLOOR, gens 5–9 + champions use ROUND** — nothing else overrides. Live-verified: gen1 Struggle dealt 29, recoil [1,2] → `floor(14.5)` = **14** (round would say 15). The same split governs drain (`dist/sim/battle.js:1793-1800`: gen≤4 `clamp(floor(dmg×n/d),1)`, gen>4 round) and struggleRecoil (gen1–4 `floor(baseMaxhp/4)` vs gen5+ `round(baseMaxhp/4)`); mindBlown/chloroblast are `round(maxhp/2)` in BOTH variants. Fixed in `node_calc.js` (recoil block + header doc). (c) **Clamped-damage semantics (verified):** recoil/drain fire only when the move DEALT damage (`battle-actions.js:905`) and are computed on the CLAMPED damage — `battle.damage` clamps to the defender's REMAINING HP (live: champions Brave Bird 237 computed vs 154-HP Blastoise → 154 dealt → recoil `round(154×33/100)` = 51); `heal` is capped by the user's MISSING HP — that cap is left to the AI, the calc reports the raw heal bracket. (d) **Life Orb:** uniform `floor(baseMaxhp/10)` in all 10 engines in this fork (`dist/data/items.js:3427-3443`), non-Status guard, gen6 mod adds `!move.ohko` (fork OHKO set: fissure/guillotine/horndrill/sheercold). (e) **The gen1 "2× damage divergence" was a CRIT — resolved:** live gen1 Pikachu Struggle dealt 29 = a gen1 crit (`dist/data/mods/gen1/scripts.js:636-785`: `level*=2` on crit, randomizer 217–255, crit roll `randomChance(critChance,256)`), and 29 ∈ the library's crit range 27–32 — **fork and @smogon/calc AGREE on gen1 damage**; the only real gen1/2 gap is the ±1 stat-model divergence (fork uses the modern formula; the library uses the authentic RBY DV/stat-EXP model; they agree at IV31 + EV0). Note: gen1 Struggle is type Normal in the fork data, but a gen1 Electric-only attacker has no Normal typing → no STAB (probe-verified). (f) **`critChance` response field (new):** base fork crit rate per move/engine — 1/24 gens 7–9 + champions, 1/16 gens ≤ 6, 1/8 for critRatio-2 moves (e.g. Slash); absent on special-damage/immune moves; battle-state modifiers (Super Luck, Scope Lens, Focus Energy, Lucky Chant, Merciless, Battle/Shell Armor) are left to the belief state. (g) **Tests:** +17 in `damage/tests/test_recoil_drain.py` (recoil/drain/struggleRecoil/lifeOrb/status-immune × engines; gen1–2 cases at EV0 where the models agree); harness `scratch/verify_recoil_drain_fork.js` 14/14 live-fork; T1–T5 keeper harness re-run green (29/29 + 20/20). | user: "continue with t6 please" + belief-state correctness (recoil/drain observed in battle must be inferred exactly) | 2026-11-15 |
 | D42 | **Step 2 audit (user: “no, please check for mistakes and bugs first and clean up the code”) — 3 REAL bugs found, fixed in both files, +42 tests, 222/222 gate.** (a) **B1 (BSS-critical) — Tera type missing from the special-move immunity gate.** The gate checked only BASE types, but the fork's `getImmunity` (`dist/sim/dex.js:226`) uses `target.getTypes()`, which returns the terastallized type when terastallized and not Stellar (`dist/sim/pokemon.js:1583`); the library likewise overrides effectiveness with `defender.teraType` (`dist/mechanics/gen789.js:292-294`). Consequence: Super Fang wrongly “hit” a Tera-Ghost Sandshrew in BSS (0× in battle). Fixed with an `effectiveTypes(gen, mon)` helper (engines **9 and 0 only** — Tera doesn't exist in gens 1-8; 'Stellar' ignored; `toID`-normalized), used in `specialMoveImmune` (chart list + the Flying/Ground check) and `specialMoveDamage` (Sheer Cold's Ice check). (b) **B2 — paralysis speed factor wrong for gens 1-4 and 6.** Fork: gens 1-4 ×0.25 (`mods/gen4/conditions.js:30`), gen 6 ×0.25 (`mods/gen6/conditions.js:31`), gen 5 ×0.5 (base, no override), gens 7-9 + champions ×0.5. Old code used ×0.5 everywhere → gen 1-4/6 speeds were 2× too high. Fixed with the per-gen table. (c) **B3 — the speed endpoint was missing most of the library's `getFinalSpeed`** (`dist/mechanics/util.js:131-173`): Swift Swim+Rain, Chlorophyll+Sun, Sand Rush+Sand, Slush Rush+Hail|Snow, Surge Surfer+Electric terrain, Quark Drive/Protosynthesis, Unburden, Quick Feet+status, Slow Start, Iron Ball/EV items ×0.5, Quick Powder+Ditto, `chainMods`/`pokeRound` rounding (`util.js:487,696`), the gen 1-2 **999 cap**. Now a full hand-mirror (the library does not export `getFinalSpeed`; `index.js:41` exports only). New OPTIONAL inputs (backward-compatible, all prior tests unchanged): mon flags `abilityOn` / `boostedStat`, and a top-level `field` (weather/terrain) on the speed request; a `main()` wiring bug (field not forwarded) found & fixed during the smoke test. (d) **B4 cleanup:** triplicated `pct` helper unified into `pctOf`; docstrings updated in both files. **Verified NOT bugs (don't re-investigate):** Struggle CAN crit in the fork (data default `critRatio:1` for ALL moves) → 1/24 `critChance` is fork-consistent; `applyBoost` tables matched fork `pokemon.js:302` exactly; gen 1-2 library EV default 252 (tests rely on it). **DECISION (flag to user): gen-5 paralysis — FORK ×0.5 wins over the library's ×0.25** (all other gens agree; the fork is the battle environment, so who-moves-first follows the fork); documented in code, `calc.py` docstring, and pinned in tests (`ours=75` vs library `37`, Jolteon L50). **Evidence:** `dex.js:226-236`, `pokemon.js:1583-1586` + `runImmunity` `pokemon.js:1664`, base `dist/data/conditions.js:43-62` + the gen4/gen6 par mods, `util.js:58-91/131-173/512-549/696`, `dist/pokemon.js:39-90`, `gen789.js:292-294`. **Tests:** +42 in `damage/tests/test_audit_fixes.py` (13 Tera/immunity incl. champs-whitelist clean-error, 10 per-gen par incl. the gen-5 divergence pin, 19 full-mirror speed cases, compare_speed); keeper `scratch/verify_speed_tera.js` **40/40** (28 speed scenarios EXACT vs the library's own `getFinalSpeed` + 12 Tera cases); T1-T5 keeper 29/29+20/20 and T6 keeper 14/14 re-run green; **gate 222/222** (was 180). | user: “no, please check for mistakes and bugs first and clean up the code” (pre-Step-3 quality pass) | 2026-11-15 |
+| D44 | **Step 3.4 SOFT-evidence gate — a real latent bug in the belief calc bridge found & fixed (the 3.3 suite never exercised the SOFT path, so it shipped untested).** `evidence.mon_options` read `spec["name"]`, but a belief **candidate carries no `name`** — the species is a separate observation on `SlotBelief.species` (the candidate is only the hidden set dims: moves/item/ability/nature/evs/tera). Every candidate-side window/speed call (`defender_window`, `attacker_window`, and the `_pair_speed` candidate `mon_options`) raised `KeyError: 'name'`, so the entire 3.4 damage + speed SOFT evidence was dead on arrival. The `defender_window(candidate, species, …)` / `attacker_window(…, species, …)` signatures already carried the `species` they were supposed to use but never did — the fix makes `mon_options` accept an optional `name` (defaults to `spec['name']`, so own-team specs are unchanged) and the candidate callers pass `name=species` (the belief slot's species). Also normalized a `WeatherChanged('none')`/`TerrainChanged('none')` clear-signal to `field=None` (was the literal string `'none'`; harmless to the calc but semantically wrong). **Verified against the Step-2 calc (source of truth) before pinning any number** — the handoff's hardcoded windows were partly stale (e.g. Adamant 252 Atk Earthquake vs Blastoise is [180,213] here, not [163,193]; Duskull/Insomnia is [68,81], not [81,95]), and its KO-clip scenario was unworkable by design (the no-item candidate's *crit* already KOs, so the KO-clip rule `max>=maxhp or crit_max>=maxhp` — which is semantically correct, crits are possible — counts it as KO-consistent); a clean KO/never-KO pair (Garchomp strong [286,339] vs weak [166,196], crit 294 < 301 max, Golduck) was used instead. **Tests:** `belief/tests/test_step3_4.py` **13/13** (damage rule + both directions + KO-clip + immunity + speed order (incl. priority-differs & switch-breaks) + fact sheet + field/Tailwind + live seeded-battle pipeline); belief suite **64/64**; **full gate 286/286**; keepers 40/40 + 29/29+20/20 + 14/14. | user: “i want strong checkpoints… we need to catch errors” + “i need the calc to be right” (3.4 gate) | 2026-11-16 |
 
 ## 5. Verified facts about this server build (evidence — don't re-derive)
 

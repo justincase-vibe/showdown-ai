@@ -22,12 +22,16 @@ Design (PLAN.md §3, 3.2 + 3.3):
     ~1 — so HARD evidence is effectively decisive without ever collapsing the
     distribution to all-zeros.
 
-Pure math over the candidate dicts — no DB, no damage calc, no fork — so it is
-trivially unit-testable and reusable.
+The HARD section is pure math over the candidate dicts (no DB, no damage calc,
+no fork) — trivially unit-testable. The SOFT section (3.4) computes damage
+windows and effective speeds through the Step-2 calc (@smogon/calc = source of
+truth for the damage model; the fork is the battle environment) and dedupes
+identical calls, so both the set posterior (3.3–3.5) and the HP/EV inference
+(3.6) consume ONE verified number.
 """
 from __future__ import annotations
 
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Optional
 
 #: EPS floor — no evidence may fully rule out a candidate. Small enough that a
 #: HARD non-match is ≈0 after renormalization; large enough to avoid float
@@ -138,3 +142,192 @@ HARD_EVIDENCE = {
     "tera_used": tera_used,
     "choice_lock": choice_lock,
 }
+
+
+# ══════════════════ SOFT evidence (3.4): damage window + speed order ══════════════════
+#
+# The 3.4 SOFT evidence (PLAN.md §3a, awaiting user review — the bold
+# recommendations are implemented): a HARD damage window (observed delta in the
+# Step-2 calc's [min,max] OR crit [min,max] -> 1, else 0->EPS) and the
+# speed-order signal (equal-priority moves: first mover's effective speed >=
+# the second's; ties consistent). Both are computed with the Step-2 calc
+# (@smogon/calc = source of truth for the damage model), so the likelihoods
+# inherit its verification. The pure functions (``damage_likelihood``,
+# ``mon_options``) stay testable without Node; only ``window_for`` /
+# ``speed_of`` spawn a process — and IDENTICAL calls are deduped in ``_CACHE``
+# (the window depends on the mon spec + move + field, NOT on the set, so a
+# 693-candidate slot costs at most one spawn per unique spec).
+from typing import Any  # noqa: E402  (SOFT section keeps the HARD section pure)
+
+import json as _json
+
+#: belief field id -> @smogon/calc field value
+_WEATHER = {"rain": "Rain", "sun": "Sun", "strongwinds": "Sun",
+            "sand": "Sand", "sandstorm": "Sand", "hail": "Hail", "snow": "Hail"}
+_TERRAIN = {"electric": "Electric", "grassy": "Grass", "misty": "Misty", "psychic": "Psychic"}
+
+#: the calc takes ONE status per mon; order by damage/speed interaction
+#: (paralysis first: it is the only status with both).
+_STATUS_ORDER = ("par", "brn", "skl", "frz", "tox")
+
+
+def status_of(statuses) -> Optional[str]:
+    """A fact sheet's status set -> the single status the calc takes."""
+    for s in _STATUS_ORDER:
+        if s in (statuses or ()):  # pragma: no cover - trivial
+            return s
+    return None
+
+
+def calc_field(field: Optional[Dict]) -> Dict:
+    """``BeliefState.field`` -> the calc's ``field`` input ({} when nothing set)."""
+    field = field or {}
+    out: Dict[str, str] = {}
+    w = _WEATHER.get(field.get("weather") or "")
+    if w:
+        out["weather"] = w
+    t = _TERRAIN.get(field.get("terrain") or "")
+    if t:
+        out["terrain"] = t
+    return out
+
+
+def mon_options(spec: Dict, status: Optional[str] = None, boosts: Optional[Dict] = None,
+                hp_fraction: Optional[float] = None, name: Optional[str] = None) -> Dict:
+    """A belief candidate (or an exact own-team spec) -> @smogon/calc mon options.
+
+    ``status`` / ``boosts`` / ``hp_fraction`` are the LIVE facts of the mon in
+    the slot (3.4 fact sheet); the candidate carries only the hidden set dims.
+    Unknown dims stay absent (``item == ""`` / ``tera is None`` -> full-HP /
+    no-item / no-Tera baseline, same as the prior).
+
+    ``name``: the mon's species. An exact own-team spec already carries it
+    (``spec['name']``); a belief candidate does NOT — the species is a separate
+    observation on ``SlotBelief.species``, so the candidate callers pass it here.
+    """
+    mon: Dict[str, Any] = {"name": name if name is not None else spec["name"]}
+    if spec.get("nature"):
+        mon["nature"] = spec["nature"]
+    if spec.get("evs"):
+        mon["evs"] = dict(spec["evs"])
+    if spec.get("item"):
+        mon["item"] = spec["item"]
+    if spec.get("ability"):
+        mon["ability"] = spec["ability"]
+    if spec.get("tera"):
+        mon["teraType"] = spec["tera"]
+    if status:
+        mon["status"] = status
+    b = {k: v for k, v in (boosts or {}).items() if v}
+    if b:
+        mon["boosts"] = b
+    if hp_fraction is not None:
+        mon["hp"] = hp_fraction
+    return mon
+
+
+#: calc-result dedupe (PLAN.md §3a 3.4-7): pure function of the inputs, so a
+#: module-level cache is safe across battles. Capped — the 3.8 bench will say
+#: if a bigger cache or a batch endpoint is worth it.
+_CACHE: Dict[str, Any] = {}
+
+
+def _cached(key: str, compute) -> Any:
+    hit = _CACHE.get(key)
+    if hit is None:
+        hit = compute()
+        if len(_CACHE) > 8192:
+            _CACHE.clear()
+        _CACHE[key] = hit
+    return hit
+
+
+def damage_likelihood(window: Dict, observed_delta: int, ko: bool = False,
+                      maxhp: int = 0) -> float:
+    """HARD-window likelihood (3.4-1): the observed hit is consistent iff it
+    lies inside the candidate's calc window OR crit window.
+
+    * non-KO hit: ``min <= delta <= max`` (normal) or ``crit_min <= delta <=
+      crit_max`` (the sim can crit, base rate 1/24 in gens 7-9). A candidate
+      whose ``min > delta`` would have KO'd this hit — ruled out.
+    * KO line (D40, the log clips at 0): consistent iff ``max >= maxhp`` or
+      ``crit_max >= maxhp``; an always-KO candidate (``min > maxhp``) is
+      consistent with a KO but inconsistent with any surviving hit.
+    * zero observed delta (a miss): consistent with everything — the move may
+      have missed; no discrimination, no harm.
+    """
+    if ko:
+        return 1.0 if (window["max"] >= maxhp or window["crit_max"] >= maxhp) else 0.0
+    if observed_delta <= 0:
+        return 1.0
+    if window["min"] > observed_delta:
+        return 0.0
+    if window["min"] <= observed_delta <= window["max"]:
+        return 1.0
+    if window["crit_min"] and window["crit_min"] <= observed_delta <= window["crit_max"]:
+        return 1.0
+    return 0.0
+
+
+def window_for(attacker: Dict, defender: Dict, move, field: Optional[Dict] = None,
+               fmt: Optional[str] = None, gen: int = 9) -> Dict:
+    """The Step-2 calc's damage window for one (attacker, defender, move, field)
+    tuple — ``{'min','max','crit_min','crit_max'}`` in HP (immune -> all 0).
+    Deduped: candidates sharing a spec pay one Node spawn each (3.4-7)."""
+    key = _json.dumps([fmt, gen, attacker, defender, move, field], sort_keys=True)
+    return _cached(key, lambda: _calc_window(attacker, defender, move, field, fmt, gen))
+
+
+def _calc_window(attacker, defender, move, field, fmt, gen) -> Dict:
+    from damage import calc  # lazy: keeps the pure section of this module import-light
+    r = calc.calc_damage(attacker=attacker, defender=defender, move=move,
+                         field=field, fmt=fmt, gen=gen)
+    if r.get("immune"):
+        return {"min": 0, "max": 0, "crit_min": 0, "crit_max": 0,
+                "maxhp": int(r.get("maxhp", 0) or 0)}
+    c = r.get("crit") or {}
+    return {
+        "min": int(r.get("min", 0) or 0),
+        "max": int(r.get("max", 0) or 0),
+        "crit_min": int(c.get("min", 0) or 0),
+        "crit_max": int(c.get("max", 0) or 0),
+        "maxhp": int(r.get("maxhp", 0) or 0),  # the defender's max HP (3.6: EV inference)
+    }
+
+
+def defender_window(candidate: Dict, species: str, attacker_mon: Dict,
+                    defender_status: Optional[str], defender_boosts: Optional[Dict],
+                    defender_hp_fraction: Optional[float], move, field: Optional[Dict],
+                    fmt: Optional[str] = None, gen: int = 9) -> Dict:
+    """Window when the CANDIDATE is the defender (the attacker is exactly known).
+
+    ``species`` names the candidate's mon (a belief candidate has no 'name';
+    the species is the observed fact on the slot)."""
+    mon = mon_options(candidate, status=defender_status, boosts=defender_boosts,
+                      hp_fraction=defender_hp_fraction, name=species)
+    return window_for(attacker_mon, mon, move, field, fmt, gen)
+
+
+def attacker_window(candidate: Dict, species: str, attacker_status: Optional[str],
+                    attacker_boosts: Optional[Dict], attacker_hp_fraction: Optional[float],
+                    defender_mon: Dict, move, field: Optional[Dict] = None,
+                    fmt: Optional[str] = None, gen: int = 9) -> Dict:
+    """Window when the CANDIDATE is the attacker (the defender is exactly known).
+
+    ``species`` names the candidate's mon (a belief candidate has no 'name';
+    the species is the observed fact on the slot)."""
+    mon = mon_options(candidate, status=attacker_status, boosts=attacker_boosts,
+                      hp_fraction=attacker_hp_fraction, name=species)
+    return window_for(mon, defender_mon, move, field, fmt, gen)
+
+
+def speed_of(mon: Dict, fmt: Optional[str] = None, tailwind: bool = False,
+             field: Optional[Dict] = None, gen: int = 9) -> int:
+    """Effective action speed (Step-2 calc, full @smogon/calc mirror). Deduped."""
+    key = _json.dumps(["spd", fmt, gen, mon, tailwind, field], sort_keys=True)
+
+    def _compute() -> int:
+        from damage import calc  # lazy
+        return calc.effective_speed(mon, fmt=fmt, gen=gen, tailwind=tailwind, field=field)
+
+    return _cached(key, _compute)
