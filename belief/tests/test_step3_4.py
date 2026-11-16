@@ -431,6 +431,49 @@ def test_residual_tick_does_not_clobber_last_hit():
     assert sb.facts.last_hit == 95                 # the tick must NOT clobber it
 
 
+def test_reflector_preserves_narrowed_posterior():
+    """P0 regression (2026-11-16): a reflector move (Counter/Mirror Coat/Metal
+    Burst/Come Up Pance) must NOT collapse an already-narrowed posterior.
+
+    Before the fix, ``_damage_evidence`` passed the move as a bare string to the
+    calc; ``_normalise_move`` dropped ``lastHitDamage``; the calc returned
+    ``immune/[0,0]`` for reflectors without prior-hit data; ``damage_likelihood``
+    returned 0.0 for every candidate; ``apply_evidence`` floored all to EPS →
+    uniform. The prior evidence was destroyed.
+
+    After the fix, ``_move_with_state`` attaches the attacker's ``facts.last_hit``
+    to the move spec; the calc returns a valid window (2× prior hit); both
+    candidates get likelihood 1.0 (reflectors are stat-independent); the prior
+    narrowing is preserved.
+    """
+    own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
+                   "item": "lifeorb", "ability": "solarpower"}}
+
+    def fresh():
+        bs = BeliefState("gen9ou", own_team=own)
+        return bs, install(bs, "p2a", "blastoise",
+                           [cand(evs={"spd": 0}), cand(evs={"spd": 252})])
+
+    # Step 1: a discriminating move hit narrows the posterior
+    bs, sb = fresh()
+    bs.update(E.DamageObserved(
+        target_side="p2", target_slot="p2a", hp_after=204, maxhp=299,
+        ko=False, source_kind="move", move="flamethrower",
+        source_side="p1", source_slot="p1a"))
+    assert approx_one(sb.candidates[0]["weight"])  # 0-SpD wins
+
+    # Step 2: the opponent uses a reflector — must NOT wipe the narrowing
+    # (Counter reflects 2 × last_hit; stat-independent, so both candidates
+    # get 1.0 → the prior evidence is preserved, not destroyed.)
+    bs.update(E.DamageObserved(
+        target_side="p1", target_slot="p1a", hp_after=109, maxhp=299,
+        ko=False, source_kind="move", move="counter",
+        source_side="p2", source_slot="p2a"))
+    assert approx_one(sb.candidates[0]["weight"]), \
+        f"reflector collapsed the posterior: {[c['weight'] for c in sb.candidates]}"
+    assert approx_eps(sb.candidates[1]["weight"])
+
+
 # ═══════════════════════════════ live integration ═════════════════════════════
 
 def _run_smoke_battle():

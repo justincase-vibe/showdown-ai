@@ -33,7 +33,7 @@ import itertools
 import random
 import re
 from dataclasses import dataclass, field as _dc_field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from legality import db, lookup
 
@@ -56,8 +56,9 @@ class Facts:
       migrated from ``SlotBelief._used_moves`` in 3.4, 3.3 behaviour unchanged).
     * ``tera`` — the observed Tera type (HARD evidence already pinned it to the
       candidates in 3.3; kept here as the single observation record).
-    * ``last_hit`` — the damage this mon last took (the reflector input for 3.6
-      — counter/mirrorcoat scale off the prior hit).
+    * ``last_hit`` — the damage this mon last took from a MOVE hit (D48: move-
+      source only). Consumed by ``_move_with_state`` as ``lastHitDamage`` for
+      reflector moves (counter/mirrorcoat/metalburst/comeuppance).
     """
 
     hp: Optional[int] = None
@@ -83,6 +84,26 @@ _EV_TOKEN = {"hp": "hp", "atk": "atk", "def": "def", "spa": "spa", "spd": "spd",
 #: max legal moves drawn for fallback combos (bounds candidate-space size)
 _FALLBACK_MOVE_POOL = 8
 _FALLBACK_SLOTS = 4
+
+
+def _move_with_state(move_name: str, facts: Optional[Facts]) -> Union[str, Dict]:
+    """Build the move spec for the calc, attaching tracked state the attacker has.
+
+    The calc reads what it needs (reflectors use ``lastHitDamage``; state-BP
+    moves use ``hitThisTurn`` etc.).  Absent fields = no-state baseline (the
+    calc's documented contract).  Returns a bare string when no state is set
+    (zero overhead for the 99 % normal-move case).  P2 will add the remaining
+    T5 fields to the ``state`` dict — same mechanism, no new special cases.
+    """
+    if facts is None:
+        return move_name
+    state: Dict[str, Any] = {}
+    if facts.last_hit is not None:
+        state["lastHitDamage"] = facts.last_hit
+    # P2: state["hitThisTurn"], state["lastMoveFailed"], state["allyFainted"], ...
+    if not state:
+        return move_name
+    return {"name": move_name, **state}
 
 
 def _fmt_gen(fmt: str) -> int:
@@ -559,10 +580,12 @@ class BeliefState:
             d_status = ev.status_of(target_facts.statuses) if target_facts else None
             d_boosts = target_facts.boosts if target_facts else {}
             d_frac = (prev / maxhp) if maxhp else None
+            # The attacker (p1) is the one who took the prior hit (reflector source).
+            move_spec = _move_with_state(dmg.move, a_facts)
 
             def lik(c: Dict) -> float:
                 w = ev.defender_window(c, sb.species, a_mon, d_status, d_boosts,
-                                       d_frac, dmg.move, field, self.fmt)
+                                       d_frac, move_spec, field, self.fmt)
                 return ev.damage_likelihood(w, delta, ko=dmg.ko, maxhp=maxhp)
         else:
             # candidate = ATTACKER (p2); defender = exact own mon
@@ -576,10 +599,12 @@ class BeliefState:
                                   hp_fraction=self._hp_fraction(d_facts))
             a_status = ev.status_of(sb.facts.statuses)
             a_frac = self._hp_fraction(sb.facts)
+            # The attacker (p2) is the one who took the prior hit (reflector source).
+            move_spec = _move_with_state(dmg.move, sb.facts)
 
             def lik(c: Dict) -> float:
                 w = ev.attacker_window(c, sb.species, a_status, sb.facts.boosts, a_frac,
-                                      d_mon, dmg.move, field, self.fmt)
+                                      d_mon, move_spec, field, self.fmt)
                 return ev.damage_likelihood(w, delta, ko=dmg.ko, maxhp=maxhp)
         ev.apply_evidence(sb.candidates, lik)
         return True
