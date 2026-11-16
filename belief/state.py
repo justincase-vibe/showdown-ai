@@ -57,8 +57,11 @@ class Facts:
     * ``tera`` — the observed Tera type (HARD evidence already pinned it to the
       candidates in 3.3; kept here as the single observation record).
     * ``last_hit`` — the damage this mon last took from a MOVE hit (D48: move-
-      source only). Consumed by ``_move_with_state`` as ``lastHitDamage`` for
-      reflector moves (counter/mirrorcoat/metalburst/comeuppance).
+      source only). The MAGNITUDE the reflector would reflect; retained across
+      turns as memory. But ``_move_with_state`` only hands it to the calc as
+      ``lastHitDamage`` when the mon was hit THIS turn (``attacked_by_this_turn``
+      non-empty) — the fork's reflector volatile is per-turn (``duration: 1``) and
+      a STALE hit means the reflector fails (0), not 2× the old value.
     """
 
     hp: Optional[int] = None
@@ -145,11 +148,23 @@ def _move_with_state(move_name: str, facts: Optional[Facts],
     the target (``defender=None``) falls back to the was-hit-at-all bool — the
     over-report direction (never misses a legitimate double); the real evidence
     path always passes the target, so accuracy is preserved where it matters.
+
+    Reflector gate (counter/mirrorcoat/metalburst/comeuppance) — the fork
+    recreates the reflector volatile FRESH each turn (``beforeTurnCallback``,
+    ``duration: 1``) and its ``onTry`` FAILS (``slot === null``) unless the user
+    was hit by a damaging move THIS turn. ``last_hit`` (the magnitude) is
+    intentionally retained across turns as reflector memory, but it must NOT be
+    reflected STALE: a hit from a previous turn means the reflector fails (0),
+    not 2× that stale hit. So ``lastHitDamage`` is attached only when the user
+    was hit this turn (``attacked_by_this_turn`` non-empty — the same per-turn,
+    move-source, damage>0 signal the Avalanche gate uses). At decision time in
+    singles (no hit yet this turn) the gate is closed → the reflector reports
+    base power (0); once the hit lands in the log the gate opens → 2×.
     """
     if facts is None:
         return move_name
     state: Dict[str, Any] = {}
-    if facts.last_hit is not None:
+    if facts.last_hit is not None and facts.attacked_by_this_turn:
         state["lastHitDamage"] = facts.last_hit
     if facts.attacked_by_this_turn:
         if defender is None or defender in facts.attacked_by_this_turn:

@@ -559,6 +559,49 @@ def test_reflector_preserves_narrowed_posterior():
     assert approx_eps(sb.candidates[1]["weight"])
 
 
+def test_reflector_stale_hit_not_reflected():
+    """D54 (2026-11-16) reflector stale-hit gate. The fork recreates the
+    reflector volatile FRESH each turn (``beforeTurnCallback`` + ``duration: 1``)
+    and its ``onTry`` FAILS (``slot === null``) if the user was not hit by a
+    damaging move THIS turn — so a hit from a PREVIOUS turn means the reflector
+    fails (0), it does NOT reflect 2× that stale hit.
+
+    ``facts.last_hit`` (the magnitude) is intentionally retained across turns as
+    memory; the fix gates it: ``_move_with_state`` attaches ``lastHitDamage`` only
+    when ``attacked_by_this_turn`` is non-empty (this-turn, move-source, damage>0).
+    White-box (no Node): the positive case (hit this turn -> gate open) and the
+    stale case (hit last turn -> gate closed) are pinned directly on the spec.
+    """
+    own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
+                   "item": "lifeorb", "ability": "solarpower"}}
+    bs = BeliefState("gen9ou", own_team=own)
+    sb = install(bs, "p2a", "blastoise", [cand()])
+
+    # Turn N: p2a is hit by p1a -> last_hit set AND attacked_by_this_turn set
+    bs.update(E.DamageObserved(
+        target_side="p2", target_slot="p2a", hp_after=204, maxhp=299,
+        ko=False, source_kind="move", move="flamethrower",
+        source_side="p1", source_slot="p1a"))
+    assert sb.facts.last_hit == 95
+    assert ("p1", "p1a") in sb.facts.attacked_by_this_turn
+    # SAME turn: the gate is OPEN -> the reflector reflects this hit (2×95)
+    spec_this = _move_with_state("counter", sb.facts, defender=("p1", "p1a"))
+    assert isinstance(spec_this, dict) and spec_this["lastHitDamage"] == 95
+
+    # Turn boundary: the per-turn signal clears, but last_hit (memory) persists
+    bs.update(E.Turn())
+    assert sb.facts.last_hit == 95                      # memory retained
+    assert sb.facts.attacked_by_this_turn == set()      # this-turn signal cleared
+
+    # Turn N+1: p2a Counters WITHOUT being hit this turn -> gate CLOSED -> no
+    # lastHitDamage (fork's onTry fails -> Counter deals 0, NOT 2*95).
+    spec_stale = _move_with_state("counter", sb.facts, defender=("p1", "p1a"))
+    if isinstance(spec_stale, dict):
+        assert "lastHitDamage" not in spec_stale, f"stale over-report: {spec_stale}"
+    else:
+        assert spec_stale == "counter"
+
+
 # ═══════════════════════════════ live integration ═════════════════════════════
 
 def test_hit_this_turn_set_and_turn_reset():
