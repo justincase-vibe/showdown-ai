@@ -34,6 +34,9 @@ from typing import Dict, List, Optional
 
 from legality import db, lookup
 
+from . import events as E          # typed events (3.1) — update() dispatches on these
+from . import evidence as ev      # shared evidence engine (3.2)
+
 #: EV stat tokens as they appear in the DB spread strings ("252 HP / 216 Def")
 _EV_TOKEN = {"hp": "hp", "atk": "atk", "def": "def", "spa": "spa", "spd": "spd", "spe": "spe"}
 
@@ -166,6 +169,10 @@ class SlotBelief:
         self.slot = slot
         self.species = species
         self.candidates = list(candidates)
+        # per-mon observation history (reset by add_opponent when a NEW mon takes
+        # the slot): used_moves drives the Choice-lock signal (3.3).
+        self._used_moves: set = set()
+        self._choice_locked = False
         self.normalize()
 
     @property
@@ -187,6 +194,37 @@ class SlotBelief:
         """Total posterior mass over candidates satisfying ``predicate``."""
         return sum(c["weight"] for c in self.candidates if predicate(c))
 
+    def update(self, event) -> bool:
+        """Apply one observed event to this slot's posterior (3.3 HARD evidence).
+
+        Returns True if the event was applied as set-belief evidence, False if it
+        is not (damage/status/boost/field lines belong to 3.4/3.6). The posterior
+        stays normalized and non-empty after every call (the evidence.py EPS floor
+        guarantees it — even an off-DB move never collapses the belief).
+
+        Choice-lock: the SAME move observed a second time on this mon means the
+        item is locked to a Choice item (a non-Choice item allows switching moves
+        freely) — applied once, on the second sighting.
+        """
+        if isinstance(event, E.MoveUsed):
+            move = event.move
+            ev.apply_evidence(self.candidates, ev.revealed_move(move))
+            if move in self._used_moves and not self._choice_locked:
+                ev.apply_evidence(self.candidates, ev.choice_lock())
+                self._choice_locked = True
+            self._used_moves.add(move)
+            return True
+        if isinstance(event, E.AbilityRevealed):
+            ev.apply_evidence(self.candidates, ev.revealed_ability(event.ability))
+            return True
+        if isinstance(event, E.ItemRevealed):
+            ev.apply_evidence(self.candidates, ev.revealed_item(event.item))
+            return True
+        if isinstance(event, E.TeraUsed):
+            ev.apply_evidence(self.candidates, ev.tera_used(event.tera_type))
+            return True
+        return False
+
 
 class BeliefState:
     """The bot's belief about the opponent side (p2 slots) in one battle."""
@@ -196,12 +234,35 @@ class BeliefState:
         self._slots: Dict[str, SlotBelief] = {}
 
     def add_opponent(self, slot: str, species: str) -> SlotBelief:
-        """Register an opponent mon (on switch-in) and give it its prior."""
-        if slot in self._slots:
-            return self._slots[slot]
+        """Register an opponent mon (on switch-in) and give it its prior.
+
+        If the slot already holds a DIFFERENT mon (a faint + re-switch into the
+        same active slot, common in 3v3), the belief is RE-INITIALIZED to the new
+        mon's prior — a new mon is a new set (and a fresh move history). Same
+        species = the same mon still on field -> keep the existing posterior.
+        """
+        existing = self._slots.get(slot)
+        if existing is not None and existing.species == species:
+            return existing
         sb = SlotBelief(slot, species, build_prior(species, self.fmt))
         self._slots[slot] = sb
         return sb
+
+    def update(self, event) -> bool:
+        """Route an event to the slot it concerns and apply it (3.3).
+
+        ``event.slot`` is the mon the evidence is about (the move USER for
+        MoveUsed, the holder for reveals) — own-side (p1*) and slot-less / field
+        events are not set-belief evidence here and are ignored (they feed 3.4/
+        3.6). Returns True if the event was applied to a slot's posterior.
+        """
+        slot = getattr(event, "slot", None)
+        if not slot or not slot.startswith("p2"):
+            return False
+        try:
+            return self.slot(slot).update(event)
+        except KeyError:
+            return False
 
     def slot(self, slot: str) -> SlotBelief:
         try:

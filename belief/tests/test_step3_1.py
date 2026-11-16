@@ -118,6 +118,59 @@ def test_slot_belief_posterior_and_mass():
                for c in sb.candidates)
 
 
+def test_moveset_is_an_unordered_set_user_invariant():
+    """User invariant (2026-11-16): ``wish+protect+foulplay = foulplay+protect+wish``.
+
+    A moveset IS a set — order carries no gameplay meaning (the AI picks which
+    move to use each turn). Two consequences pinned here so a future refactor
+    can't quietly make order matter:
+
+      (a) the prior must not contain two candidates that are the SAME set
+          (moves + item + ability + nature + evs + tera) differing ONLY in move
+          order — that would double-count one moveset and split its posterior
+          mass. The fallback already builds combos with ``itertools.combinations``
+          (each 4-subset once, NOT permutations); this locks that in, and checks
+          the set/tier prior paths too.
+      (b) the belief addresses a set's moves by MEMBERSHIP, never position: two
+          candidate lists identical except for one candidate's move order are
+          indistinguishable to every belief op (posterior + the membership mass
+          that the 3.3 revealed-move filter will use).
+    """
+    # (a) no order-variant duplicates in ANY prior path
+    for species, fmt in (
+        ("garchomp", "gen9ou"),            # a format's own Smogon sets
+        ("garchomp", "gen9bss3v3"),        # merged same-gen tier pool
+        (FALLBACK_SPECIES, "gen9bss3v3"),  # bounded legal-move fallback
+    ):
+        seen = {}
+        for c in build_prior(species, fmt):
+            key = (
+                frozenset(c["moves"]),
+                c["item"], c["ability"], c["nature"],
+                tuple(sorted(c["evs"].items())), c["tera"],
+            )
+            assert key not in seen, (
+                f"{species}/{fmt}: order-variant duplicate candidate {key} would "
+                f"double-count one moveset and split its mass")
+            seen[key] = c
+            assert len(set(c["moves"])) == len(c["moves"]), f"repeated move in {c}"
+
+    # (b) order of one candidate's moves is semantically irrelevant
+    base = {
+        "moves": ["wish", "protect", "foulplay", "struggle"],
+        "item": "leftovers", "ability": "prankster", "nature": "Bold",
+        "evs": {"hp": 252, "def": 252}, "tera": None, "weight": 1.0,
+    }
+    reordered = dict(base)
+    reordered["moves"] = ["foulplay", "protect", "wish", "struggle"]  # same set
+    sb_a = SlotBelief("p2a", "slowking", [dict(base)])
+    sb_b = SlotBelief("p2a", "slowking", [dict(reordered)])
+    assert sb_a.posterior == sb_b.posterior
+    for m in ("wish", "foulplay", "protect", "struggle", "earthquake"):
+        assert sb_a.mass(lambda c, m=m: m in c["moves"]) == \
+               sb_b.mass(lambda c, m=m: m in c["moves"])
+
+
 # ═══════════════════════════════ event model ════════════════════════════════
 
 def test_events_are_json_safe():

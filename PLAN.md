@@ -101,10 +101,24 @@ here (✅ + date + evidence). Failed gate = fix + re-run, never "proceed with ca
 - **3.1** belief state + event model + prior (Step-1 `get_common_sets`; bounded legal-move
   fallback for set-less species) + **mini log→event adapter**, smoke-tested against one live
   seeded fork battle → *gate: init tests (sums to 1, fallback, visibility dims) + event smoke*
+  → ✅ **2026-11-16** — `belief/tests/test_step3_1.py` **29/29** (incl. the moveset-is-an-
+  unordered-set invariant, user 2026-11-16); 3 adapter bugs fixed (move indices, switch-in dup
+  dedupe, `movefail` doesn't exist in this fork — see §5 log-protocol facts).
 - **3.2** evidence engine (per-evidence likelihoods; HARD/SOFT split; ε floor; never-empty
   guard) → *gate: per-evidence-function unit tests*
+  → ✅ **2026-11-16** — `belief/evidence.py` (ONE shared module for set posterior 3.3–3.5 AND
+  HP/EV inference 3.6 — nothing written twice). HARD likelihoods exact 0/1; **"unknown is not
+  disconfirmed"** (a candidate with `item==""`/`tera is None` is consistent with a reveal of
+  that dimension, not ruled out); **EPS floor (1e-9)** in `apply_evidence` guarantees the
+  posterior **never empties** (off-DB set → all floor at EPS → uniform, still normalizable).
+  `belief/tests/test_step3_2.py` **13/13**.
 - **3.3** `update()`: revealed move / ability / **Choice-lock (same move twice ⇒ Choice item)** /
   Tera → *gate: the 4 spec tests (revealed in every sample; illegal = 0; sums to 1; Choice shift)*
+  → ✅ **2026-11-16** — `SlotBelief.update(event)` + `BeliefState.update(event)` (routes by
+  `event.slot`; own-side p1* and field/damage lines ignored — those are 3.4/3.6). Choice-lock
+  fires once on the 2nd sighting of the SAME move on that mon. `add_opponent` re-initializes a
+  slot's prior when a NEW mon takes it (3v3 faint+re-switch) and keeps it for the same mon.
+  `belief/tests/test_step3_3.py` **9/9** (the 4 spec tests + routing/re-init integration).
 - **3.4** damage + speed-order evidence via the Step 2 calc (**KO-clip rule D40** baked in)
   → *gate: in/out-of-window, KO-clip, speed-discrimination tests*
 - **3.5** `sample(n)` + `move_probabilities()` + correlation preservation → *gate: sampling
