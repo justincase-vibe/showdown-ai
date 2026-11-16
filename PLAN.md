@@ -393,17 +393,36 @@ turn, so the Node spawn IS the realistic per-turn cost) · **sample(100) ~0.5ms*
      wiring it:** layers are a fork VOLATILE with no duration — they PERSIST
      across turns (a multi-turn Stockpile→Spit Up sequence would have been
      broken by the old per-turn wipe) and clear only on switch-out / new mon.
-  3. **`hit_this_turn` approximation:** we track "was hit this turn", not "was hit
-     by THIS target" (the fork's gate is per-source). We can over-report only if
-     the mon that hit us switches out in the SAME turn and the hit-victim then
-     Avalanches a different mon — a very rare sequence. Accepted for now; revisit
-     only if the AI ever trains on avalanche-heavy sets.
+  3. ~~**`hit_this_turn` approximation**~~ — **✅ CLOSED 2026-11-16 (D53):** now
+     PER-SOURCE — `attacked_by_this_turn: set[(side,slot)]` records which mon(s) hit
+     this one; `_move_with_state(move, facts, defender)` computes `defender in
+     attacked_by_this_turn` at the two `_damage_evidence` call sites; the calc is
+     unchanged (still reads the `hitThisTurn` bool). Covers Avalanche (gen 8-9) AND
+     Revenge (gen 4-7, same fork gate). +1 test (`test_hit_this_turn_is_per_source`);
+     full gate **320/320** (was 319).
   4. ~~**`spikes` 0/1 bool + `confidence` `-0.0` + 3.7 "benign prepare" Unknowns**~~
      — **✅ CLOSED 2026-11-16 (D51):** Spikes/Toxic Spikes now COUNT the per-layer
      `|-sidestart|` lines (the fork emits one line per layer, NO count in the line —
      `moves.js:17536-17543`; caps 3/2) and reset on `|-sideend|`; `confidence`
      clamped to [0,1]; `-prepare` (client animation line, `SIM-PROTOCOL.md:594`)
      moved to `IGNORED_TAGS`. Full gate **316/316** (was 313).
+  5. **`revenge` (gen 4-7) not in the calc's `STATE_BP_MOVES` set** — it has the SAME
+     per-source gate as Avalanche (`attackedBy.some(p => p.source === target &&
+     p.damage > 0 && p.thisTurn)`, moves.js:15085-15093) but `node_calc.js` only models
+     `avalanche`. So gen ≤7 formats would mis-model Revenge (no doubling). NOT a BSS
+     issue (gen 9); surfaces only when targeting early gens. **Recommendation:** add it
+     to `STATE_BP_MOVES` + `special_bp_moves.json` when we sweep early-gen formats.
+  6. **Reflector stale-hit divergence (potential, low-reachability):** the fork's
+     reflectors are PER-TURN — Counter/Mirror Coat use a `counter`/`mirrorcoat` volatile
+     with **`duration: 1`** (moves.js:3046; expires), and Metal Burst/Comeuppance require
+     **`thisTurn`** (moves.js:2739/11721; they FAIL if the last hit wasn't this turn).
+     Our `last_hit` (the reflector input) **persists across turns** (D48: reflector
+     memory; cleared only on switch/new mon). So a mon hit N-1 turns ago (not this turn)
+     that uses a reflector would be reflected by our calc but FAILED by the fork — an
+     over-report. Rare in practice (reflectors are reactive, usually same-turn).
+     **Recommendation:** investigate + pin down the exact volatile lifetime before
+     deciding whether `last_hit` should be per-turn; do NOT change it blindly (the
+     same-turn case is the common, correct path).
 
 ### 3b. Step 4 stage (observation encoder / belief sampler) — STAGE LAID, NOT BUILT (2026-11-16)
 
@@ -459,18 +478,20 @@ approved **3-4 hidden layers** (revises the prior 2-layer GRU-256); 6v6 singles,
 B1 (hazard/protect obs — **DONE, D52**) + C1 (3-4 layer GRU) + the action-space
 enumeration; (3) **319/319** stays green.
 
-**E. hit_this_turn per-source fix — PROPOSED (D52, awaiting user decision; NOT implemented).**
+**E. hit_this_turn per-source fix — ✅ RESOLVED (D53, 2026-11-16).**
 Root cause: `Facts.hit_this_turn: bool` = "was hit this turn by ANYONE", but the fork's
-Avalanche/Temperate gate is PER-SOURCE (`attackedBy.some(p => p.source === target &&
-p.damage > 0 && p.thisTurn)`, moves.ts:912-915) — so "mon X hits me, I Avalanche mon Y (≠X)"
-currently over-reports (would double Avalanche when the fork wouldn't). Fix: replace the bool
-with `attacked_by_this_turn: set[(side,slot)]` (opponent slots that hit this mon this turn,
-delta>0), set in `_apply_damage`, cleared on `turn_reset()`/`reset()`; the calc pipe computes
-the per-source PAIR `(def_side,def_slot) in attacker_facts.attacked_by_this_turn` at the
-evidence/forward-eval call sites (`evidence.py` `window_for`/`defender_window`/`attacker_window`,
-which already know both mons); observation keeps a model-facing bool `hit_this_turn = len(set)>0`
-(no dim change). Blast radius ~40-60 lines incl. tests; rare-in-BSS. **Decision needed:
-implement before Step 4 (calc-perfection now) or defer as a small follow-up.**
+Avalanche/Revenge gate is PER-SOURCE (`attackedBy.some(p => p.source === target &&
+p.damage > 0 && p.thisTurn)`, moves.js:926-934 / 15085-15093) — so "mon X hits me, I Avalanche
+mon Y (≠X)" over-reported (doubled Avalanche when the fork wouldn't). **Fix (implemented,
+320/320):** the bool is now `attacked_by_this_turn: set[(side,slot)]` (opponent slots that hit
+this mon this turn, delta>0), set in `_apply_damage`, cleared on `turn_reset()`/`reset()`;
+`_move_with_state(move, facts, defender)` computes the per-source PAIR `defender in
+attacked_by_this_turn` at the two `_damage_evidence` call sites (both pass
+`defender=(dmg.target_side, dmg.target_slot)`); the calc is UNCHANGED (still reads the
+`hitThisTurn` bool). Observation keeps the model-facing bool `hit_this_turn = len(set)>0`
+(no dim change). Tests: `test_hit_this_turn_is_per_source` (X-hits → Avalanche-X doubles,
+Avalanche-Y does not) + updated `test_hit_this_turn_set_and_turn_reset`. **Remaining open
+items from this class:** §3a-5 (Revenge not in calc, gen ≤7) + §3a-6 (reflector stale-hit).
 
 ## 4. Decision log
 
@@ -514,6 +535,7 @@ Step 1 wrap-up.
 | D50 | **The two T5 move gaps closed (user: "can you fix the two move bugs while youre on it please?") + a fork divergence found while doing so.** (a) **`last_move_failed` was unreachable from this fork's REAL logs** (the fork never emits `movefail` — the previous session's adapter comment assumed a `|-fail|<user>` line but never verified it). Fork-verified protocol (2026-11-16): an ANNOUNCED move that fails (miss/immunity/Protect/blocked) logs `|move|...` then **`|-fail|<user>`** (`battle-actions.ts:656-659` — no move name in the payload; `attrLastMove('[still]')`); an ABORTED attempt (par/slp/frz/flinch/recharge — `conditions.ts` `onBeforeMove` returns false; nopp — `battle-actions.ts:340`) logs **`|cant|<user>|<reason>`** BEFORE any `|move|` line (the `BeforeMove` check at `runMove` line 316 precedes the announce at `addMove` line 521). The fork sets `moveThisTurnResult=false` on ALL of these paths (runMove 319/331/342 + `hitResult===false`), which is exactly the next-turn gate for Stomping Tantrum / Temper Flare (`moveLastTurnResult === false`, moves.ts:18050/19186) — note a MISS also doubles, and a Protect block does NOT (`NOT_FAIL`/`true` paths). Adapter: `|-fail|` → `MoveFailed` (move name recovered from the user's own `|move|` announce — a move executes atomically, so the fail line always immediately follows it); `|cant|` → `MoveFailed` ONLY for the six move-attempt reasons (nopp carries the move name in the line; other cant reasons — trp, ability blocks — stay silent). (b) **`stockpile_layers` now increments** on `MoveUsed(move="stockpile")` with the fork cap of 3 (`moves.ts:17956-17966` `onTry`/`onRestart` return false at 3 → the 4th use fails, adding nothing); documented edge: a blocked sub-cap Stockpile leaves one phantom layer (rollback can't tell a capped failure from a real one — rare-in-BSS, accepted). (c) **FORK DIVERGENCE FIXED (self-review catch):** Stockpile layers are a fork **volatile with no duration** (`data/conditions.ts` — `noCopy`, `onStart`/`onRestart`, no expiry) — they PERSIST ACROSS TURNS and are cleared only by switch-out (`clearVolatiles`) or a new mon. The previous session's `turn_reset()` wiped them every turn, which would have corrupted a multi-turn Stockpile→Spit Up sequence (3 turns of Stockpile then Spit Up = BP 300 in the fork; our calc would have seen 1 layer). Now: `turn_reset()` keeps them; `reset()` (new mon) and the same-mon switch-in branch (switch-out cleared the volatile) clear them. **Tests:** +3 — adapter protocol (`test_step3_1.py::test_adapter_move_failure_lines_to_movefailed`, incl. the silent non-move-failure cant case), stockpile cap/persist/switch-clear + pipe (`test_step3_4.py::test_stockpile_layers_track_cap_and_switch_clear`), end-to-end real-log MoveFailed (`test_step3_4.py::test_last_move_failed_from_real_log_lines`). **Gate:** full **313/313** (incl. the 3.7 fuzz on real seeded battles — misses in real logs now map to MoveFailed instead of being dropped). Commit `85729b9`. | user: "we need to fix the calc first before doing anything … can you fix the two move bugs while youre on it please?" (2026-11-16) | 2026-11-16 |
 | D51 | **Pre-Step-4 belief/observation bug wave — 3 real bugs fixed + the Step 4 stage documented (user: "continue setting up the stage for part 4 … we are not continuing before all bugs are fixed … i have not yet decided on the node/endpoint decision").** (a) **Spikes/Toxic Spikes layer count was DROPPED** (`state.py._apply_field_effect` stored `1 if active else 0` — a bool — so 2-3 Spikes read as "present"; hazard damage under-reported). Fork-verified: the fork emits ONE `|-sidestart|<side>|Spikes` line PER LAYER with NO count in the line (`dist/data/moves.js:17536-17543`: `onSideStart` sets `layers=1`+emit; `onRestart` does `layers++` + the SAME emit; caps 3 Spikes / 2 Toxic Spikes) — the count IS the number of start lines. Now counted (capped) in the belief and reset to 0 on `|-sideend|`; the observation carries the true 0-3 / 0-2 count. (b) **`-prepare` was surfacing as the 3.7 "benign prepare" Unknowns** — it's the client charge/aim animation line (`sim/SIM-PROTOCOL.md:594` `|-prepare|ATTACKER|MOVE`); the real move is the `|move|` line we DO map, so no belief evidence → moved to `IGNORED_TAGS` (the `Unknown` bug-catcher stays live for genuinely-unmapped tags). (c) **`confidence` could render `-0.0`** (a float entropy a hair over 1.0) → clamped to [0,1]. **Tests:** +3 — `test_spikes_and_toxicspikes_track_layer_count`, `test_confidence_clamped_to_unit_interval`, `test_adapter_prepare_line_is_ignored`. **Gate:** full **316/316** (was 313). **Still open (accepted, rare-in-BSS):** `hit_this_turn` per-source approximation (§3a-3). **Step-4 stage laid in §3b (NOT built); the calc endpoint (batch vs persistent worker) is STILL AWAITING USER DECISION — no calc work started.** | user: "please continue setting up the stage for part 4 / we are not continuing before all bugs are fixed / i have not yet decided on the node/endpoint decision" (2026-11-16) | 2026-11-16 |
 | D52 | **Batch calc endpoint (Option 2 — user: "let's implement the batch for now, its the safer route") + Protect observation + complete hazard observation — the final pre-Step-4 wave (resolves the D51 open calc-endpoint decision).** (a) **Batch endpoint:** `damage/node_calc.js` gained a shared per-request `dispatchOne(r)`; `main()` branches on input shape — a JSON ARRAY in → an ARRAY of results IN ORDER with per-item isolation (one bad item → `{error}` for that item, the rest still return) — while the SINGLE-request contract stays BYTE-identical (object in → object out; bad → `{error}` + exit 1) so all 313 prior damage tests pass untouched. `damage/calc.py` gained `_node_batch(requests)` (ONE Node spawn for N calcs) + public `calc_damage_many(items)`, where each item is the same arg dict a single `calc_damage` takes (`attacker`/`defender`/`move` + optional `field`/`fmt`/`gen`). **Why:** the forward-eval path is "my N moves × enemy team" = 24+ calcs per decision; batching avoids N Node spawns — probe `scratch/batch_probe.py`: 24 calcs **266 ms batch vs 5984 ms individual (~22.5×), identical results**. The persistent-worker option is kept documented (deferred), not built. (b) **Protect observation (user: "we should put a 'used-protect-last-turn' observation since that is huge for doubles"):** `Facts.used_protect: bool`, set on `MoveUsed` when the move is in `_PROTECT_FAMILY` (`protect`/`detect`/`kingsshield`/`spikyshield`/`guardsplit`; moves.js:14010/3579/17556/7991 + kingsshield) — detected by MOVE NAME because the fork's volatile differs per move, so the move name is the one stable signal we already have. Per-turn (the fork clears the protect volatile at end of turn), cleared in `turn_reset()`. Surfaced on both own and opponent mon blocks in `get_context()`. Documented minor edges (both rare-in-BSS, low impact): a FAILED protect-family use still sets it; Guard Split marks the user, not the ally it shields. (c) **Complete hazard observation (user: "if the hazards are not correctly observed as you said, please add it" — §3b B1):** Toxic Spikes (0-2) + Safeguard were tracked in `self.field` (D51 wired the layer count) but NOT surfaced in `get_context()` — now both are (toxicspikes per-side count + safeguard per-side). Hazard state is now complete for the Step-4 observation. **Tests:** +3 — `test_calc_damage_many_batch_matches_individual` (batch==individual, order, per-item isolation), `test_used_protect_set_and_turn_reset`, `test_hazard_observation_includes_toxicspikes_and_safeguard`. **Gate:** full **319/319** (was 316). **Still open (PROPOSED, NOT implemented):** the `hit_this_turn` per-source approximation — see §3b E, awaiting the user's implement-vs-defer call. | user: "lets implement the batch for now, its the safer route" + "we should put a 'used-protect-last-turn' observation since that is huge for doubles" + "if the hazards are not correctly observed as you said, please add it" (2026-11-16) | 2026-11-16 |
+| D53 | **hit_this_turn per-source fix implemented (user: "yeah for sure fix the issue now before we get issues when testing this in another format").** Replaced `Facts.hit_this_turn: bool` ("was hit this turn by ANYONE") with `attacked_by_this_turn: set[(side,slot)]` (which opponent mon(s) hit this one this turn, delta>0) — matching the fork's PER-SOURCE gate `attackedBy.some(p => p.source === target && p.damage > 0 && p.thisTurn)` (Avalanche moves.js:926-934; Revenge moves.js:15085-15093 — the SAME gate, so both are covered). Set in `_apply_damage` (records `ev.source_side`/`ev.source_slot`; guarded on delta>0 + a real, distinct source); cleared in `turn_reset()` (and `reset()` via it). `_move_with_state(move, facts, defender)` now takes the target's `(side,slot)` and computes `hitThisTurn = defender in attacked_by_this_turn`; the two `_damage_evidence` call sites both pass `defender=(dmg.target_side, dmg.target_slot)` (the mon being hit). **The calc is UNCHANGED** (still reads the plain `hitThisTurn` bool — the per-source decision is made in the Python data pipe, keeping @smogon/calc the semantic authority per D37). Observation dim UNCHANGED: `get_context()` still exposes the model-facing bool `hit_this_turn = len(attacked_by_this_turn) > 0`. The `defender=None` fallback (only reachable if a caller omits the target) keeps the old was-hit-at-all over-report — documented. **Tests:** `test_hit_this_turn_is_per_source` (p1a hits me → Avalanche on p1a doubles, Avalanche on p1b does NOT) + updated `test_hit_this_turn_set_and_turn_reset` / `test_zero_damage_hit_does_not_set_hit_this_turn`. **Gate:** full **320/320** (was 319). **Also surfaced (NOT fixed, for user review — §3a-5/6):** (a) Revenge (gen 4-7) has this same per-source gate but is NOT in the calc's `STATE_BP_MOVES` set — a gen ≤7 gap; (b) the fork's reflectors are per-turn (Counter/Mirror Coat `duration:1` volatile; Metal Burst/Comeuppance `thisTurn`-required) while our `last_hit` persists across turns — a potential stale-hit over-report. | user: "yeah for sure fix the issue now before we get issues when testing this in another format" + "what else caught your 'eye'?" (2026-11-16) | 2026-11-16 |
 
 ## 5. Verified facts about this server build (evidence — don't re-derive)
 

@@ -69,7 +69,14 @@ class Facts:
     tera: Optional[str] = None
     last_hit: Optional[int] = None
     # T5 state (consumed by _move_with_state for state-BP moves)
-    hit_this_turn: bool = False          # per-turn (fork: thisTurn resets end of turn)
+    # avalanche/revenge gate (fork moves.ts:912-915 / 15086-15088:
+    # `attackedBy.some(p => p.source === target && p.damage > 0 && p.thisTurn)`) —
+    # the (side, slot) of the opponent mon(s) that hit THIS mon this turn with
+    # damage > 0. PER-SOURCE: Avalanche/Revenge on target T doubles only if T
+    # (not merely any mon) hit the user this turn. The observation exposes the
+    # model-facing bool `hit_this_turn = len(set) > 0` (get_context), so the
+    # net's dim is unchanged. Per-turn; cleared by turn_reset() / reset().
+    attacked_by_this_turn: set = _dc_field(default_factory=set)
     last_move_failed: bool = False       # per-turn (fork: moveLastTurnResult)
     # Stockpile LAYERS — a fork VOLATILE (no duration): they persist across
     # turns, cleared only by switch-out (clearVolatiles) or a new mon.
@@ -98,7 +105,7 @@ class Facts:
         last_hit (reflector memory), stockpile_layers (fork: the stockpile
         volatile has no duration — layers survive turns, cleared only by a
         switch-out / new mon), hp, maxhp, statuses, boosts, moves_used, tera."""
-        self.hit_this_turn = False
+        self.attacked_by_this_turn = set()
         self.last_move_failed = False
         self.used_protect = False
 
@@ -120,7 +127,8 @@ _FALLBACK_MOVE_POOL = 8
 _FALLBACK_SLOTS = 4
 
 
-def _move_with_state(move_name: str, facts: Optional[Facts]) -> Union[str, Dict]:
+def _move_with_state(move_name: str, facts: Optional[Facts],
+                     defender: Optional[tuple] = None) -> Union[str, Dict]:
     """Build the move spec for the calc, attaching tracked state the attacker has.
 
     The calc reads what it needs (reflectors use ``lastHitDamage``; state-BP
@@ -128,14 +136,24 @@ def _move_with_state(move_name: str, facts: Optional[Facts]) -> Union[str, Dict]
     calc's documented contract).  Returns a bare string when no state is set
     (zero overhead for the 99 % normal-move case).  P2 will add the remaining
     T5 fields to the ``state`` dict — same mechanism, no new special cases.
+
+    ``defender`` — the ``(side, slot)`` of the mon THIS move is hitting. The
+    Avalanche/Revenge gate is PER-SOURCE (fork ``attackedBy.some(p => p.source
+    === target && p.damage > 0 && p.thisTurn)``): it doubles only if THAT target
+    hit the user this turn, not merely any mon. So ``hitThisTurn`` is computed
+    as ``defender in facts.attacked_by_this_turn``. A caller that does not know
+    the target (``defender=None``) falls back to the was-hit-at-all bool — the
+    over-report direction (never misses a legitimate double); the real evidence
+    path always passes the target, so accuracy is preserved where it matters.
     """
     if facts is None:
         return move_name
     state: Dict[str, Any] = {}
     if facts.last_hit is not None:
         state["lastHitDamage"] = facts.last_hit
-    if facts.hit_this_turn:
-        state["hitThisTurn"] = True
+    if facts.attacked_by_this_turn:
+        if defender is None or defender in facts.attacked_by_this_turn:
+            state["hitThisTurn"] = True
     if facts.last_move_failed:
         state["lastMoveFailed"] = True
     if facts.stockpile_layers > 0:
@@ -467,7 +485,7 @@ class BeliefState:
                 "moves": sorted(facts.moves_used),
                 "tera": facts.tera or "",
                 "last_hit": facts.last_hit or 0,
-                "hit_this_turn": facts.hit_this_turn,
+                "hit_this_turn": len(facts.attacked_by_this_turn) > 0,
                 "last_move_failed": facts.last_move_failed,
                 "stockpile": facts.stockpile_layers,
                 "used_protect": facts.used_protect,
@@ -787,9 +805,13 @@ class BeliefState:
                 # avalanche gate (fork moves.ts:912-915: `p.damage > 0`): only a
                 # hit that actually dealt damage sets the flag — a resisted or
                 # immune (0-damage) hit must not, mirroring the fork's some()
-                # over attackedBy. Cleared by turn_reset() on E.Turn.
-                if delta > 0:
-                    facts.hit_this_turn = True
+                # over attackedBy. Cleared by turn_reset() on E.Turn. Record
+                # WHICH mon dealt it (side, slot) so the per-source Avalanche/
+                # Revenge gate can check "did THIS target hit me"; a 0-damage or
+                # unattributable/self source records nothing (the fork's some()
+                # never qualifies those).
+                if delta > 0 and ev.source_slot and ev.source_slot != slot:
+                    facts.attacked_by_this_turn.add((ev.source_side, ev.source_slot))
         # evidence only for attributable MOVE-source damage with a DISTINCT
         # attacker; residual/unattributable lines update the fact only (3.4-6)
         if (ev.source_kind != "move" or not ev.move or not ev.source_slot
@@ -820,7 +842,10 @@ class BeliefState:
             d_boosts = target_facts.boosts if target_facts else {}
             d_frac = (prev / maxhp) if maxhp else None
             # The attacker (p1) is the one who took the prior hit (reflector source).
-            move_spec = _move_with_state(dmg.move, a_facts)
+            # defender = the mon being hit (dmg.target_*); the per-source avalanche
+            # gate checks whether THAT mon hit the attacker this turn.
+            move_spec = _move_with_state(dmg.move, a_facts,
+                                        defender=(dmg.target_side, dmg.target_slot))
 
             def lik(c: Dict) -> float:
                 w = ev.defender_window(c, sb.species, a_mon, d_status, d_boosts,
@@ -839,7 +864,10 @@ class BeliefState:
             a_status = ev.status_of(sb.facts.statuses)
             a_frac = self._hp_fraction(sb.facts)
             # The attacker (p2) is the one who took the prior hit (reflector source).
-            move_spec = _move_with_state(dmg.move, sb.facts)
+            # defender = the mon being hit (dmg.target_*); the per-source avalanche
+            # gate checks whether THAT mon hit the attacker this turn.
+            move_spec = _move_with_state(dmg.move, sb.facts,
+                                        defender=(dmg.target_side, dmg.target_slot))
 
             def lik(c: Dict) -> float:
                 w = ev.attacker_window(c, sb.species, a_status, sb.facts.boosts, a_frac,

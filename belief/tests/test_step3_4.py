@@ -562,38 +562,39 @@ def test_reflector_preserves_narrowed_posterior():
 # ═══════════════════════════════ live integration ═════════════════════════════
 
 def test_hit_this_turn_set_and_turn_reset():
-    """T5 wiring (2026-11-16): ``hit_this_turn`` (the avalanche gate) is set on
-    the TARGET of a real move hit and cleared on E.Turn. The fork's avalanche
+    """T5 wiring (2026-11-16): the avalanche gate records the (side, slot) of
+    the mon that hit this one and is cleared on E.Turn. The fork's avalanche
     bpCallback (moves.ts:912-915) doubles only if ``p.damage > 0`` from the
     target this turn, so a 0-damage follow-up must not clear an already-set
-    flag (the fork's ``some()`` over attackedBy keeps the 95-damage entry)."""
+    entry (the fork's ``some()`` over attackedBy keeps the 95-damage entry)."""
     own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
                    "item": "lifeorb", "ability": "solarpower"}}
     bs = BeliefState("gen9ou", own_team=own)
     sb = install(bs, "p2a", "blastoise", [cand()])
-    # a real hit (delta 95 > 0) on the target -> flag set
+    # a real hit (delta 95 > 0) on the target -> the attacker is recorded
     bs.update(E.DamageObserved(
         target_side="p2", target_slot="p2a", hp_after=204, maxhp=299,
         ko=False, source_kind="move", move="flamethrower",
         source_side="p1", source_slot="p1a"))
-    assert sb.facts.hit_this_turn is True
-    # the state pipe must hand it to the calc (avalanche reads hitThisTurn)
-    spec = _move_with_state("avalanche", sb.facts)
+    assert ("p1", "p1a") in sb.facts.attacked_by_this_turn
+    # the state pipe must hand it to the calc (avalanche reads hitThisTurn),
+    # computed PER-SOURCE: p1a is the mon that hit me, so Avalanche on p1a doubles
+    spec = _move_with_state("avalanche", sb.facts, defender=("p1", "p1a"))
     assert spec["name"] == "avalanche" and spec["hitThisTurn"] is True
-    # a 0-damage follow-up hit (resist/immune) must NOT clear it
+    # a 0-damage follow-up hit (resist/immune) must NOT clear the entry
     bs.update(E.DamageObserved(
         target_side="p2", target_slot="p2a", hp_after=204, maxhp=299,
         ko=False, source_kind="move", move="thunderbolt",
         source_side="p1", source_slot="p1a"))
-    assert sb.facts.hit_this_turn is True
+    assert ("p1", "p1a") in sb.facts.attacked_by_this_turn
     # next turn: cleared
     bs.update(E.Turn(n=2))
-    assert sb.facts.hit_this_turn is False
+    assert sb.facts.attacked_by_this_turn == set()
 
 
 def test_zero_damage_hit_does_not_set_hit_this_turn():
     """Fork avalanche gate (moves.ts:914 ``p.damage > 0``): a resisted or
-    immune hit (delta 0) must NOT set ``hit_this_turn`` — the fork never
+    immune hit (delta 0) must NOT record the attacker — the fork never
     doubles off a 0-damage entry."""
     own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
                    "item": "lifeorb", "ability": "solarpower"}}
@@ -603,9 +604,40 @@ def test_zero_damage_hit_does_not_set_hit_this_turn():
         target_side="p2", target_slot="p2a", hp_after=299, maxhp=299,
         ko=False, source_kind="move", move="flamethrower",
         source_side="p1", source_slot="p1a"))
-    assert sb.facts.hit_this_turn is False
-    spec = _move_with_state("avalanche", sb.facts)
+    assert sb.facts.attacked_by_this_turn == set()
+    spec = _move_with_state("avalanche", sb.facts, defender=("p1", "p1a"))
     assert "hitThisTurn" not in spec
+
+
+def test_hit_this_turn_is_per_source():
+    """The avalanche/revenge gate is PER-SOURCE (fork moves.ts:912-915 /
+    15086-15088: ``attackedBy.some(p => p.source === target && p.damage > 0 &&
+    p.thisTurn)``): Avalanche doubles only if THE TARGET hit the user this turn
+    — not merely any mon. So if p1a hit me, Avalanche on p1a doubles, but
+    Avalanche on a DIFFERENT mon (p1b, which did not hit me) does not."""
+    own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
+                   "item": "lifeorb", "ability": "solarpower"},
+           "p1b": {"name": "garchomp", "nature": "Jolly", "evs": {"atk": 252},
+                   "item": "lifeorb", "ability": "sandrushing"}}
+    bs = BeliefState("gen9ou", own_team=own)
+    sb = install(bs, "p2a", "blastoise", [cand()])
+    # only p1a hit me this turn (p1b did not)
+    bs.update(E.DamageObserved(
+        target_side="p2", target_slot="p2a", hp_after=204, maxhp=299,
+        ko=False, source_kind="move", move="flamethrower",
+        source_side="p1", source_slot="p1a"))
+    assert sb.facts.attacked_by_this_turn == {("p1", "p1a")}
+    # the observation still exposes the model-facing bool (was hit at all)
+    assert bs.get_context()["opponent"]["p2a"]["hit_this_turn"] is True
+    # Avalanche on p1a (the mon that hit me) -> doubles
+    on_p1a = _move_with_state("avalanche", sb.facts, defender=("p1", "p1a"))
+    assert on_p1a["hitThisTurn"] is True
+    # Avalanche on p1b (a DIFFERENT mon) -> does NOT double (the per-source gate)
+    on_p1b = _move_with_state("avalanche", sb.facts, defender=("p1", "p1b"))
+    assert "hitThisTurn" not in on_p1b
+    # next turn: the per-source set clears too
+    bs.update(E.Turn(n=2))
+    assert sb.facts.attacked_by_this_turn == set()
 
 
 def test_last_move_failed_set_and_turn_reset():
