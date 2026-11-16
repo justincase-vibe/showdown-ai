@@ -362,6 +362,16 @@ def test_adapter_noise_and_empty_lines_are_ignored():
     assert events_from_log(lines) == []
 
 
+def test_adapter_prepare_line_is_ignored():
+    # |-prepare|ATTACKER|MOVE (SIM-PROTOCOL.md:594) is the client charge/aim
+    # animation line — the real move is the |move| line we DO map. It must be
+    # ignored, NOT surfaced as Unknown (the 3.7 "benign prepare" Unknowns).
+    evs = events_from_log(["|-prepare|p1a: Garchomp|Focus Punch|p2a: Charizard"])
+    assert evs == []
+    # and a genuinely-unknown tag still surfaces (the bug-catcher stays live)
+    assert _types(events_from_log(["|-totally-bogus-tag|p1a: X|42"])) == ["unknown"]
+
+
 def test_adapter_unknown_is_surfaced():
     # A line with a tag we neither map nor ignore must surface as Unknown.
     evs = events_from_log(["|-totally-bogus-tag|p1a: X|42"])

@@ -501,11 +501,12 @@ class BeliefState:
             block["top_moves"] = [
                 m for m, _ in sorted(move_counts.items(), key=lambda x: -x[1])[:4]
             ]
-            # confidence (1 - normalized entropy)
+            # confidence (1 - normalized entropy), clamped to [0,1] so a
+            # floating-point entropy a hair above 1.0 can't render as -0.0 / >1.0
             import math
             p = sb.posterior
             ent = -sum(pi * math.log2(pi) for pi in p if pi > 0) / max(1, math.log2(len(p)))
-            block["confidence"] = round(1.0 - ent, 4)
+            block["confidence"] = round(max(0.0, min(1.0, 1.0 - ent)), 4)
             ctx["opponent"][slot] = block
         return ctx
 
@@ -714,10 +715,20 @@ class BeliefState:
             if name in self.field:
                 self.field[name][side] = ev.active
             return False
-        # per-side: layered (spikes 1-3, toxic spikes 1-2)
+        # per-side: layered (spikes 1-3, toxic spikes 1-2). The fork emits ONE
+        # |-sidestart line PER LAYER with no count in the line (moves.js:17536-17543:
+        # onSideStart sets layers=1 + emit; onRestart does layers++ + the SAME
+        # emit; caps at 3 Spikes / 2 Toxic Spikes), so the layer count is the
+        # number of start lines. Count them here (capped at the fork's cap) and
+        # reset that side to 0 on the -sideend line. (Was a 0/1 bool — it
+        # collapsed 2-3 Spikes to "present", under-reporting hazard damage.)
         if name in ("spikes", "toxicspikes"):
             if name in self.field:
-                self.field[name][side] = 1 if ev.active else 0
+                cap = 3 if name == "spikes" else 2
+                if ev.active:
+                    self.field[name][side] = min(cap, (self.field[name][side] or 0) + 1)
+                else:
+                    self.field[name][side] = 0
             return False
         return False
 

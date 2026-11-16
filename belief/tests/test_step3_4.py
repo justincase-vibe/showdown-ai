@@ -355,6 +355,43 @@ def test_field_and_tailwind_expiry():
     assert bs.field["weather"] is None
 
 
+def test_spikes_and_toxicspikes_track_layer_count():
+    """The fork emits ONE |-sidestart line PER Spikes / Toxic-Spikes layer (no
+    count in the line; moves.js:17536-17543: onSideStart sets layers=1 + emit,
+    onRestart does layers++ + the SAME emit). The belief must therefore COUNT the
+    start lines: Spikes 0->1->2->3 (cap 3), Toxic Spikes 0->1->2 (cap 2), and a
+    -sideend line resets that side to 0. The old code collapsed both to a 0/1
+    bool, so 2-3 Spikes read as "present" (hazard damage under-reported)."""
+    bs = BeliefState("gen9ou", own_team={})
+    for _ in range(3):
+        bs.update(E.FieldEffectChanged(name="spikes", side="p2", active=True))
+    assert bs.field["spikes"]["p2"] == 3
+    # a 4th start can't exceed the fork's cap of 3
+    bs.update(E.FieldEffectChanged(name="spikes", side="p2", active=True))
+    assert bs.field["spikes"]["p2"] == 3
+    # Toxic Spikes cap at 2
+    for _ in range(3):
+        bs.update(E.FieldEffectChanged(name="toxicspikes", side="p1", active=True))
+    assert bs.field["toxicspikes"]["p1"] == 2
+    # the observation carries the true layer count
+    assert bs.get_context()["field"]["spikes"]["p2"] == 3
+    # a -sideend line (hazard cleared) resets that side to 0
+    bs.update(E.FieldEffectChanged(name="spikes", side="p2", active=False))
+    assert bs.field["spikes"]["p2"] == 0
+    assert bs.get_context()["field"]["spikes"]["p2"] == 0
+
+
+def test_confidence_clamped_to_unit_interval():
+    """confidence = 1 - normalized entropy must stay in [0,1]; a floating-point
+    entropy a hair above 1.0 used to round to -0.0 on the observation."""
+    bs = BeliefState("gen9ou", own_team={})
+    install(bs, "p2a", "gengar", [cand(), cand()])
+    bs.update(E.SwitchIn(side="p2", slot="p2a", species="gengar", hp=170, maxhp=170))
+    conf = bs.get_context()["opponent"]["p2a"]["confidence"]
+    assert 0.0 <= conf <= 1.0
+    assert conf == abs(conf)  # never -0.0
+
+
 def test_residual_damage_updates_fact_but_no_set_evidence():
     """Residual / unattributable damage (no move source) still updates the HP fact
     and records the last hit, but produces NO set-belief evidence (3.4-6: deferred

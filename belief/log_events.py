@@ -73,9 +73,12 @@ IGNORED_TAGS = frozenset({
     "team", "pokeball", "t:", "gametype", "clearpoke", "poke", "teampreview",
     "showteam", "rated", "chat", "message", "-message", "html", "debug",
     "bigerror", "detailschange",
-    # visual/ambient effects (no set evidence)
+    # visual/ambient effects (no set evidence). `-prepare` (SIM-PROTOCOL.md:594
+    # |-prepare|ATTACKER|MOVE) is the client charge/aim animation line — the real
+    # move is the |move| line we DO map, so it adds no belief evidence and is
+    # ignored (not Unknown). Was surfacing as the 3.7 "benign prepare" Unknowns.
     "-center", "-block", "-activate", "-clearmessage", "-singlemove",
-    "-mustrecharge", "-warpplate", "-clearspikes",
+    "-mustrecharge", "-warpplate", "-clearspikes", "-prepare",
     # `-sidestart` is NOT here — it is checked first in _map (the Tailwind
     # start line is the speed-order input for 3.4; other side-condition
     # starts stay ignored).
