@@ -331,3 +331,59 @@ def speed_of(mon: Dict, fmt: Optional[str] = None, tailwind: bool = False,
         return calc.effective_speed(mon, fmt=fmt, gen=gen, tailwind=tailwind, field=field)
 
     return _cached(key, _compute)
+
+
+# ══════════════════ 3.6 SOFT evidence: max-HP consistency ══════════════════
+#
+# The switch-in line (`hp/maxhp`) reveals the mon's max HP (verified in 3.1: the
+# adapter learns it from the opponent's switch-in, incl. the maxhp==100 dedupe and
+# slot-reuse cases). max HP is a FUNCTION of the candidate's HP-EV spread, so the
+# observed max HP is EV evidence: it rules out any candidate whose spread could not
+# produce that much HP, and confirms one that can. This is the clean, IV-safe form
+# of the "residual damage (burn/poison)" signal from 3.4 decision #6 — a burn deals
+# max(1, floor(maxhp/16)) and a poison max(1, floor(maxhp/8)), so BOTH are just
+# another observation of the same max HP; the switch-in line is the direct one.
+#
+# The calc's `maxhp` field is the DEFENDER's maxHP (node_calc.js `defender.maxHP()`),
+# independent of the attacker — verified immune-safe (a Normal-immune defender still
+# returns its maxhp). So we read it with a fixed generic probe attacker (any valid
+# (attacker, defender, move) tuple; the attacker never affects the value).
+
+#: fixed probe attacker for reading the defender's max HP — generic (a Normal-type
+#: mon / Tackle) so it carries no damage-side meaning of its own.
+_MAXHP_PROBE_ATTACKER: Dict[str, Any] = {"name": "pikachu", "ability": "static", "evs": {}}
+
+
+def maxhp_for(candidate: Dict, species: str, field: Optional[Dict] = None,
+              fmt: Optional[str] = None, gen: int = 9) -> int:
+    """A candidate's max HP (IV 31 — the calc's default) as a function of its EV
+    spread, read straight off the Step-2 calc's ``maxhp`` field (the DEFENDER's
+    maxHP, so the probe attacker is irrelevant to the value).
+
+    Deduped in ``_CACHE``: candidates sharing an EV spread cost ONE Node spawn
+    each (same cost profile as the 3.4 damage window — the 3.8 bench decides if it
+    matters; do NOT pre-optimize). Because the calc uses IV 31 (the maximum IV),
+    this is the mon's maxHP *maximum* for that EV spread — the basis of the
+    one-sided consistency rule below (a real mon can only have <= this HP for the
+    same spread, so we never rule out a spread that could actually be right).
+    """
+    mon = mon_options(candidate, name=species)
+    return int(window_for(_MAXHP_PROBE_ATTACKER, mon, "tackle", field, fmt, gen)["maxhp"])
+
+
+def maxhp_likelihood(candidate_maxhp: int, observed_maxhp: int) -> float:
+    """One-sided max-HP consistency (IV-safe — no false rule-outs):
+
+    * the calc's ``maxhp`` (IV 31) is the mon's maxHP *maximum* for that EV spread,
+      so ``observed > candidate`` is IMPOSSIBLE -> ruled out (0 -> EPS floor);
+    * ``observed <= candidate`` is CONSISTENT (the real mon may run lower IVs, so
+      its true max HP is at most the IV-31 value) -> 1.0.
+
+    Deliberately one-sided, NOT a tight two-sided band: a higher-HP-EV candidate
+    stays consistent even when it is not the true spread, so a candidate that
+    *could* be right is never ruled out. ``observed_maxhp <= 0`` (no max HP known
+    yet) is consistent with everything — no signal, no harm.
+    """
+    if observed_maxhp <= 0:
+        return 1.0
+    return 1.0 if observed_maxhp <= candidate_maxhp else 0.0

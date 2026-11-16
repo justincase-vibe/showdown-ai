@@ -476,6 +476,10 @@ class BeliefState:
         facts.reset()
         facts.maxhp = ev.maxhp or None
         facts.hp = ev.hp or ev.maxhp or None
+        # 3.6 — the switch-in line reveals the mon's max HP: apply it as EV
+        # evidence on the p2 slot (one-sided, IV-safe, no false rule-outs).
+        if ev.side == "p2" and facts.maxhp:
+            self._apply_maxhp_evidence(ev.slot, facts.maxhp)
 
     def _apply_status(self, ev) -> None:
         facts = self._facts_for(ev.side, ev.slot)
@@ -578,6 +582,30 @@ class BeliefState:
         if facts is not None and facts.hp is not None and facts.maxhp:
             return max(0.0, min(1.0, facts.hp / facts.maxhp))
         return None
+
+    # ══════════════════ 3.6 SOFT evidence: max-HP consistency ══════════════════
+
+    def _apply_maxhp_evidence(self, slot: str, observed_maxhp: int) -> bool:
+        """3.6 — the switch-in line reveals the mon's max HP; use it as EV evidence.
+
+        Rules out candidates whose HP-EV spread could not produce that much HP
+        (their IV-31 maxHP is lower) and confirms one that can (one-sided,
+        IV-safe — never a false rule-out). Applied on the p2 slot the switch-in
+        names. Idempotent: re-applying the same observed max HP to an already
+        narrowed posterior leaves consistent candidates at the same relative
+        weight (a candidate that floors at EPS stays floored; the confirmed one
+        stays at ~1), so a same-mon re-entry is a no-op, not a double-count.
+        """
+        sb = self._slots.get(slot)
+        if sb is None or not observed_maxhp:
+            return False
+        field = ev.calc_field(self.field)
+
+        def lik(c: Dict) -> float:
+            return ev.maxhp_likelihood(ev.maxhp_for(c, sb.species, field, self.fmt),
+                                       observed_maxhp)
+        ev.apply_evidence(sb.candidates, lik)
+        return True
 
     # ══════════════════ 3.4 SOFT evidence: speed order (3.4-4) ══════════════════
 
