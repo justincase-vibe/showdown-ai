@@ -536,6 +536,17 @@ class BeliefState:
         if isinstance(event, E.MoveUsed):
             self._turn_buffer.append(("m", event.side, event.slot, event.move))
             return self._route_set_evidence(event)
+        if isinstance(event, E.MoveFailed):
+            # stompingtantrum/temperflare gate (fork moves.ts:18050/19186:
+            # `moveLastTurnResult === false`): the user's last move failed ->
+            # next turn's BP x2. Set on the mon whose move failed; cleared by
+            # turn_reset() on E.Turn. Facts only (a failure is not set evidence).
+            facts = self._facts_for(event.side, event.slot)
+            if facts is None and event.side != "p2":
+                facts = self.own_facts.setdefault(event.slot, Facts())
+            if facts is not None:
+                facts.last_move_failed = True
+            return False
         if isinstance(event, (E.AbilityRevealed, E.ItemRevealed)):
             return self._route_set_evidence(event)
         if isinstance(event, E.TeraUsed):
@@ -714,6 +725,12 @@ class BeliefState:
             # it, and a later Counter/Mirror Coat calc would have reflected the tick).
             if ev.source_kind == "move":
                 facts.last_hit = delta
+                # avalanche gate (fork moves.ts:912-915: `p.damage > 0`): only a
+                # hit that actually dealt damage sets the flag — a resisted or
+                # immune (0-damage) hit must not, mirroring the fork's some()
+                # over attackedBy. Cleared by turn_reset() on E.Turn.
+                if delta > 0:
+                    facts.hit_this_turn = True
         # evidence only for attributable MOVE-source damage with a DISTINCT
         # attacker; residual/unattributable lines update the fact only (3.4-6)
         if (ev.source_kind != "move" or not ev.move or not ev.source_slot

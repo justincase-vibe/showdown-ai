@@ -49,7 +49,7 @@ import pytest
 from belief import events as E
 from belief import evidence as ev
 from belief.log_events import LogAdapter
-from belief.state import BeliefState, SlotBelief
+from belief.state import BeliefState, SlotBelief, _move_with_state
 
 ROOT = Path(__file__).resolve().parents[2]  # belief/tests/x.py -> project root
 
@@ -475,6 +475,76 @@ def test_reflector_preserves_narrowed_posterior():
 
 
 # ═══════════════════════════════ live integration ═════════════════════════════
+
+def test_hit_this_turn_set_and_turn_reset():
+    """T5 wiring (2026-11-16): ``hit_this_turn`` (the avalanche gate) is set on
+    the TARGET of a real move hit and cleared on E.Turn. The fork's avalanche
+    bpCallback (moves.ts:912-915) doubles only if ``p.damage > 0`` from the
+    target this turn, so a 0-damage follow-up must not clear an already-set
+    flag (the fork's ``some()`` over attackedBy keeps the 95-damage entry)."""
+    own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
+                   "item": "lifeorb", "ability": "solarpower"}}
+    bs = BeliefState("gen9ou", own_team=own)
+    sb = install(bs, "p2a", "blastoise", [cand()])
+    # a real hit (delta 95 > 0) on the target -> flag set
+    bs.update(E.DamageObserved(
+        target_side="p2", target_slot="p2a", hp_after=204, maxhp=299,
+        ko=False, source_kind="move", move="flamethrower",
+        source_side="p1", source_slot="p1a"))
+    assert sb.facts.hit_this_turn is True
+    # the state pipe must hand it to the calc (avalanche reads hitThisTurn)
+    spec = _move_with_state("avalanche", sb.facts)
+    assert spec["name"] == "avalanche" and spec["hitThisTurn"] is True
+    # a 0-damage follow-up hit (resist/immune) must NOT clear it
+    bs.update(E.DamageObserved(
+        target_side="p2", target_slot="p2a", hp_after=204, maxhp=299,
+        ko=False, source_kind="move", move="thunderbolt",
+        source_side="p1", source_slot="p1a"))
+    assert sb.facts.hit_this_turn is True
+    # next turn: cleared
+    bs.update(E.Turn(n=2))
+    assert sb.facts.hit_this_turn is False
+
+
+def test_zero_damage_hit_does_not_set_hit_this_turn():
+    """Fork avalanche gate (moves.ts:914 ``p.damage > 0``): a resisted or
+    immune hit (delta 0) must NOT set ``hit_this_turn`` — the fork never
+    doubles off a 0-damage entry."""
+    own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
+                   "item": "lifeorb", "ability": "solarpower"}}
+    bs = BeliefState("gen9ou", own_team=own)
+    sb = install(bs, "p2a", "blastoise", [cand()])
+    bs.update(E.DamageObserved(
+        target_side="p2", target_slot="p2a", hp_after=299, maxhp=299,
+        ko=False, source_kind="move", move="flamethrower",
+        source_side="p1", source_slot="p1a"))
+    assert sb.facts.hit_this_turn is False
+    spec = _move_with_state("avalanche", sb.facts)
+    assert "hitThisTurn" not in spec
+
+
+def test_last_move_failed_set_and_turn_reset():
+    """T5 wiring (2026-11-16): ``last_move_failed`` (the stompingtantrum /
+    temperflare gate, fork moves.ts:18050/19186 ``moveLastTurnResult === false``)
+    is set on the mon whose move failed — both sides — and cleared on E.Turn."""
+    own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
+                   "item": "lifeorb", "ability": "solarpower"}}
+    bs = BeliefState("gen9ou", own_team=own)
+    sb = install(bs, "p2a", "blastoise", [cand()])
+    # opponent side: set on the p2 slot's facts
+    bs.update(E.MoveFailed(side="p2", slot="p2a", move="struggle"))
+    assert sb.facts.last_move_failed is True
+    # the state pipe must hand it to the calc (stompingtantrum reads it)
+    spec = _move_with_state("stompingtantrum", sb.facts)
+    assert spec["lastMoveFailed"] is True
+    # own side: own_facts created on demand (same pattern as the other fact handlers)
+    bs.update(E.MoveFailed(side="p1", slot="p1a", move="struggle"))
+    assert bs.own_facts["p1a"].last_move_failed is True
+    # next turn: both cleared
+    bs.update(E.Turn(n=2))
+    assert sb.facts.last_move_failed is False
+    assert bs.own_facts["p1a"].last_move_failed is False
+
 
 def _run_smoke_battle():
     """Run the seeded fork battle keeper and return its raw log lines (shared with
