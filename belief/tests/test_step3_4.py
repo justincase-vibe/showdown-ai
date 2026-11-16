@@ -49,7 +49,8 @@ import pytest
 from belief import events as E
 from belief import evidence as ev
 from belief.log_events import LogAdapter
-from belief.state import BeliefState, SlotBelief, _move_with_state
+from belief.state import BeliefState, SlotBelief, _move_category, _move_with_state
+from legality import formats
 
 ROOT = Path(__file__).resolve().parents[2]  # belief/tests/x.py -> project root
 
@@ -604,6 +605,23 @@ def test_reflector_stale_hit_not_reflected():
         assert "lastHitDamage" not in spec_stale, f"stale over-report: {spec_stale}"
     else:
         assert spec_stale == "counter"
+
+
+def test_reflector_gate_category_is_per_gen():
+    """A1 (2026-11-16): the reflector gate records the hit's category PER-GEN
+    (D55), sourced via the format's engine key — not the gen-9 base row.
+    Dragon Claw is Special in gen 1-3 (type-based physical/special split),
+    Physical gen 4+, so the SAME move name classifies differently by generation.
+    This pins the format → engine-key → per-gen-category wiring the D55 gate
+    consumes (belief/state.py ``_move_category(ev.move, formats.engine_key(fmt))``).
+    """
+    # via the real wiring path (format -> engine key -> per-gen category)
+    assert _move_category("dragonclaw", formats.engine_key("gen1ou")) == "Special"
+    assert _move_category("dragonclaw", formats.engine_key("gen9bss3v3")) == "Physical"
+    # gen 3 directly: the type-based split still makes it special
+    assert _move_category("dragonclaw", 3) == "Special"
+    # unknown move -> None (gate stays closed), any gen
+    assert _move_category("nonexistentmove123", 9) is None
 
 
 def test_reflector_category_gate():

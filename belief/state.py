@@ -35,7 +35,7 @@ import re
 from dataclasses import dataclass, field as _dc_field
 from typing import Any, Dict, List, Optional, Union
 
-from legality import db, lookup
+from legality import db, lookup, formats
 
 from . import events as E          # typed events (3.1) — update() dispatches on these
 from . import evidence as ev      # shared evidence engine (3.2) + SOFT calc bridge (3.4)
@@ -146,15 +146,17 @@ _REFLECTOR_REQUIRES = {
 }
 
 
-def _move_category(move_name: Optional[str]) -> Optional[str]:
+def _move_category(move_name: Optional[str], gen: int) -> Optional[str]:
     """The category (``Physical``/``Special``/``Status``) of a move, from the DB
-    (source of truth for raw move data). ``None`` for an unknown/absent move —
-    the reflector category gate then can't confirm a match and stays closed.
-    Only called on move-source hits (rare), so the per-call lookup is fine."""
+    (source of truth for raw move data), PER-GEN (``gen`` = the @smogon/calc
+    engine key). ``None`` for an unknown/absent move — the reflector category
+    gate then can't confirm a match and stays closed. Only called on move-source
+    hits (rare), so the per-call lookup is fine. Per-gen because category shifts
+    across gens (Dragon Claw is Special in gen 1-3, Physical gen 4+)."""
     if not move_name:
         return None
     try:
-        return lookup.get_move(move_name).get("category")
+        return lookup.get_move(move_name, gen).get("category")
     except KeyError:
         return None
 
@@ -862,7 +864,7 @@ class BeliefState:
                 # the hit's category (D55 reflector gate): the fork reflects only
                 # a matching category (Counter/Metal Burst physical, Mirror Coat/
                 # Comeuppance special), so record what kind of move set last_hit.
-                facts.last_hit_category = _move_category(ev.move)
+                facts.last_hit_category = _move_category(ev.move, formats.engine_key(self.fmt))
                 # avalanche gate (fork moves.ts:912-915: `p.damage > 0`): only a
                 # hit that actually dealt damage sets the flag — a resisted or
                 # immune (0-damage) hit must not, mirroring the fork's some()
@@ -991,8 +993,9 @@ class BeliefState:
         _, side_a, slot_a, move_a = a
         _, side_b, slot_b, move_b = b
         try:
-            pa = lookup.get_move(move_a)["priority"]
-            pb = lookup.get_move(move_b)["priority"]
+            gen = formats.engine_key(self.fmt)
+            pa = lookup.get_move(move_a, gen)["priority"]
+            pb = lookup.get_move(move_b, gen)["priority"]
         except KeyError:
             return False  # unknown move — no priority, no evidence
         if pa != pb:

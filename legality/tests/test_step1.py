@@ -64,6 +64,46 @@ def test_tailwind_flag():
     assert lookup.get_move("Tailwind")["is_tailwind"] is True
 
 
+# ── per-gen move lookups (A1: move_gen overrides, engine key 0-9) ──────
+# gen is the @smogon/calc ENGINE KEY (0 = champions, 1-9 = gen). The gen-9
+# ``move`` row is the base; a move_gen override (extract_move_gen.js, fork-
+# sourced) replaces the per-gen data where the move changed.
+def test_per_gen_category_dragonclaw():
+    # Dragon Claw is SPECIAL in gen 1-3 (type-based split), PHYSICAL gen 4+.
+    assert lookup.get_move("Dragon Claw", 1)["category"] == "Special"
+    assert lookup.get_move("Dragon Claw", 2)["category"] == "Special"
+    assert lookup.get_move("Dragon Claw", 3)["category"] == "Special"
+    assert lookup.get_move("Dragon Claw", 4)["category"] == "Physical"
+    assert lookup.get_move("Dragon Claw", 9)["category"] == "Physical"
+
+
+def test_per_gen_priority_protect():
+    # Protect priority: 2 (gen 1-2), 3 (gen 3-4), 4 (gen 5+).
+    assert lookup.get_move("Protect", 1)["priority"] == 2
+    assert lookup.get_move("Protect", 2)["priority"] == 2
+    assert lookup.get_move("Protect", 3)["priority"] == 3
+    assert lookup.get_move("Protect", 4)["priority"] == 3
+    assert lookup.get_move("Protect", 9)["priority"] == 4
+
+
+def test_per_gen_power_champions_vs_gen9():
+    # Slash is 80 BP in champions (engine key 0), 70 in gen 9 (base).
+    assert lookup.get_move("Slash", 0)["power"] == 80
+    assert lookup.get_move("Slash", 9)["power"] == 70
+
+
+def test_per_gen_default_gen9_and_flags_preserved():
+    # No-override path: gen 9 (base) values unchanged; effect flags stay on the
+    # base row (they are gen-9; the calc models them per-gen via its JSON tables).
+    m = lookup.get_move("Dragon Claw", 9)
+    assert m["category"] == "Physical"
+    assert m["power"] == 80
+    assert m["is_hazard"] is False and m["is_screen"] is False
+    # an override row still carries the base row's effect flags
+    g1 = lookup.get_move("Dragon Claw", 1)
+    assert g1["category"] == "Special" and g1["is_hazard"] is False
+
+
 def test_hiddenpower_variants_collapse_to_base_id():
     m = lookup.get_move("Hidden Power")
     assert m["id"] == "hiddenpower"

@@ -17,7 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMA_PATH = os.path.join(HERE, "schema.sql")
 DB_PATH = os.environ.get("LEGALITY_DB", os.path.join(HERE, "legality.db"))
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 #: tables that must never be wiped (provenance + schema bookkeeping)
 PROTECTED_TABLES = frozenset({"meta", "ingest_log"})
 #: tables with data (for status + wipe whitelist)
@@ -63,6 +63,14 @@ def bootstrap(db_path: str = DB_PATH, force: bool = False) -> Dict[str, Any]:
         for col in ("min_level", "max_level", "adjust_level", "adjust_level_down"):
             if col not in existing:
                 conn.execute(f"ALTER TABLE format ADD COLUMN {col} INTEGER")
+
+        # v5 (A1): move_gen per-gen category + priority. Add to pre-v5 DBs so a
+        # live DB migrates without a full rebuild (same ALTER pattern as v4).
+        existing_mg = {r[1] for r in conn.execute("PRAGMA table_info(move_gen)")}
+        if "category" not in existing_mg:
+            conn.execute("ALTER TABLE move_gen ADD COLUMN category TEXT")
+        if "priority" not in existing_mg:
+            conn.execute("ALTER TABLE move_gen ADD COLUMN priority INTEGER")
 
         # upsert format registry
         cols = ["id", "name", "gen", "tier", "game_type", "min_team", "max_team",

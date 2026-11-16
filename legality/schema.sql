@@ -50,13 +50,25 @@ CREATE TABLE IF NOT EXISTS move (
   recoil         INTEGER -- recoil fraction x100; NULL if none
 );
 
+-- v5 (A1): move_gen gains category + priority. Its ``gen`` column is the
+-- @smogon/calc ENGINE KEY (0 = champions, 1-9 = gen), NOT the raw generation:
+-- move data is mechanics-scoped (champions reuses gen-9 species but different
+-- moves — e.g. Slash bp 70 -> 80), matching formats.engine_key() and the calc's
+-- per-engine-key tables (special_bp_moves.json / recoil_drain_moves.json).
+-- Populated per engine key from the fork (extract_move_gen.js): type/category/
+-- power/accuracy/pp/priority/desc for every move that exists in that gen.
+-- lookup.get_move(name, gen) merges this override onto the gen-9 ``move`` row
+-- (which still carries the effect flags side_condition/boosts/drain/recoil; the
+-- calc models those per-gen via its JSON tables).
 CREATE TABLE IF NOT EXISTS move_gen (
   move_id    TEXT NOT NULL REFERENCES move(id),
   gen        INTEGER NOT NULL,
   type       TEXT,
+  category   TEXT,
   power      INTEGER,
   accuracy   INTEGER,
   pp         INTEGER,
+  priority   INTEGER,
   desc       TEXT,
   PRIMARY KEY (move_id, gen)
 );

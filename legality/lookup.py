@@ -10,8 +10,11 @@ Read-only query layer over ``legality.db`` for the bot:
     battle_level(fmt, level=None)   -> level a mon fights at in the format (D33)
 
 Names accept display names or ids (normalized with Showdown ``toID``).
-``gen`` defaults to 9 (the project target; the move table holds current-gen
-properties — per-gen overrides land in ``move_gen`` later).
+``gen`` for ``get_move`` is the @smogon/calc ENGINE KEY (0 = champions, 1-9 =
+gen) — move data is mechanics-scoped (champions reuses gen-9 species but
+different moves). The gen-9 ``move`` row is the base; a ``move_gen`` override
+(extract_move_gen.js, fork-sourced) replaces the per-gen data. ``get_species``
+and ``get_type_chart`` still take the raw generation (1-9).
 
 Raises ``KeyError`` for unknown moves/species; returns ``[]`` where a
 "no data" answer is meaningful (no sets for a species, …).
@@ -36,8 +39,21 @@ def to_id(name: str) -> str:
 
 
 # ── moves ────────────────────────────────────────────────────────────
+#: data columns a move_gen override may carry (the rest — id/name/desc/
+#: side_condition/boosts/drain/recoil — stay on the gen-9 base row).
+_MOVE_GEN_OVERRIDES = ("type", "category", "power", "accuracy", "pp", "priority")
+
+
 def get_move(name: str, gen: int = 9) -> Dict[str, Any]:
-    """Move properties + parsed effect flags.
+    """Move properties + parsed effect flags, PER-GEN.
+
+    ``gen`` is the @smogon/calc ENGINE KEY (0 = champions, 1-9 = gen; see
+    ``legality.formats.engine_key``). The gen-9 ``move`` row is the base; a
+    ``move_gen`` override (extract_move_gen.js, fork-sourced) replaces the
+    per-gen data where the move changed — e.g. Dragon Claw is Special in gen
+    1-3, Protect is pri 2 in gen 1-2 / pri 3 in gen 3-4, Slash is 80 BP in
+    champions. Effect flags (side_condition/boosts/drain/recoil) stay gen-9 on
+    the base row (the calc models those per-gen via its JSON tables).
 
     Returns a dict with: id, name, type, category, power, accuracy, pp,
     priority, desc, boosts (parsed JSON, e.g. {"atk": 2} or None),
@@ -47,10 +63,21 @@ def get_move(name: str, gen: int = 9) -> Dict[str, Any]:
     mid = to_id(name)
     conn = db.connect()
     try:
-        r = conn.execute("SELECT * FROM move WHERE id=?", (mid,)).fetchone()
-        if r is None:
+        base = conn.execute("SELECT * FROM move WHERE id=?", (mid,)).fetchone()
+        if base is None:
             raise KeyError(f"unknown move: {name!r}")
-        d = dict(r)
+        d = dict(base)
+        # A1: per-gen override — replace the data columns where the move changed
+        # in this gen. The override row is self-contained (all 6 data columns
+        # present, incl. NULL for a status move), so override when the column is
+        # in the row (a NULL is a real change, e.g. damage -> status that gen).
+        ov = conn.execute(
+            "SELECT * FROM move_gen WHERE move_id=? AND gen=?", (mid, gen)).fetchone()
+        if ov is not None:
+            o = dict(ov)
+            for col in _MOVE_GEN_OVERRIDES:
+                if col in o:
+                    d[col] = o[col]
         d["boosts"] = json.loads(d["boosts"]) if d.get("boosts") else None
         sc = d.get("side_condition")
         d["is_hazard"] = sc in HAZARDS
