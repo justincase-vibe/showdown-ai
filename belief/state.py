@@ -74,6 +74,11 @@ class Facts:
     # Stockpile LAYERS — a fork VOLATILE (no duration): they persist across
     # turns, cleared only by switch-out (clearVolatiles) or a new mon.
     stockpile_layers: int = 0
+    # Used a Protect-family move (Protect/Detect/Spiky Shield/King's Shield/
+    # Guard Split) — PER-TURN (the fork clears the protect volatile at end of
+    # turn, so it only blocks the turn it's used). Doubles-critical: a protected
+    # opponent can't be hit, so attacking it wastes the move.
+    used_protect: bool = False
 
     def reset(self) -> None:
         """Full wipe (a NEW mon takes the slot)."""
@@ -85,6 +90,7 @@ class Facts:
         self.tera = None
         self.last_hit = None
         self.stockpile_layers = 0
+        self.used_protect = False
         self.turn_reset()
 
     def turn_reset(self) -> None:
@@ -94,9 +100,20 @@ class Facts:
         switch-out / new mon), hp, maxhp, statuses, boosts, moves_used, tera."""
         self.hit_this_turn = False
         self.last_move_failed = False
+        self.used_protect = False
 
 #: EV stat tokens as they appear in the DB spread strings ("252 HP / 216 Def")
 _EV_TOKEN = {"hp": "hp", "atk": "atk", "def": "def", "spa": "spa", "spd": "spd", "spe": "spe"}
+
+#: The Protect-family moves (doubles-critical: block attacks on the user for the
+#: rest of the turn). We detect by MOVE NAME (already in MoveUsed) — the fork's
+#: volatile differs per move (protect/detect -> the "protect" volatile, spikyshield
+#: -> "spikyshield", guardsplit -> the protect flag; moves.js:14010/3579/17556/7991),
+#: so the move name is the one stable signal. "used_protect" is set for the USER.
+#: Minor edges (both rare-in-BSS, per-turn, low impact): a FAILED protect-family
+#: use still sets it (these stalling moves almost always land), and Guard Split
+#: marks the user (the ally it shields is not separately marked).
+_PROTECT_FAMILY = frozenset({"protect", "detect", "kingsshield", "spikyshield", "guardsplit"})
 
 #: max legal moves drawn for fallback combos (bounds candidate-space size)
 _FALLBACK_MOVE_POOL = 8
@@ -440,7 +457,8 @@ class BeliefState:
             if facts is None:
                 return {"hp_frac": 0.0, "statuses": [], "boosts": {},
                         "moves": [], "last_hit": 0, "hit_this_turn": False,
-                        "last_move_failed": False, "stockpile": 0}
+                        "last_move_failed": False, "stockpile": 0,
+                        "used_protect": False}
             hp_frac = (facts.hp / facts.maxhp) if (facts.hp is not None and facts.maxhp) else 0.0
             return {
                 "hp_frac": round(hp_frac, 4),
@@ -452,6 +470,7 @@ class BeliefState:
                 "hit_this_turn": facts.hit_this_turn,
                 "last_move_failed": facts.last_move_failed,
                 "stockpile": facts.stockpile_layers,
+                "used_protect": facts.used_protect,
             }
 
         ctx: Dict = {
@@ -468,8 +487,10 @@ class BeliefState:
                 "lightscreen": {k: v for k, v in self.field["lightscreen"].items() if v},
                 "auroraveil": {k: v for k, v in self.field["auroraveil"].items() if v},
                 "spikes": dict(self.field["spikes"]),
+                "toxicspikes": dict(self.field["toxicspikes"]),
                 "stealthrock": {k: v for k, v in self.field["stealthrock"].items() if v},
                 "stickyweb": {k: v for k, v in self.field["stickyweb"].items() if v},
+                "safeguard": {k: v for k, v in self.field["safeguard"].items() if v},
             },
             "own": {},
             "opponent": {},
@@ -550,6 +571,16 @@ class BeliefState:
                 facts = self._facts_for(event.side, event.slot)
                 if facts is not None and facts.stockpile_layers < 3:
                     facts.stockpile_layers += 1
+            # Protect-family (doubles-critical): mark the user as protected for
+            # the turn (cleared by turn_reset). The observation is the signal —
+            # "don't waste an attack on a protected target." Own-side facts are
+            # created on-demand (same pattern as _set_hp / the MoveFailed branch).
+            if event.move in _PROTECT_FAMILY:
+                facts = self._facts_for(event.side, event.slot)
+                if facts is None and event.side != "p2":
+                    facts = self.own_facts.setdefault(event.slot, Facts())
+                if facts is not None:
+                    facts.used_protect = True
             return self._route_set_evidence(event)
         if isinstance(event, E.MoveFailed):
             # stompingtantrum/temperflare gate (fork moves.ts:18050/19186:

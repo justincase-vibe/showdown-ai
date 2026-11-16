@@ -88,7 +88,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 from legality import formats as _formats
 from legality import lookup as _lookup
@@ -140,6 +140,32 @@ def _node(request: Dict[str, Any]) -> Dict[str, Any]:
         raise RuntimeError(f"node_calc.js returned non-JSON: {out!r}") from e
     if "error" in data:
         raise RuntimeError(data["error"])
+    return data
+
+
+def _node_batch(requests: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Send a JSON ARRAY of requests to the Node CLI in ONE spawn and parse the
+    JSON ARRAY response (in order). Per-item failures come back as
+    ``{'error': str}`` — a single bad item does NOT abort the batch (the forward
+    eval keeps the good results). The single-request ``_node`` contract is
+    unchanged (one object in -> one object out)."""
+    proc = subprocess.run(
+        [_NODE, _SCRIPT],
+        input=json.dumps(list(requests)),
+        capture_output=True,
+        text=True,
+        timeout=60,  # one shared startup + N calcs; generous for large batches
+    )
+    out = proc.stdout.strip()
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"node_calc.js (batch) failed (exit {proc.returncode}): {out or proc.stderr.strip()}")
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError as e:  # pragma: no cover - defensive
+        raise RuntimeError(f"node_calc.js (batch) returned non-JSON: {out!r}") from e
+    if not isinstance(data, list):
+        raise RuntimeError(f"node_calc.js (batch) did not return a list: {out!r}")
     return data
 
 
@@ -228,6 +254,31 @@ def calc_damage(
         "field": field,
     }
     return _node(req)
+
+
+def calc_damage_many(items: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Batch N damage calcs in ONE Node spawn (the forward-eval path: my moves
+    x enemy mons, so 24+ calcs per decision instead of 24+ separate spawns).
+
+    Each ``items`` element is a dict with the SAME keys a single ``calc_damage``
+    call takes: ``attacker``, ``defender``, ``move`` (required) and optional
+    ``field``, ``fmt``, ``gen``. Returns a list IN ORDER — each entry is the
+    normal ``calc_damage`` result dict, or ``{'error': str}`` if that item
+    failed (one bad item does not sink the batch). The single ``calc_damage(...)
+    `` API is unchanged.
+    """
+    reqs: List[Dict[str, Any]] = []
+    for it in items:
+        fmt = it.get("fmt")
+        reqs.append({
+            "type": "damage",
+            "gen": _engine_key(it.get("gen", 9), fmt),
+            "attacker": _resolve_mon(it["attacker"], fmt),
+            "defender": _resolve_mon(it["defender"], fmt),
+            "move": _normalise_move(it["move"]),
+            "field": it.get("field"),
+        })
+    return _node_batch(reqs)
 
 
 def effective_speed(

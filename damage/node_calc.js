@@ -719,19 +719,36 @@ function main() {
       process.exit(1);
       return;
     }
-    let res;
-    try {
-      if (req.type === 'damage') res = handleDamage(req);
-      else if (req.type === 'speed') {
-        const gen = req.gen ?? 9;
-        res = { base: buildPokemon(gen, req.pokemon).stats.spe, speed: effectiveSpeed(gen, req.pokemon, !!req.tailwind, req.field) };
-      } else {
-        throw new Error('unknown request type: ' + req.type);
+    // ONE shared per-request dispatcher (no duplicated calc logic): damage or
+    // speed. SINGLE mode = one object in -> one object out (unchanged contract;
+    // a bad request -> {error} + exit 1, which the test suite relies on). BATCH
+    // mode = a JSON ARRAY of requests -> an array of results IN ORDER, with
+    // per-item isolation (one bad item -> {error} for that item; the rest still
+    // return). Batch is the forward-eval path (my moves x enemy mons in ONE
+    // spawn, instead of N spawns).
+    function dispatchOne(r) {
+      if (r.type === 'damage') return handleDamage(r);
+      if (r.type === 'speed') {
+        const gen = r.gen ?? 9;
+        return { base: buildPokemon(gen, r.pokemon).stats.spe, speed: effectiveSpeed(gen, r.pokemon, !!r.tailwind, r.field) };
       }
-    } catch (e) {
-      process.stdout.write(JSON.stringify({ error: e.message }));
-      process.exit(1);
-      return;
+      throw new Error('unknown request type: ' + (r && r.type));
+    }
+
+    let res;
+    if (Array.isArray(req)) {
+      res = req.map((r) => {
+        try { return dispatchOne(r); }
+        catch (e) { return { error: e.message }; }
+      });
+    } else {
+      try {
+        res = dispatchOne(req);
+      } catch (e) {
+        process.stdout.write(JSON.stringify({ error: e.message }));
+        process.exit(1);
+        return;
+      }
     }
     process.stdout.write(JSON.stringify(res));
   });

@@ -50,6 +50,36 @@ def rng(result):
     return (result["min"], result["max"])
 
 
+def test_calc_damage_many_batch_matches_individual():
+    """Batch mode (forward-eval path): N damage calcs in ONE Node spawn return
+    the SAME results, IN ORDER, as N individual calc_damage calls — and one bad
+    item yields {'error': ...} for just that item (the rest still return)."""
+    items = [
+        {"attacker": GARCH, "defender": TITAN, "move": "earthquake"},
+        {"attacker": CHARZ, "defender": BLAST, "move": "fireblast",
+         "field": {"weather": "Sun"}},
+        {"attacker": LUC, "defender": TITAN, "move": "closecombat"},
+    ]
+    batch = calc.calc_damage_many(items)
+    assert len(batch) == 3
+    for it, b in zip(items, batch):
+        single = calc.calc_damage(it["attacker"], it["defender"], it["move"],
+                                  field=it.get("field"))
+        assert b == single, f"batch != single for {it['move']}"
+
+    # a bad item (mon with no name) is isolated: {error} for it, the rest fine
+    mixed = [
+        {"attacker": GARCH, "defender": TITAN, "move": "earthquake"},
+        {"attacker": {"no_name": True}, "defender": TITAN, "move": "earthquake"},
+        {"attacker": LUC, "defender": TITAN, "move": "closecombat"},
+    ]
+    out = calc.calc_damage_many(mixed)
+    assert len(out) == 3
+    assert "min" in out[0] and "max" in out[0]      # good
+    assert "error" in out[1]                          # the bad one is isolated
+    assert "min" in out[2] and "max" in out[2]        # good
+
+
 # ── API surface ───────────────────────────────────────────────────────
 def test_result_shape():
     r = dmg(GARCH, TITAN, "earthquake")

@@ -381,6 +381,54 @@ def test_spikes_and_toxicspikes_track_layer_count():
     assert bs.get_context()["field"]["spikes"]["p2"] == 0
 
 
+def test_hazard_observation_includes_toxicspikes_and_safeguard():
+    """Toxic Spikes + Safeguard are tracked in ``self.field`` but were NOT
+    surfaced in ``get_context()`` (only spikes/stealthrock/stickyweb were) —
+    hazard state is now complete for the Step-4 observation (user: "if the
+    hazards are not correctly observed, please add it")."""
+    bs = BeliefState("gen9ou", own_team={})
+    bs.update(E.FieldEffectChanged(name="toxicspikes", side="p2", active=True))
+    bs.update(E.FieldEffectChanged(name="toxicspikes", side="p2", active=True))  # 2 layers
+    bs.update(E.FieldEffectChanged(name="safeguard", side="p1", active=True))
+    field = bs.get_context()["field"]
+    assert field["toxicspikes"]["p2"] == 2
+    assert field["safeguard"]["p1"] is True
+    # the other side reads as 0 (toxicspikes) / is filtered out (safeguard keeps
+    # only active sides)
+    assert field["toxicspikes"]["p1"] == 0
+    assert "p2" not in field["safeguard"]
+
+
+def test_used_protect_set_and_turn_reset():
+    """Protect-family moves (Protect/Detect/Spiky Shield/King's Shield/Guard
+    Split) set the user's used_protect for the turn (doubles-critical: don't
+    waste an attack on a protected target); a non-protect move does not; cleared
+    on E.Turn; surfaced on both own and opponent mon blocks."""
+    bs = BeliefState("gen9ou", own_team={"p1a": {"name": "garchomp"}})
+    install(bs, "p2a", "gengar", [cand(), cand()])
+
+    # opponent uses Spiky Shield -> protected this turn (opponent block)
+    bs.update(E.MoveUsed(side="p2", slot="p2a", move="spikyshield"))
+    assert bs._slots["p2a"].facts.used_protect is True
+    assert bs.get_context()["opponent"]["p2a"]["used_protect"] is True
+
+    # own side uses Protect -> own block
+    bs.update(E.MoveUsed(side="p1", slot="p1a", move="protect"))
+    assert bs.own_facts["p1a"].used_protect is True
+    assert bs.get_context()["own"]["p1a"]["used_protect"] is True
+
+    # a non-protect move does NOT set a fresh mon's flag
+    install(bs, "p2b", "blastoise", [cand()])
+    bs.update(E.MoveUsed(side="p2", slot="p2b", move="hydropump"))
+    assert bs._slots["p2b"].facts.used_protect is False
+
+    # cleared on the next turn (both sides)
+    bs.update(E.Turn(n=2))
+    assert bs._slots["p2a"].facts.used_protect is False
+    assert bs.own_facts["p1a"].used_protect is False
+    assert bs.get_context()["opponent"]["p2a"]["used_protect"] is False
+
+
 def test_confidence_clamped_to_unit_interval():
     """confidence = 1 - normalized entropy must stay in [0,1]; a floating-point
     entropy a hair above 1.0 used to round to -0.0 on the observation."""
