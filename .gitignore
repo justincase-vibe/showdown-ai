@@ -26,7 +26,10 @@ bot/replays/
 # Generated / build artifacts (Step 1 wrap-up)
 node_modules/
 .pytest_cache/
-# generated DB (rebuild recipe in legality/PLAN.md)
+# generated DB (rebuild recipe in legality/PLAN.md) + local safety backups
 legality/legality.db
+legality/legality.db.*
 # extracted payload, ~30MB, regenerable via extract_gen9.js
 legality/data/
+# Step 3 belief artifacts (fuzz report 3.7, perf bench 3.8) — regenerated each run
+belief/artifacts/

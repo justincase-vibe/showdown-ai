@@ -126,7 +126,11 @@ for (const it of dex.items.all()) {
 }
 
 // ── 4. per-gen attributes + gen-scoped learnsets ─────────────────────
-const learnsetCache = new Map(); // formId -> {moveId: [codes...]}
+const learnsetCache = new Map(); // formId -> {moveId: [code...]}
+// Real (current-gen) moves only — a species can only be credited with a move
+// that actually exists in this gen's move table (prevents orphan move ids).
+const realMoves = new Set();
+for (const m of dex.moves.all()) { if (m && m.id) realMoves.add(m.id); }
 for (const sp of dex.species.all()) {
   if (!sp || !sp.num) continue;
   const spId = sp.id;
@@ -146,15 +150,24 @@ for (const sp of dex.species.all()) {
     add('form_ability', {form_id: spId, gen: GEN, ability_id: aId, is_hidden: slot === 'H' ? 1 : 0});
   }
 
-  // Learnset: union over base+forme parts, keep only this gen's codes.
+  // Learnset: union over base+forme parts. A move is usable in THIS gen if the
+  // species can learn it in this gen OR any earlier gen >= 3 — moves carry
+  // forward via transfer/relearner. This mirrors the fork's own checkCanLearn
+  // (noFutureGen caps sources at dex.gen; minSourceGen floors them at 3). The
+  // old "c[0] === GEN" filter was too strict: it dropped ~399 species whose
+  // learnset data in this fork caps at gen 8 (e.g. machamp, abra), leaving them
+  // with zero legal moves and breaking build_prior.
   // Code shape: "9M" (gen 9, method M), "5S0" (gen 5 event, level 0), "4-" = illegal.
   const learn = {};
   try {
     for (const part of dex.species.getFullLearnset(spId)) {
       for (const [mId, codes] of Object.entries(part.learnset || {})) {
-        const genCodes = (codes || []).filter(
-          c => typeof c === 'string' && c[0] === String(GEN) && c[1] !== '-');
-        if (genCodes.length) learn[mId] = (learn[mId] || []).concat(genCodes);
+        const okCodes = (codes || []).filter(
+          c => typeof c === 'string' && c[1] !== '-'
+            && parseInt(c[0], 10) >= 3 && parseInt(c[0], 10) <= GEN);
+        if (okCodes.length && realMoves.has(mId)) {
+          learn[mId] = (learn[mId] || []).concat(okCodes);
+        }
       }
     }
   } catch (e) {
@@ -174,13 +187,23 @@ for (const fmtId of FORMATS) {
   const tv = new TeamValidator(fmtId);
   const rt = tv.ruleTable;
 
+  // D33: default_level must equal the format's BATTLE level, exactly as
+  // test_step1.test_format_levels_match_fork re-derives it (start at
+  // defaultLevel, then apply adjustLevelDown, then adjustLevel). The old
+  // `rt.maxLevel` was wrong for formats like BSS (Adjust Level Down 50 →
+  // battle level 50, not maxLevel 100) and clobbered the D33 rule on rebuild.
+  let battleLevel = rt.defaultLevel;
+  if (rt.adjustLevelDown && battleLevel >= rt.adjustLevelDown) battleLevel = rt.adjustLevelDown;
+  if (rt.adjustLevel) battleLevel = rt.adjustLevel;
+  if (typeof battleLevel !== 'number') battleLevel = null;
+
   add('format', {
     id: fmtId, name: fmt.name, gen: tv.gen, tier: TIER[fmtId] || null,
     game_type: /doubles/i.test(fmt.name) ? 'doubles' : 'singles',
     min_team: fmt.minTeam ?? null,
     max_team: fmt.maxTeam ?? null,
     picked_team: rt.pickedTeamSize == null ? null : rt.pickedTeamSize,
-    default_level: rt.maxLevel == null ? null : rt.maxLevel,
+    default_level: battleLevel,
     section: TIER[fmtId] === 'BSS' ? 'bss' : 'ladder',
     mod: fmt.mod || null,
     exists_in_server: 1,
@@ -214,7 +237,23 @@ for (const fmtId of FORMATS) {
     let problem;
     try { problem = tv.checkSpecies({}, sp, base, {}); }
     catch (e) { problem = `error: ${e.message}`; }
-    if (problem) continue; // validator says no → not in format_form (D8)
+    // D47 (Option B): this fork marks ~454 REAL species `isNonstandard: "Past"`
+    // (tier "Illegal") purely because their learnset data caps at gen 8 — a data
+    // artifact, not a ban. The fork's own TeamValidator.validateTeam ACCEPTS them
+    // (BSS "Flat Rules" allows all species), so the "Past" tag is internally
+    // inconsistent. Allow a real species (valid num, exists, not a placeholder)
+    // that is blocked ONLY by the "Past" tag. CAP / LGPE / Legends / Unobtainable
+    // are NOT "Past", so they stay rejected (D8) — this override cannot un-ban them.
+    // Base form only: base species have forme="" (falsy); Mega/Primal/Gmax
+    // formes carry forme="Mega"/"Mega-X"/"Primal"/"Gmax" (and gmax also set
+    // placeholderFor). We do NOT want to un-ban those formes into BSS.
+    const pastArtifact = !!(problem
+      && sp.isNonstandard === 'Past'
+      && sp.num
+      && sp.exists
+      && !sp.placeholderFor
+      && !sp.forme);
+    if (problem && !pastArtifact) continue; // validator says no → not in format_form (D8)
     add('format_form', {format_id: fmtId, form_id: spId});
 
     for (const [slot, aName] of Object.entries(sp.abilities || {})) {

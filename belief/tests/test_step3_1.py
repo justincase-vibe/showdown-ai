@@ -39,9 +39,11 @@ from belief.state import BeliefState, SlotBelief, build_prior
 ROOT = Path(__file__).resolve().parents[2]  # belief/tests/x.py -> project root
 
 # A legal BSS species that has moves but NO Smogon sets anywhere in gen 9
-# (the genuine fallback case). Abra is deliberately NOT used: it is absent
-# from this fork's gen-9 learnset, so it exercises the "no prior at all" path
-# (test_no_prior_raises) instead.
+# (the genuine fallback case). The "no prior at all" path (test_no_prior_raises)
+# is exercised by a CAP (colossoil — genuinely nonstandard: no sets AND no legal
+# moves), NOT by a regular species: after the Step-1 learnset fix, formerly-
+# absent legal species (abra, machamp, …) now get a legal-move fallback prior
+# instead of raising.
 FALLBACK_SPECIES = "ampharos"
 FALLBACK_ABILITIES = ["plus", "static"]
 
@@ -87,8 +89,13 @@ def test_prior_candidate_dims_present():
 
 
 def test_no_prior_raises_for_absent_species():
+    # A CAP is genuinely nonstandard — no Smogon sets AND no legal moves in a
+    # standard format — so build_prior has no prior to build. The never-empty
+    # guard must fail LOUDLY here (no silent empty belief). colossoil is a
+    # recognizable, stable CAP (a fusion) that can never be legal in standard
+    # formats, so this keeps testing the real "no data at all" edge case.
     with pytest.raises(ValueError):
-        build_prior("abra", "gen9bss3v3")  # no gen-9 learnset in this fork
+        build_prior("colossoil", "gen9bss3v3")
 
 
 def test_belief_state_p2_only_guard():
