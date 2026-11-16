@@ -71,6 +71,12 @@ class Facts:
     moves_used: set = _dc_field(default_factory=set)
     tera: Optional[str] = None
     last_hit: Optional[int] = None
+    # The CATEGORY ("Physical"/"Special") of the move that set ``last_hit`` —
+    # the fork reflects only a MATCHING category (Counter/Metal Burst reflect a
+    # physical hit; Mirror Coat/Comeuppance reflect a special one — moves.js
+    # ``onDamagingHit``: ``getCategory(move) === "Physical"`` / ``"Special"``).
+    # Set alongside last_hit in _apply_damage; persisted as memory like last_hit.
+    last_hit_category: Optional[str] = None
     # T5 state (consumed by _move_with_state for state-BP moves)
     # avalanche/revenge gate (fork moves.ts:912-915 / 15086-15088:
     # `attackedBy.some(p => p.source === target && p.damage > 0 && p.thisTurn)`) —
@@ -99,6 +105,7 @@ class Facts:
         self.moves_used = set()
         self.tera = None
         self.last_hit = None
+        self.last_hit_category = None
         self.stockpile_layers = 0
         self.used_protect = False
         self.turn_reset()
@@ -128,6 +135,28 @@ _PROTECT_FAMILY = frozenset({"protect", "detect", "kingsshield", "spikyshield", 
 #: max legal moves drawn for fallback combos (bounds candidate-space size)
 _FALLBACK_MOVE_POOL = 8
 _FALLBACK_SLOTS = 4
+
+#: The HIT category each reflector requires (fork ``onDamagingHit`` checks
+#: ``getCategory(move) === <this>`` — moves.js:3025-3060 / 2739-2760 / 11721).
+#: A mismatch means the reflector FAILS (0), so ``lastHitDamage`` must NOT be fed
+#: (the calc's ``lastHit==null -> 0`` path then fires). Keys are move ids (lower).
+_REFLECTOR_REQUIRES = {
+    "counter": "Physical", "metalburst": "Physical",
+    "mirrorcoat": "Special", "comeuppance": "Special",
+}
+
+
+def _move_category(move_name: Optional[str]) -> Optional[str]:
+    """The category (``Physical``/``Special``/``Status``) of a move, from the DB
+    (source of truth for raw move data). ``None`` for an unknown/absent move —
+    the reflector category gate then can't confirm a match and stays closed.
+    Only called on move-source hits (rare), so the per-call lookup is fine."""
+    if not move_name:
+        return None
+    try:
+        return lookup.get_move(move_name).get("category")
+    except KeyError:
+        return None
 
 
 def _move_with_state(move_name: str, facts: Optional[Facts],
@@ -160,12 +189,25 @@ def _move_with_state(move_name: str, facts: Optional[Facts],
     move-source, damage>0 signal the Avalanche gate uses). At decision time in
     singles (no hit yet this turn) the gate is closed → the reflector reports
     base power (0); once the hit lands in the log the gate opens → 2×.
+
+    Category gate (D55) — the fork reflects only a MATCHING category: Counter /
+    Metal Burst reflect a PHYSICAL hit, Mirror Coat / Comeuppance a SPECIAL one
+    (``onDamagingHit`` ``getCategory(move) === "Physical"`` / ``"Special"``).
+    So ``lastHitDamage`` is attached only if the recorded hit category
+    (``last_hit_category``) matches the reflector's requirement in
+    ``_REFLECTOR_REQUIRES``. A mismatch (e.g. a special hit + Counter) means the
+    reflector FAILS (0) — the calc's ``lastHit==null -> 0`` path fires — instead
+    of over-reporting 2× the mismatched hit. ``lastHitDamage`` is a REFLECTOR-ONLY
+    field (the calc reads it only for the four reflectors), so it is attached ONLY
+    to a reflector move — non-reflector moves never carry it.
     """
     if facts is None:
         return move_name
     state: Dict[str, Any] = {}
     if facts.last_hit is not None and facts.attacked_by_this_turn:
-        state["lastHitDamage"] = facts.last_hit
+        required = _REFLECTOR_REQUIRES.get(move_name.lower())
+        if required is not None and facts.last_hit_category == required:
+            state["lastHitDamage"] = facts.last_hit
     if facts.attacked_by_this_turn:
         if defender is None or defender in facts.attacked_by_this_turn:
             state["hitThisTurn"] = True
@@ -817,6 +859,10 @@ class BeliefState:
             # it, and a later Counter/Mirror Coat calc would have reflected the tick).
             if ev.source_kind == "move":
                 facts.last_hit = delta
+                # the hit's category (D55 reflector gate): the fork reflects only
+                # a matching category (Counter/Metal Burst physical, Mirror Coat/
+                # Comeuppance special), so record what kind of move set last_hit.
+                facts.last_hit_category = _move_category(ev.move)
                 # avalanche gate (fork moves.ts:912-915: `p.damage > 0`): only a
                 # hit that actually dealt damage sets the flag — a resisted or
                 # immune (0-damage) hit must not, mirroring the fork's some()

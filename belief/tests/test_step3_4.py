@@ -547,12 +547,14 @@ def test_reflector_preserves_narrowed_posterior():
         source_side="p1", source_slot="p1a"))
     assert approx_one(sb.candidates[0]["weight"])  # 0-SpD wins
 
-    # Step 2: the opponent uses a reflector — must NOT wipe the narrowing
-    # (Counter reflects 2 × last_hit; stat-independent, so both candidates
-    # get 1.0 → the prior evidence is preserved, not destroyed.)
+    # Step 2: the opponent uses a reflector — must NOT wipe the narrowing.
+    # Mirror Coat (not Counter) because Step 1's hit was SPECIAL (Flamethrower):
+    # the fork reflects only a MATCHING category (D55), so Mirror Coat reflects
+    # 2 × last_hit here; stat-independent, so both candidates get 1.0 → the prior
+    # evidence is preserved, not destroyed.
     bs.update(E.DamageObserved(
         target_side="p1", target_slot="p1a", hp_after=109, maxhp=299,
-        ko=False, source_kind="move", move="counter",
+        ko=False, source_kind="move", move="mirrorcoat",
         source_side="p2", source_slot="p2a"))
     assert approx_one(sb.candidates[0]["weight"]), \
         f"reflector collapsed the posterior: {[c['weight'] for c in sb.candidates]}"
@@ -577,14 +579,16 @@ def test_reflector_stale_hit_not_reflected():
     bs = BeliefState("gen9ou", own_team=own)
     sb = install(bs, "p2a", "blastoise", [cand()])
 
-    # Turn N: p2a is hit by p1a -> last_hit set AND attacked_by_this_turn set
+    # Turn N: p2a is hit by p1a (Aqua Jet = PHYSICAL, matching Counter) ->
+    # last_hit set, last_hit_category="Physical", attacked_by_this_turn set
     bs.update(E.DamageObserved(
         target_side="p2", target_slot="p2a", hp_after=204, maxhp=299,
-        ko=False, source_kind="move", move="flamethrower",
+        ko=False, source_kind="move", move="aquajet",
         source_side="p1", source_slot="p1a"))
     assert sb.facts.last_hit == 95
+    assert sb.facts.last_hit_category == "Physical"   # D55: category recorded
     assert ("p1", "p1a") in sb.facts.attacked_by_this_turn
-    # SAME turn: the gate is OPEN -> the reflector reflects this hit (2×95)
+    # SAME turn + category match: the gate is OPEN -> Counter reflects this hit
     spec_this = _move_with_state("counter", sb.facts, defender=("p1", "p1a"))
     assert isinstance(spec_this, dict) and spec_this["lastHitDamage"] == 95
 
@@ -600,6 +604,59 @@ def test_reflector_stale_hit_not_reflected():
         assert "lastHitDamage" not in spec_stale, f"stale over-report: {spec_stale}"
     else:
         assert spec_stale == "counter"
+
+
+def test_reflector_category_gate():
+    """D55 (2026-11-16) reflector CATEGORY gate. The fork reflects only a
+    MATCHING category (moves.js ``onDamagingHit``: Counter/Metal Burst record a
+    PHYSICAL hit, Mirror Coat/Comeuppance a SPECIAL one); a mismatch means the
+    reflector FAILS (0). So ``lastHitDamage`` is attached only when the recorded
+    hit category (``facts.last_hit_category``) matches the reflector's
+    requirement (``_REFLECTOR_REQUIRES``). White-box (no Node): a SPECIAL hit
+    opens Mirror Coat but NOT Counter; a PHYSICAL hit opens Counter but NOT
+    Mirror Coat. Non-reflector moves are never category-gated.
+    """
+    own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
+                   "item": "lifeorb", "ability": "solarpower"}}
+
+    def hit_and_check(hit_move, hit_category):
+        bs = BeliefState("gen9ou", own_team=own)
+        sb = install(bs, "p2a", "blastoise", [cand()])
+        bs.update(E.DamageObserved(
+            target_side="p2", target_slot="p2a", hp_after=204, maxhp=299,
+            ko=False, source_kind="move", move=hit_move,
+            source_side="p1", source_slot="p1a"))
+        assert sb.facts.last_hit_category == hit_category
+        has = lambda mv: (isinstance(_move_with_state(mv, sb.facts,
+                            defender=("p1", "p1a")), dict)
+                          and "lastHitDamage"
+                          in _move_with_state(mv, sb.facts, defender=("p1", "p1a")))
+        return has
+
+    # SPECIAL hit (Flamethrower): Mirror Coat reflects, Counter does NOT.
+    has = hit_and_check("flamethrower", "Special")
+    assert has("mirrorcoat"), "special hit should open Mirror Coat"
+    assert not has("counter"), "special hit must NOT open Counter"
+    assert not has("metalburst"), "special hit must NOT open Metal Burst"
+    assert has("comeuppance"), "special hit should open Come Up Pance"
+
+    # PHYSICAL hit (Aqua Jet): Counter reflects, Mirror Coat does NOT.
+    has = hit_and_check("aquajet", "Physical")
+    assert has("counter"), "physical hit should open Counter"
+    assert has("metalburst"), "physical hit should open Metal Burst"
+    assert not has("mirrorcoat"), "physical hit must NOT open Mirror Coat"
+    assert not has("comeuppance"), "physical hit must NOT open Come Up Pance"
+
+    # A non-reflector move is never category-gated (its state is unrelated).
+    bs = BeliefState("gen9ou", own_team=own)
+    sb = install(bs, "p2a", "blastoise", [cand()])
+    bs.update(E.DamageObserved(
+        target_side="p2", target_slot="p2a", hp_after=204, maxhp=299,
+        ko=False, source_kind="move", move="flamethrower",
+        source_side="p1", source_slot="p1a"))
+    spec = _move_with_state("tackle", sb.facts, defender=("p1", "p1a"))
+    # tackle is a normal move: no lastHitDamage is ever attached to it
+    assert not (isinstance(spec, dict) and "lastHitDamage" in spec)
 
 
 # ═══════════════════════════════ live integration ═════════════════════════════
