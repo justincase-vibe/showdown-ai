@@ -370,6 +370,67 @@ def test_residual_damage_updates_fact_but_no_set_evidence():
     assert sb.facts.hp == 170               # ...but the fact is recorded
 
 
+def test_residual_burn_tick_does_not_disturb_posterior():
+    """End-to-end regression (D48): a burn tick on the defender must NOT be
+    consumed as MOVE damage. Before the fix the adapter pinned it to the last
+    ``|move|`` line; because the tick's delta is far below that move's window, it
+    floored the CORRECT candidate to ~0 (collapsing the posterior to uniform).
+    Driven through the REAL adapter so the log→event→belief path is what is tested.
+    """
+    own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
+                   "item": "lifeorb", "ability": "solarpower"}}
+    bs = BeliefState("gen9ou", own_team=own)
+    sb = install(bs, "p2a", "blastoise", [cand(evs={"spd": 0}), cand(evs={"spd": 252})])
+    a = LogAdapter()
+    a.feed_lines([
+        "|move|p1a: Charizard|Flamethrower|p2a: Blastoise",
+        "|-damage|p2a: Blastoise|204/299",   # delta 95 -> the SpD-0 window
+    ])
+    for e in a.events:
+        bs.update(e)
+    assert approx_one(sb.candidates[0]["weight"])     # narrowed to the SpD-0 set
+    # the burn tick must NOT be consumed as move damage (regression, D48):
+    # the adapter classifies it residual, so the belief records the HP fact but
+    # applies NO set evidence (the true SpD-0 set stays the leader).
+    a.feed_lines(["|-damage|p2a: Blastoise|190/299 brn|[from] brn"])
+    burn = a.events[-1]
+    assert burn.source_kind == "residual"              # adapter: not a move hit
+    assert bs.update(burn) is False                    # belief: no set evidence
+    assert approx_one(sb.candidates[0]["weight"])      # ...true set still the leader
+    assert sb.facts.hp == 190                          # ...but the HP fact is updated
+
+
+def test_residual_tick_does_not_clobber_last_hit():
+    """D48 bug-hunt regression: ``facts.last_hit`` (the reflector input for
+    Counter/Mirror Coat/Metal Burst) tracks the last MOVE hit only. The fork sets
+    its counter volatile / ``attackedBy`` from the move-hit loop alone
+    (``gotAttacked``, battle-actions.ts:1051) — a burn tick is never reflected,
+    so it must not overwrite the last real hit. Before the fix the tick's delta
+    clobbered it and a later reflector calc would have reflected the tick.
+    """
+    own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
+                   "item": "lifeorb", "ability": "solarpower"}}
+    bs = BeliefState("gen9ou", own_team=own)
+    sb = install(bs, "p2a", "blastoise", [cand(evs={"spd": 0})])
+    a = LogAdapter()
+    a.feed_lines([
+        "|move|p1a: Charizard|Flamethrower|p2a: Blastoise",
+        "|-damage|p2a: Blastoise|204/299",   # move hit: last_hit = 95
+    ])
+    for e in a.events:
+        bs.update(e)
+    assert sb.facts.last_hit == 95
+    # a burn tick (delta 14) is residual: HP fact updates, last_hit does NOT
+    # (feed only the NEW event — a.events is cumulative; re-feeding the earlier
+    # move-hit event would re-apply it with delta 0, a test artifact, not a log)
+    a.feed_lines(["|-damage|p2a: Blastoise|190/299 brn|[from] brn"])
+    burn = a.events[-1]
+    assert burn.source_kind == "residual"          # adapter: not a move hit
+    assert bs.update(burn) is False                # belief: facts only, no evidence
+    assert sb.facts.hp == 190
+    assert sb.facts.last_hit == 95                 # the tick must NOT clobber it
+
+
 # ═══════════════════════════════ live integration ═════════════════════════════
 
 def _run_smoke_battle():

@@ -82,9 +82,13 @@ IGNORED_TAGS = frozenset({
     "-transform", "-primal", "-formechange", "-enditem", "swap", "cant",
     # non-BSS / gen-specific (no 3.1 evidence)
     "-mega", "-zpower", "-zbroken", "-burst", "-candynamax",
-    # damage MODIFIERS — not set evidence; promoted to events in 3.4 (type
-    # effectiveness, crit, OHKO) so the 3.1 smoke stays clean (Unknown = the
-    # genuinely-unexpected signal the 3.7 fuzz reports).
+    # damage MODIFIERS — the lines themselves carry no set evidence, and none of
+    # them NEED to (D48 bug-hunt, verified against the 3.4 machinery): type
+    # effectiveness is already inside the calc's window (computed from the
+    # candidate's OWN typing), a crit is inside the crit window the likelihood
+    # also accepts (damage_likelihood), and an OHKO is the calc's guaranteed-KO
+    # formula (consumed via the KO line, D40). Ignoring them keeps Unknown the
+    # genuinely-unexpected signal the 3.7 fuzz reports.
     "-immune", "-resisted", "-supereffective", "-crit", "-ohko",
     # whole-boost resets (the per-stat -boost/-unboost is the evidence)
     "-clearboost", "-clearpositiveboost", "-clearnegativeboost",
@@ -99,6 +103,31 @@ IGNORED_TAGS = frozenset({
 _FROM_KIND = re.compile(r"\[from\]\s*(ability|item):\s*([^|\]]+)")
 #: [of] p2a: Charizard — the source/holder slot for a [from]-context reveal
 _OF_SLOT = re.compile(r"\[of\]\s*(p[12][a-f])")
+#:
+#: A -damage/-heal 3rd payload that marks the line as a CONTEXT (residual) event
+#: rather than a pure move hit. Fork-verified (2026-11-16, scratch/probe_residual.js,
+#: all 10 cases: move hit = 2 payloads; burn/poison/toxic/recoil/confusion/powder/
+#: weather/drain/leechseed all bracketed) AND proven statically from the fork:
+#:
+#:   * spreadDamage log switch  sim/battle.ts:2159-2178 — default branch logs NO
+#:     3rd payload ONLY when `effect.effectType === 'Move'` (a real move hit) OR
+#:     `!name`; every other (non-move) effect logs a bracketed `[from] <name>` /
+#:     `[of] <source>` (or the special `[silent]`/`[partiallytrapped]` cases).
+#:   * heal log switch          sim/battle.ts:2293-2314 — drain → `[from] drain`,
+#:     leechseed/rest → `[silent]`, zpower → `[zeffect]`, a healing Move → no
+#:     bracket (a heal move, e.g. Synthesis), every other → `[from] <name>`.
+#:   * `!name` edge is UNREACHABLE for real damage: `fullname = data.fullname ||
+#:     name` (sim/dex-data.ts:125), and every real damage-source effect carries a
+#:     name — brn/psn/tox (Conditions), recoil→'Recoil'/drain→'Drain'
+#:     (sim/dex-conditions.ts:700-707), weather (Sandstorm/Hail/Snowscape), the
+#:     generic getByID `else` sets `name: id`. The only name-less effect
+#:     (EMPTY_CONDITION, id==='') carries no damage. So a non-move damage line
+#:     ALWAYS carries a bracketed 3rd payload.
+#:
+#: Consequence (D48): the presence of a bracketed 3rd payload is the clean
+#: move-vs-residual signal; a plain move hit never carries one, so this cannot
+#: false-positive on real move damage.
+_CONTEXT_TAG = re.compile(r"^\[(from|silent|of|zeffect)\]")
 
 
 def to_id(name: str) -> str:
@@ -274,9 +303,11 @@ class LogAdapter:
             return HitCount(side=side, slot=slot, n=_int(p[1]))
 
         if tag == "-damage" and len(p) >= 2:
-            return self._hp_event(p[0], p[1], damage=True)
+            # p[2] is the residual context tag (`[from] brn` / `[from] Recoil` /
+            # `[silent]` …) — present on residual lines, absent on a pure move hit.
+            return self._hp_event(p[0], p[1], damage=True, context=p[2] if len(p) >= 3 else None)
         if tag == "-heal" and len(p) >= 2:
-            return self._hp_event(p[0], p[1], damage=False)
+            return self._hp_event(p[0], p[1], damage=False, context=p[2] if len(p) >= 3 else None)
         if tag == "-side damage" and len(p) >= 2:
             ev = self._hp_event(p[0], p[1], damage=True)
             if ev is not None:
@@ -357,9 +388,10 @@ class LogAdapter:
         self._maxhp_species[slot] = cur
 
     def _hp_event(self, slot_payload: str, hp_payload: str,
-                  damage: bool) -> Optional[Event]:
+                  damage: bool, context: Optional[str] = None) -> Optional[Event]:
         side, slot = _slot_of(slot_payload)
         hp_payload = hp_payload.strip()
+        residual = self._is_residual_context(context)  # burn/poison/recoil/… not a move
         ko = hp_payload.endswith("fnt")
         if ko:
             # KO line: "0 fnt" (no denominator — getHealth() returns "0 fnt" for
@@ -385,11 +417,21 @@ class LogAdapter:
         self.maxhp_by_slot[slot] = maxhp
         if damage:
             ev = DamageObserved(target_side=side, target_slot=slot, hp_after=hp,
-                                maxhp=maxhp, ko=ko, source_kind="move")
-            self._attribute_move_source(ev)
+                                maxhp=maxhp, ko=ko,
+                                source_kind="residual" if residual else "move")
+            if not residual:
+                self._attribute_move_source(ev)
             return ev
         return HealObserved(target_side=side, target_slot=slot, hp_after=hp,
-                            maxhp=maxhp, source_kind="move")
+                            maxhp=maxhp,
+                            source_kind="residual" if residual else "move")
+
+    def _is_residual_context(self, context: Optional[str]) -> bool:
+        """A -damage/-heal line whose 3rd payload is a bracketed context tag is a
+        RESIDUAL / ability / item / recoil / drain event, NOT a pure move hit. The
+        fork (`runDamage`/`heal`/`directDamage`) logs a move hit with no 3rd payload
+        and every residual line with one — so a bracketed 3rd payload is the signal."""
+        return bool(context) and bool(_CONTEXT_TAG.match(context.strip()))
 
     def _attribute_move_source(self, ev: DamageObserved) -> None:
         """Attribute move-source damage to the most recent `|move|` line, when

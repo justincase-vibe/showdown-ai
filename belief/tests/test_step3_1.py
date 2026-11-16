@@ -274,6 +274,30 @@ def test_adapter_maxhp100_dedupe():
     assert [e.hp_after for e in d] == [50, 20]
 
 
+def test_adapter_residual_not_attributed_to_move():
+    """A residual tick (burn) must NOT be attributed to the most recent move.
+
+    Fork-verified (2026-11-16, probe_residual.js): a pure move hit logs exactly
+    two payloads (``|-damage|slot|hp/max``); a residual line adds a bracketed
+    context tag — burn ``… brn|[from] brn``, recoil ``|[from] Recoil``, confusion
+    ``|[from] confusion``, powder ``|[silent]``. That 3rd payload is the
+    move-vs-residual signal, and residual damage is NOT move evidence (3.4-6).
+    Regression D48: before the fix the tick was pinned to the stale ``|move|``
+    line and consumed as (wrong) move damage.
+    """
+    a = LogAdapter()
+    a.feed_lines([
+        "|move|p1a: Charizard|Flamethrower|p2a: Blastoise",
+        "|-damage|p2a: Blastoise|204/299",                # move hit -> attributed
+        "|-damage|p2a: Blastoise|190/299 brn|[from] brn",  # burn tick -> residual
+    ])
+    dmg = [e for e in a.events if e.type == "damage_observed"]
+    assert len(dmg) == 2
+    assert dmg[0].source_kind == "move" and dmg[0].move == "flamethrower"
+    assert dmg[1].source_kind == "residual"
+    assert dmg[1].move is None and dmg[1].source_slot is None
+
+
 def test_adapter_slot_reuse_updates_maxhp():
     # p2a is Garchomp (183), then a new mon (Blastoise, 150) takes the active
     # slot after a faint. The slot's max HP must follow the new mon.

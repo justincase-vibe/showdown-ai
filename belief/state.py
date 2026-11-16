@@ -522,7 +522,14 @@ class BeliefState:
         if facts is not None:
             if ev.maxhp:
                 facts.maxhp = ev.maxhp
-            facts.last_hit = delta  # the reflector input for 3.6
+            # the reflector input (3.6): the fork records ONLY real move hits
+            # (`gotAttacked` -> `attackedBy` / the counter volatile, set from the
+            # move-hit loop at battle-actions.ts:1051); residual (burn/recoil) and
+            # field (hazard) damage is NEVER reflected, so it must not clobber the
+            # last move hit (D48 bug-hunt: a burn tick after a hit was overwriting
+            # it, and a later Counter/Mirror Coat calc would have reflected the tick).
+            if ev.source_kind == "move":
+                facts.last_hit = delta
         # evidence only for attributable MOVE-source damage with a DISTINCT
         # attacker; residual/unattributable lines update the fact only (3.4-6)
         if (ev.source_kind != "move" or not ev.move or not ev.source_slot
