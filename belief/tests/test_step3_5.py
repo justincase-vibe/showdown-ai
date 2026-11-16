@@ -154,3 +154,23 @@ def test_sample_preserves_correlation():
     assert with_wish  # every set carries Wish, so this is all of them
     frac = sum(1 for d in with_wish if "protect" in d["moves"]) / len(with_wish)
     assert 0.82 <= frac <= 0.97, f"P(Protect|Wish) from samples = {frac:.4f}"
+
+
+def test_marginals_are_not_independent():
+    """The audit finding: move_probabilities() are MARGINALS, and multiplying them
+    to get a joint is the independence error the user explicitly forbade ("the moves
+    are correlated"). Pin that the CORRECT joint comes from the full sets (sample/mass),
+    not from P(a)·P(b)."""
+    # A (0.5): Wish+Protect  ·  B (0.5): no Wish, no Protect
+    s = sb([cand(["wish", "protect", "a", "b"], 0.5),
+            cand(["earthquake", "surf", "c", "d"], 0.5)])
+    p = s.move_probabilities()
+    joint = s.mass(lambda c: "wish" in c["moves"] and "protect" in c["moves"])
+    naive = p["wish"] * p["protect"]
+    assert abs(joint - 0.5) <= 1e-9       # true joint from the full sets
+    assert abs(naive - 0.25) <= 1e-9      # the (wrong) independence product
+    assert abs(joint - naive) > 0.2, "joint must differ from the naive product"
+    # and sample() reproduces the CORRELATED joint, not the naive one:
+    draws = s.sample(20000, seed=11)
+    frac = sum(1 for d in draws if "wish" in d["moves"] and "protect" in d["moves"]) / len(draws)
+    assert 0.45 <= frac <= 0.55, f"empirical P(Wish∧Protect) = {frac:.4f} (naive would be ~0.25)"

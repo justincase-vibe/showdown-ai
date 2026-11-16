@@ -245,6 +245,10 @@ class SlotBelief:
         (the RNG is a fresh ``random.Random(seed)``, so samples never leak state
         across calls or slots). Returns COPIES, so mutating a sample cannot touch
         the belief's live candidates.
+
+        This is the primitive for CORRELATED / JOINT reasoning: a question like
+        "does this mon run Wish AND Protect" must be answered from the full sets
+        (here), NOT by multiplying ``move_probabilities()`` marginals (see there).
         """
         if n < 0:
             raise ValueError(f"sample count must be >= 0, got {n}")
@@ -254,10 +258,20 @@ class SlotBelief:
         return [copy.deepcopy(self.candidates[i]) for i in idxs]
 
     def move_probabilities(self) -> Dict[str, float]:
-        """Posterior mass over the sets CONTAINING each move (membership, order-blind
-        — the 3.3 moveset-is-a-set invariant). A move's probability is the mass of the
-        full sets that include it, so correlated moves (Wish+Protect) are NOT treated
-        as independent — this is the belief-facing view the policy samples from.
+        """Posterior mass over the sets CONTAINING each move — a per-move MARGINAL,
+        order-blind (the 3.3 moveset-is-a-set invariant). ``value(m)`` = the posterior
+        mass of the full sets that carry move ``m``.
+
+        Two things this is NOT (both are traps that break the Wish⇒Protect reasoning):
+          * Not a per-turn USAGE probability. It says the move is ON the mon, not that
+            the mon will use it this turn (a mon carries 4 moves, uses 1). Predicting
+            the turn move is the POLICY's job (belief + move order + Choice lock + PP).
+          * Not a joint. These are marginals — DO NOT multiply two of them to get
+            P(both): that assumes independence and is exactly wrong when the moves are
+            correlated (Wish+Protect live in the SAME sets). P(Wish∧Protect)=0.5 but
+            P(Wish)·P(Protect)=0.25 in the 3.5 audit case. For any joint / correlated
+            question use ``sample()`` and read the full sets (``test_marginals_are_not
+            independent`` pins this).
 
         PP is unobservable in the log, so it is deliberately ignored. Every value is in
         [0, 1]; they sum to the posterior-expected number of moves (4 for a 4-move set),
