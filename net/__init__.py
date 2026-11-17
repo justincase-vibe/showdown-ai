@@ -48,10 +48,15 @@ from .registry import (
 )
 from .vocab import Vocab, Vocabs
 from .encoder import encode_context, encode_sequence
+from .vocab_db import build_vocabs
+from .model import PokeNet, bc_loss, overfit_train
+from .batch import build_samples, samples_to_batch, batch_to_torch
 
 __all__ = [
     "LAYOUT", "FIELDS", "SHAPES", "DTYPES", "Field",
     "checksum", "total_elements", "summary",
-    "Vocab", "Vocabs",
+    "Vocab", "Vocabs", "build_vocabs",
     "encode_context", "encode_sequence",
+    "PokeNet", "bc_loss", "overfit_train",
+    "build_samples", "samples_to_batch", "batch_to_torch",
 ]
