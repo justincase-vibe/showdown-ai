@@ -29,21 +29,27 @@ NOT done here (deliberately, and flagged for the user):
     is a ``belief/`` change (331-baseline risk) that is the NEXT recorded
     decision, not part of this S4.1 checkpoint. The registry is shaped so they
     slot in as new fields without disturbing the existing layout.
-  * the per-slot ``fainted`` flag is currently derived as ``hp_frac <= 0``.
-    The present ``get_context()`` cannot distinguish "benched, untouched" from
-    "fainted" (both read hp_frac 0) — a dedicated ``belief/`` flag is the
-    correct fix (next decision). The layout already reserves the column so the
-    shape does not change when it lands.
+  * the per-slot ``fainted`` flag is a RESERVED column, left ``0.0``. The
+    present ``get_context()`` cannot distinguish "benched, untouched" from
+    "fainted" (both read hp_frac 0), and deriving it from hp_frac emitted a
+    FALSE fainted signal on untouched benched mons — a "wrong state" the net
+    must never see. It therefore reads 0.0 until the dedicated ``belief/``
+    flag lands (next decision); the column is reserved so that lands with NO
+    shape change, and the raw evidence (hp_frac / active / moves / last_hit) is
+    already in the block for the net to use. See ``_slot_vector``.
 """
 from __future__ import annotations
 
 from typing import Dict, List, Optional
+
+import re
 
 import numpy as np
 
 from .registry import (
     BOOSTS,
     GLOBAL_INDEX,
+    LAYOUT,
     MAX_ACTIONS,
     MAX_OWN_MOVES,
     MAX_POST,
@@ -62,6 +68,25 @@ STATUS_COL: Dict[str, int] = {s: SLOT_INDEX[f"st_{s}"] for s in STATUS_FLAGS}
 BOOST_COL: Dict[str, int] = {b: SLOT_INDEX[f"boost_{b}"] for b in BOOSTS}
 
 
+def _to_id(name) -> str:
+    """Showdown toID — mirrors ``legality.lookup.to_id`` /
+    ``belief.log_events.to_id`` (lowercase alphanumerics only). Idempotent on an
+    id, so it is ALWAYS safe to apply: it only rewrites a display name
+    ("Landorus-Therian") to its id ("landorustherian"). The S4.2 vocab is built
+    from the legality DB's ids, so every identity lookup here must be normalised
+    the same way — otherwise a display-name own-team spec would silently OOV -> 0
+    (bug #1). Kept local so net/ stays DB-free / numpy-only; the same 2-line
+    function already lives in the two other modules (codebase convention, not a
+    new source of truth)."""
+    return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+
+
+def _idx(vocab, ident) -> int:
+    """A vocab lookup that accepts an id OR a display name (normalised via
+    ``_to_id``). Empty / None -> 0 (<pad>/OOV)."""
+    return vocab.index(_to_id(ident))
+
+
 def _slot_ids(side: str) -> List[str]:
     """Canonical slot order for a side: a, b, c, d, e, f (deterministic)."""
     return [f"{side}{c}" for c in "abcdef"]
@@ -77,7 +102,14 @@ def _slot_vector(block: Dict, active: bool, is_own: bool) -> np.ndarray:
     hp = float(block.get("hp_frac", 0.0) or 0.0)
     v[SLOT_INDEX["present"]] = 1.0
     v[SLOT_INDEX["active"]] = 1.0 if active else 0.0
-    v[SLOT_INDEX["fainted"]] = 1.0 if (hp <= 0.0 and not active) else 0.0
+    # fainted is a RESERVED per-slot flag, left 0.0 (see module docstring).
+    # get_context() cannot yet distinguish "benched, untouched" from "fainted"
+    # (both read hp_frac 0), so deriving it from hp_frac emitted a FALSE
+    # fainted=1 on untouched benched mons — exactly the "wrong state" the net
+    # must never see. The dedicated belief/Facts flag (open decision) will fill
+    # this column without a shape change; the raw evidence (hp_frac, active,
+    # moves, last_hit, ...) is already in the block for the net to use.
+    v[SLOT_INDEX["fainted"]] = 0.0
     v[SLOT_INDEX["hp_frac"]] = _clamp01(hp)
     for s in block.get("statuses", []) or []:
         col = STATUS_COL.get(s)
@@ -114,7 +146,7 @@ def _side_blocks(ctx: Dict, side: str) -> Dict[str, Dict]:
 def _id_row(ids: List[str], n: int, vocab) -> np.ndarray:
     out = np.zeros(n, dtype=np.int64)
     for i, ident in enumerate(ids[:n]):
-        out[i] = vocab.index(ident)
+        out[i] = vocab.index(_to_id(ident))
     return out
 
 
@@ -170,8 +202,8 @@ def encode_context(ctx: Dict, vocabs: Vocabs,
     out["global"] = g
 
     # ── global id channels (embeddable) ──────────────────────────────
-    out["global_weather"] = np.array([vocabs.weather.index(field.get("weather", ""))], dtype=np.int64)
-    out["global_terrain"] = np.array([vocabs.terrain.index(field.get("terrain", ""))], dtype=np.int64)
+    out["global_weather"] = np.array([_idx(vocabs.weather, field.get("weather", ""))], dtype=np.int64)
+    out["global_terrain"] = np.array([_idx(vocabs.terrain, field.get("terrain", ""))], dtype=np.int64)
 
     # ── per-slot uniform blocks (own p1 / opponent p2) ───────────────
     active = ctx.get("active", {}) or {}
@@ -195,9 +227,9 @@ def encode_context(ctx: Dict, vocabs: Vocabs,
         if not blk:
             continue
         own_slot[i] = _slot_vector(blk, active=(slot == own_active), is_own=True)
-        own_species[i] = vocabs.species.index(blk.get("name") or blk.get("species") or "")
-        own_ability[i] = vocabs.ability.index(blk.get("ability", ""))
-        own_item[i] = vocabs.item.index(blk.get("item", ""))
+        own_species[i] = _idx(vocabs.species, blk.get("name") or blk.get("species") or "")
+        own_ability[i] = _idx(vocabs.ability, blk.get("ability", ""))
+        own_item[i] = _idx(vocabs.item, blk.get("item", ""))
         own_moves[i] = _move_row(blk.get("moves", []) or [], vocabs)
 
     for i, slot in enumerate(_slot_ids("p2")):
@@ -205,7 +237,7 @@ def encode_context(ctx: Dict, vocabs: Vocabs,
         if not blk:
             continue
         opp_slot[i] = _slot_vector(blk, active=(slot == opp_active), is_own=False)
-        opp_species[i] = vocabs.species.index(blk.get("species", ""))
+        opp_species[i] = _idx(vocabs.species, blk.get("species", ""))
         opp_moves[i] = _move_row(blk.get("moves", []) or [], vocabs)
 
     out["own_slot"] = own_slot
@@ -232,10 +264,10 @@ def encode_context(ctx: Dict, vocabs: Vocabs,
     if active_opp_blk is not None:
         posterior = active_opp_blk.get("posterior", []) or []
         for k, cand in enumerate(posterior[:MAX_POST]):
-            post_ids[k] = vocabs.ability.index(cand.get("ability", ""))
+            post_ids[k] = _idx(vocabs.ability, cand.get("ability", ""))
             post_w[k] = _clamp01(float(cand.get("weight", 0.0) or 0.0))
         for k, m in enumerate((active_opp_blk.get("top_moves", []) or [])[:MAX_TOP_MOVES]):
-            top_moves[k] = vocabs.move.index(m)
+            top_moves[k] = _idx(vocabs.move, m)
     out["opp_ability_post_ids"] = post_ids
     out["opp_ability_post_w"] = post_w
     out["opp_top_moves"] = top_moves
@@ -250,9 +282,9 @@ def encode_context(ctx: Dict, vocabs: Vocabs,
         kind = act.get("kind", "")
         a_kind[i] = ACTION_KIND_IDX.get(kind, 0)
         if act.get("move"):
-            a_move[i] = vocabs.move.index(act["move"])
+            a_move[i] = _idx(vocabs.move, act["move"])
         if act.get("species"):
-            a_species[i] = vocabs.species.index(act["species"])
+            a_species[i] = _idx(vocabs.species, act["species"])
         a_mask[i] = 1.0
     out["action_kind"] = a_kind
     out["action_move"] = a_move
@@ -274,15 +306,17 @@ def encode_sequence(context_seq: List[Dict], vocabs: Vocabs,
     keeps S4.1's per-turn contract testable in isolation of the GRU.
     """
     t = len(context_seq)
-    out: Dict[str, np.ndarray] = {}
     per_turn = [encode_context(ctx, vocabs,
                                (actions_seq[i] if actions_seq else None))
                 for i, ctx in enumerate(context_seq)]
-    for name, first in per_turn[0].items() if t else []:
-        shape = first.shape
-        stack = np.zeros((t,) + shape, dtype=first.dtype)
+    # Derive keys/shapes/dtypes from the registry (single source of truth), NOT
+    # from per_turn[0] — so an EMPTY sequence still emits every field with shape
+    # (0, ...) and the layout can never drift between the encoder and the net.
+    out: Dict[str, np.ndarray] = {}
+    for fld in LAYOUT:
+        stack = np.zeros((t,) + fld.shape, dtype=fld.dtype)
         for i, enc in enumerate(per_turn):
-            stack[i] = enc[name]
-        out[name] = stack
+            stack[i] = enc[fld.name]
+        out[fld.name] = stack
     out["battle_mask"] = np.ones(t, dtype=np.float32)
     return out

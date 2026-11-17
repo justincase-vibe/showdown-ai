@@ -402,6 +402,88 @@ def test_unknown_ids_never_crash_encoder():
     assert out["opp_species"][0] == 0  # garchomp now OOV -> <pad>
 
 
+# ── bug #1 regression: own display-name -> id (vocab built from IDS) ────
+def test_own_display_name_normalized_to_id():
+    """The own-team spec may carry DISPLAY names (a team export), but the S4.2
+    vocab is built from the legality DB's IDS. The encoder must normalise the
+    display name to its id so own species/ability/item map to the correct row
+    — not silently OOV -> 0. (The earlier tests built the vocab from the
+    context's own names, so they could not catch this: a false truth.)"""
+    ctx = make_ctx()
+    # own p1a: swap the ids for DISPLAY names
+    ctx["own"]["p1a"]["name"] = "Landorus-Therian"
+    ctx["own"]["p1a"]["ability"] = "Sand Force"
+    ctx["own"]["p1a"]["item"] = "Leftovers"
+    # vocab built from IDS (the production convention)
+    v = Vocabs(
+        species=Vocab(["landorustherian", "garchomp"]),
+        ability=Vocab(["sandforce", "roughskin"]),
+        item=Vocab(["leftovers"]),
+        move=Vocab(["earthquake"]),
+        weather=Vocab(), terrain=Vocab(),
+    )
+    out = encode_context(ctx, v)
+    assert out["own_species"][0] == v.species.index("landorustherian") != 0
+    assert out["own_ability"][0] == v.ability.index("sandforce") != 0
+    assert out["own_item"][0] == v.item.index("leftovers") != 0
+    # an already-id own spec maps identically (to_id is idempotent)
+    out2 = encode_context(make_ctx(), v)  # p1a name is the id "landorustherian"
+    assert out2["own_species"][0] == out["own_species"][0] != 0
+
+
+def test_opponent_species_id_still_maps():
+    """Opponent species arrives as an id (the adapter toIDs it); confirm the
+    normalisation is a no-op there (no regression on the working path)."""
+    ctx = make_ctx()
+    v = make_vocabs(ctx)
+    out = encode_context(ctx, v)
+    assert out["opp_species"][0] == v.species.index("garchomp") != 0
+
+
+# ── bug #2 regression: benched-untouched own mon is NOT fainted ───────
+def test_benched_untouched_own_mon_not_fainted():
+    """A benched own mon that never entered has hp_frac 0 (facts is None). The
+    old code marked it fainted=1 (FALSE — a 'wrong state' for the net). It must
+    read 0.0 now; the fainted column is reserved for the dedicated belief flag."""
+    ctx = make_ctx()
+    # p1d: a benched own mon that has NEVER entered (all-default block)
+    ctx["own"]["p1d"] = {"hp_frac": 0.0, "statuses": [], "boosts": {},
+                         "moves": [], "last_hit": 0, "hit_this_turn": False,
+                         "last_move_failed": False, "stockpile": 0,
+                         "used_protect": False,
+                         "name": "dragonite", "ability": "multiscale",
+                         "item": "focusband", "confidence": 1.0}
+    v = make_vocabs(ctx)
+    out = encode_context(ctx, v)
+    row = out["own_slot"][3]  # slot p1d is the 4th own row (index 3)
+    assert row[SLOT_INDEX["present"]] == 1.0     # it IS in the team
+    assert row[SLOT_INDEX["active"]] == 0.0      # benched
+    assert row[SLOT_INDEX["hp_frac"]] == 0.0
+    assert row[SLOT_INDEX["fainted"]] == 0.0     # NOT fainted (the bug fix)
+
+
+# ── bug #3 regression: encode_sequence is registry-driven + empty-safe ─
+def test_encode_sequence_empty_sequence_is_registry_driven():
+    """An EMPTY sequence must still emit every registry field with shape
+    (0, ...) (plus battle_mask of length 0) — derived from the registry, not
+    from per_turn[0]."""
+    v = make_vocabs(make_ctx())
+    out = encode_sequence([], v)
+    assert set(out.keys()) == {f.name for f in LAYOUT} | {"battle_mask"}
+    for fld in LAYOUT:
+        assert out[fld.name].shape == (0,) + fld.shape, fld.name
+    assert out["battle_mask"].shape == (0,)
+
+
+def test_encode_sequence_registry_shapes_nonempty():
+    ctx = make_ctx()
+    v = make_vocabs(ctx)
+    out = encode_sequence([ctx, ctx], v)
+    assert set(out.keys()) == {f.name for f in LAYOUT} | {"battle_mask"}
+    for fld in LAYOUT:
+        assert out[fld.name].shape == (2,) + fld.shape, fld.name
+
+
 # ── REAL-DATA gate (the false-truth check) ────────────────────────────
 # The synthetic make_ctx() above could drift from the real get_context(); this
 # replays REAL human-ladder battles through the belief stack and encodes the
