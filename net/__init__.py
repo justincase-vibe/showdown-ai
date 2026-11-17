@@ -31,8 +31,10 @@ Design (D61/D60, doubles-robust):
 Deliberately deferred (flagged for the user, see ``encoder`` docstring):
   * the 7 curated volatiles + G1–G6 (turns-left / revealed? / PP / static dex)
     require ``belief/`` data additions (331-baseline risk) — the NEXT decision;
-  * per-slot ``fainted`` is currently derived from ``hp_frac <= 0`` (a
-    dedicated ``belief/`` flag is the correct fix — next decision).
+  * per-slot ``fainted`` is a RESERVED column left 0.0 (get_context() cannot
+    yet tell "benched, untouched" from "fainted" — both read hp_frac 0 — and the
+    raw evidence is in the slot block). A dedicated ``belief/`` flag will fill it
+    with no shape change — next decision.
 """
 from .registry import (
     LAYOUT,
