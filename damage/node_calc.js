@@ -129,9 +129,15 @@ function buildPokemon(gen, o) {
 
 function buildField(f) {
   f = f || {};
+  // isWonderRoom: the library swaps Atk<->Def / SpA<->SpD for BOTH mons when
+  // set (checkRawStatChanges). It was missing from the bridge, so a
+  // field={isWonderRoom:true} request computed with UNSWAPPED stats (silent
+  // no-op). attackerSide/defenderSide already carried isReflect/isLightScreen
+  // (the 0.5x screen halves) — keep them.
   return new Field({
     weather: f.weather,
     terrain: f.terrain,
+    isWonderRoom: !!f.isWonderRoom,
     attackerSide: new Side(f.attackerSide || {}),
     defenderSide: new Side(f.defenderSide || {}),
   });

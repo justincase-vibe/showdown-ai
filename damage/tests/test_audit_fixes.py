@@ -75,6 +75,36 @@ def test_tera_type_lowercase_id_still_stabs():
     assert (plain["min"], plain["max"]) == (31, 37)  # no tera -> no STAB
 
 
+def test_field_screens_and_wonderroom_bridge():
+    # B5 — the calc's Field supports per-side screens and Wonder Room, but the
+    # bridge dropped isWonderRoom entirely (buildField never forwarded it to
+    # the Field constructor) and the belief's calc_field never emitted the
+    # side conditions — screened windows were 2x too wide (weak evidence) and
+    # Wonder Room battles computed with UNSWAPPED stats (wrong evidence).
+    att = {"name": "garchomp", "level": 100, "evs": {"atk": 252}}
+    defn = {"name": "blastoise", "level": 100, "evs": {"def": 252}}
+    plain = calc.calc_damage(att, defn, "earthquake", gen=9)
+    assert (plain["min"], plain["max"]) == (129, 153)
+    # Reflect halves physical damage on the defending side
+    refl = calc.calc_damage(att, defn, "earthquake", gen=9,
+                            field={"defenderSide": {"isReflect": True}})
+    assert (refl["min"], refl["max"]) == (64, 76)
+    # Light Screen halves special damage
+    att2 = {"name": "blastoise", "level": 100, "evs": {"spa": 252}}
+    defn2 = {"name": "garchomp", "level": 100, "evs": {"spd": 0}}
+    plain2 = calc.calc_damage(att2, defn2, "surf", gen=9)
+    ls = calc.calc_damage(att2, defn2, "surf", gen=9,
+                          field={"defenderSide": {"isLightScreen": True}})
+    assert (plain2["min"], plain2["max"]) == (127, 150)
+    assert (ls["min"], ls["max"]) == (63, 75)
+    # Wonder Room swaps Atk<->Def for BOTH mons: Garchomp Atk 130 > Def 95 and
+    # Blastoise Def 100 > Atk 83 -> the window moves (before the fix it was
+    # silently identical to the no-WR window).
+    wr = calc.calc_damage(att, defn, "earthquake", gen=9,
+                          field={"isWonderRoom": True})
+    assert (wr["min"], wr["max"]) == (157, 186)
+
+
 def test_champions_superfang_tera_ghost_gengar_immune():
     # Champions = engine 0: Tera-aware gate applies here too (BSS target).
     # (Gengar/Farfetchd/Beartic are in the 359-species champions whitelist;

@@ -200,16 +200,40 @@ def status_of(statuses) -> Optional[str]:
     return None
 
 
-def calc_field(field: Optional[Dict]) -> Dict:
-    """``BeliefState.field`` -> the calc's ``field`` input ({} when nothing set)."""
+def calc_field(field: Optional[Dict], attacker_side: Optional[str] = None,
+               defender_side: Optional[str] = None) -> Dict:
+    """``BeliefState.field`` -> the calc's ``field`` input ({} when nothing set).
+
+    Weather / terrain are shared by both mons. The SCREENS are per-side, so the
+    caller names the Showdown side of the attacking / defending mon (``p1``/
+    ``p2``) and each screen lands on THAT mon's side (the library halves
+    physical damage behind ``defenderSide.isReflect`` and special damage behind
+    ``defenderSide.isLightScreen`` — verified: 129-153 -> 64-76). Wonder Room
+    is shared (it swaps Atk/Def and SpA/SpD for both mons).
+
+    Without the side arguments the screens are dropped — the pre-fix behaviour,
+    which left every screened window 2x too wide (weak, never-wrong evidence).
+    """
     field = field or {}
-    out: Dict[str, str] = {}
+    out: Dict[str, Any] = {}
     w = _WEATHER.get(field.get("weather") or "")
     if w:
         out["weather"] = w
     t = _TERRAIN.get(field.get("terrain") or "")
     if t:
         out["terrain"] = t
+    if field.get("wonderroom"):
+        out["isWonderRoom"] = True
+    for side, key in ((attacker_side, "attackerSide"), (defender_side, "defenderSide")):
+        if not side:
+            continue
+        s: Dict[str, bool] = {}
+        if (field.get("reflect") or {}).get(side):
+            s["isReflect"] = True
+        if (field.get("lightscreen") or {}).get(side):
+            s["isLightScreen"] = True
+        if s:
+            out[key] = s
     return out
 
 

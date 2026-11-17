@@ -147,6 +147,26 @@ def test_damage_defender_direction():
     assert sum(sb.posterior) == pytest.approx(1.0, abs=1e-9)
 
 
+def test_damage_window_halved_by_reflect():
+    """Reflect halves PHYSICAL damage on the defending side (B5). With Reflect
+    up on p2, Garchomp (252 Atk) Earthquake vs Blastoise deals 252-Def [64,76]
+    / 0-Def [81,96]; without it [129,153] / [163,193]. Observed delta 76 sits
+    inside the HALVED 252-Def window and outside the halved 0-Def window —
+    but outside BOTH unhalved windows, so if the bridge drops the screen both
+    candidates get ruled out (flat posterior) and this test fails."""
+    own = {"p1a": {"name": "garchomp", "evs": {"atk": 252}}}
+    bs = BeliefState("gen9ou", own_team=own)
+    sb = install(bs, "p2a", "blastoise", [cand(), cand(evs={"def": 252})])
+    bs.update(E.FieldEffectChanged(name="reflect", side="p2", active=True))
+    applied = bs.update(E.DamageObserved(
+        target_side="p2", target_slot="p2a", hp_after=181 - 76, maxhp=181,
+        ko=False, source_kind="move", move="earthquake",
+        source_side="p1", source_slot="p1a"))
+    assert applied is True
+    assert approx_eps(sb.candidates[0]["weight"])    # 0-Def ruled out (min 81 > 76)
+    assert approx_one(sb.candidates[1]["weight"])     # 252-Def confirmed (64-76)
+
+
 # ══════════════════════ damage window: attacker direction ═════════════════════
 
 def test_damage_attacker_direction():
@@ -284,6 +304,23 @@ def test_speed_switch_between_moves_no_evidence():
     assert sb.posterior == before
 
 
+def test_speed_trick_room_inverts_evidence():
+    """Trick Room inverts action order: the SLOWER mon moves first (B5). Our
+    Garchomp (Spe 122) moves first and the opponent's Blastoise second, so
+    under Trick Room the Blastoise must be the FASTER one — the exact opposite
+    of test_speed_first_mover_faster: the 252-Spe candidate (224) is confirmed
+    and the 0-Spe one (98) ruled out. Before the fix the evidence ran the
+    normal-order comparison even under Trick Room, so the posterior updated
+    in the WRONG direction (active false truth, not just weak evidence)."""
+    bs = BeliefState("gen9ou", own_team={"p1a": {"name": "garchomp", "evs": {"spe": 0}}})
+    sb = install(bs, "p2a", "blastoise", [cand(evs={"spe": 0}), cand(evs={"spe": 252})])
+    bs.update(E.FieldEffectChanged(name="trickroom", side="", active=True))
+    bs.update(E.MoveUsed(side="p1", slot="p1a", move="earthquake"))
+    bs.update(E.MoveUsed(side="p2", slot="p2a", move="surf"))
+    assert bs.update(E.Turn(n=1)) is True
+    assert approx_eps(sb.candidates[0]["weight"]) and approx_one(sb.candidates[1]["weight"])
+
+
 # ═══════════════════════════════ fact sheet ══════════════════════════════════
 
 def test_facts_bookkeeping():
@@ -381,6 +418,27 @@ def test_calc_field_accepts_real_log_ids():
     assert ev.calc_field({"weather": None}) == {}
     assert ev.calc_field({}) == {}
     assert ev.calc_field(None) == {}
+
+
+def test_calc_field_bridges_screens_and_wonderroom():
+    """Reflect / Light Screen are PER-SIDE (the screen protects that side's
+    mon); Wonder Room is shared. ``calc_field`` must map the belief's
+    side-condition bookkeeping onto the calc's ``attackerSide`` /
+    ``defenderSide`` / ``isWonderRoom`` keys — the library halves physical
+    damage behind ``defenderSide.isReflect``, special damage behind
+    ``isLightScreen``, and swaps Atk/Def + SpA/SpD for BOTH mons under
+    ``isWonderRoom``. Before the fix all three were silently dropped: every
+    screened window was 2x too wide (weak evidence) and Wonder Room battles
+    computed with unswapped stats (wrong evidence)."""
+    f = {"reflect": {"p2": 5}, "lightscreen": {"p1": 5}, "wonderroom": True}
+    out = ev.calc_field(f, attacker_side="p1", defender_side="p2")
+    assert out["defenderSide"] == {"isReflect": True}
+    assert out["attackerSide"] == {"isLightScreen": True}
+    assert out["isWonderRoom"] is True
+    # backwards-compatible: no side args -> only the shared condition
+    # (the pre-fix one-arg callers: speed order, max-HP probe — screens and
+    # WR never affect speed or max HP, so those callers are unaffected)
+    assert ev.calc_field(f) == {"isWonderRoom": True}
 
 
 def test_status_of_passes_showdown_status_codes_through():

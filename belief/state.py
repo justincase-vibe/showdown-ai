@@ -890,7 +890,13 @@ class BeliefState:
         source_p2 = dmg.source_side == "p2"
         if target_p2 == source_p2:
             return False
-        field = ev.calc_field(self.field)
+        # Screen-aware field (B5): Reflect halves PHYSICAL damage behind the
+        # defender, Light Screen halves SPECIAL — each lands on the side of the
+        # mon it protects, so name the attacking / defending side (the slot's
+        # side id, which is also the key the belief field uses). Wonder Room
+        # (shared) rides along in the same dict.
+        field = ev.calc_field(self.field, attacker_side=dmg.source_side,
+                              defender_side=dmg.target_side)
         if target_p2:
             # candidate = DEFENDER (p2); attacker = exact own mon
             sb = self._slots.get(dmg.target_slot)
@@ -1004,6 +1010,10 @@ class BeliefState:
         if a_belief == b_belief:
             return False  # both own (no belief) or both belief (multi) — 3.4-2
         field = ev.calc_field(self.field)
+        # Trick Room inverts action order: normally the FIRST mover is the
+        # faster one; under Trick Room the first mover is the SLOWER one (B5),
+        # so the "first mover is faster" comparison flips for the whole turn.
+        first_ge = not bool(self.field.get("trickroom"))  # first mover >= second
 
         def known_speed(side: str, slot: str) -> Optional[int]:
             spec = self.own_team.get(slot)
@@ -1015,8 +1025,9 @@ class BeliefState:
             tw = self.field.get("tailwind_side") == side
             return ev.speed_of(mon, fmt=self.fmt, tailwind=tw, field=field)
 
+        # a is the FIRST action of the turn, b the SECOND (buffer order).
         if a_belief:
-            # a moved first -> candidate speed >= other's speed
+            # candidate moved FIRST: faster (normal) / slower (Trick Room)
             other = known_speed(side_b, slot_b)
             if other is None:
                 return False
@@ -1029,9 +1040,11 @@ class BeliefState:
 
             def lik(c: Dict) -> float:
                 mon = ev.mon_options(c, status=a_status, boosts=a_boosts, name=sb.species)
-                return 1.0 if ev.speed_of(mon, fmt=self.fmt, tailwind=tw, field=field) >= other else 0.0
+                s = ev.speed_of(mon, fmt=self.fmt, tailwind=tw, field=field)
+                ok = (s >= other) if first_ge else (s <= other)
+                return 1.0 if ok else 0.0
         else:
-            # b moved first -> candidate speed <= other's speed
+            # candidate moved SECOND: slower (normal) / faster (Trick Room)
             other = known_speed(side_a, slot_a)
             if other is None:
                 return False
@@ -1044,7 +1057,9 @@ class BeliefState:
 
             def lik(c: Dict) -> float:
                 mon = ev.mon_options(c, status=b_status, boosts=b_boosts, name=sb.species)
-                return 1.0 if other >= ev.speed_of(mon, fmt=self.fmt, tailwind=tw, field=field) else 0.0
+                s = ev.speed_of(mon, fmt=self.fmt, tailwind=tw, field=field)
+                ok = (other >= s) if first_ge else (other <= s)
+                return 1.0 if ok else 0.0
         ev.apply_evidence(sb.candidates, lik)
         return True
 
