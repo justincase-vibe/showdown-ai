@@ -60,7 +60,10 @@ class SwitchIn(Event):
     slot: str = ""
     species: str = ""
     hp: int = 0     # current HP on entry
-    maxhp: int = 0  # max HP = the line's denominator (always revealed)"""
+    maxhp: int = 0  # max HP = the line's denominator (always revealed)
+    forced: bool = False  # True = a game-forced entry (|drag|/|replace|), NOT a
+                          # player decision — the corpus excludes these from the
+                          # switch-rate (a drag/replace is automatic, not chosen).
 
 
 @dataclass

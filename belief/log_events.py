@@ -73,6 +73,13 @@ IGNORED_TAGS = frozenset({
     "team", "pokeball", "t:", "gametype", "clearpoke", "poke", "teampreview",
     "showteam", "rated", "chat", "message", "-message", "html", "debug",
     "bigerror", "detailschange",
+    # human-ladder ambient noise (S4.0 gate, verified 2026-11-17 against
+    # gen9ou.jsonl): real ladder logs are full of lobby/chat/broadcast lines the
+    # clean self-play logs never had. j=join, c=chat, l=leave, n=nickname,
+    # inactive=battle-timer notice, raw/uhtml/badge=HTML broadcasts, -singleturn=
+    # cosmetic "lasts one turn" announce (the real move is the |move| line we map).
+    # None carry set evidence. (In the sample battle these were ALL 484 Unknowns.)
+    "j", "c", "l", "n", "inactive", "raw", "badge", "uhtml", "-singleturn",
     # visual/ambient effects (no set evidence). `-prepare` (SIM-PROTOCOL.md:594
     # |-prepare|ATTACKER|MOVE) is the client charge/aim animation line — the real
     # move is the |move| line we DO map, so it adds no belief evidence and is
@@ -86,6 +93,19 @@ IGNORED_TAGS = frozenset({
     # move-attempt-failure lines; see the handlers below).
     "split", "upkeep", "-start", "-end", "-miss",
     "-transform", "-primal", "-formechange", "-enditem", "swap",
+    # human-ladder extras (S4.0 gate, verified 2026-11-17 across 200 gen9ou
+    # battles — 90 had >=1 Unknown, these 4 tags are the no-set-evidence ones):
+    #   -anim        (44)  client animation line (battle.js case "-anim"): the
+    #                      move's VFX — the real move is the |move| line we map.
+    #   inactiveoff   (1)  lobby/timer notice "Battle timer is now OFF."
+    #   -clearallboost (42) whole-boost reset (the per-stat -boost/-unboost is the
+    #                      evidence; consistent with the already-ignored -clearboost).
+    #   -swapsideconditions (13) client swapSideConditions(): swaps the two sides'
+    #                      hazards/screens — a rare field-state edge, no SET reveal
+    #                      (the fuzz can flag it if it ever matters for the calc).
+    # NOTE: `drag`/`replace`/`-sethp` are NOT here — they carry evidence and are
+    # mapped (forced SwitchIn / absolute HP set) just above.
+    "-anim", "inactiveoff", "-clearallboost", "-swapsideconditions",
     # non-BSS / gen-specific (no 3.1 evidence)
     "-mega", "-zpower", "-zbroken", "-burst", "-candynamax",
     # damage MODIFIERS — the lines themselves carry no set evidence, and none of
@@ -242,13 +262,20 @@ class LogAdapter:
         p = parts[2:]  # payloads
 
         if tag == "start":
-            return BattleStart(fmt=p[0] if p else None)
+            return BattleStart(fmt=p[0].strip() if p else None)  # "|start| gen9ou" is space-padded
         if tag in IGNORED_TAGS:
             return None
         if tag == "turn":
             return Turn(n=_int(p[0]))
 
-        if tag == "switch":
+        if tag in ("switch", "drag", "replace"):
+            # `drag` (battle-actions.js:185 `isDrag ? "drag" : "switch"`) and
+            # `replace` (client `poke.side.replace`) are the FORCED switch-in
+            # variants — a mon is dragged/replaced into the slot by the game, NOT
+            # a player decision. Same payload as `switch` (slot, details, hp/max).
+            # Marked `forced` so the corpus counts the belief update but NOT a
+            # switch decision (keeps the human switch-rate accurate).
+            forced = tag != "switch"
             side, slot = _slot_of(p[0])
             species = to_id(p[1].split(",")[0])
             # the sim logs each switch-in twice, back-to-back — drop the dup
@@ -259,9 +286,10 @@ class LogAdapter:
             m = re.match(r"(\d+)\s*/\s*(\d+)", hp_payload.strip())
             cur_hp = int(m.group(1)) if m else 0
             max_hp = int(m.group(2)) if m else 0
-            self._learn_maxhp(slot, hp_payload)
+            if not forced:
+                self._learn_maxhp(slot, hp_payload)  # a real lead/switch is max/max ground truth
             return SwitchIn(side=side, slot=slot, species=species,
-                            hp=cur_hp, maxhp=max_hp)
+                            hp=cur_hp, maxhp=max_hp, forced=forced)
         if tag == "leave":
             side, slot = _slot_of(p[0])
             return SwitchOut(side=side, slot=slot)
@@ -352,7 +380,11 @@ class LogAdapter:
             # p[2] is the residual context tag (`[from] brn` / `[from] Recoil` /
             # `[silent]` …) — present on residual lines, absent on a pure move hit.
             return self._hp_event(p[0], p[1], damage=True, context=p[2] if len(p) >= 3 else None)
-        if tag == "-heal" and len(p) >= 2:
+        if tag in ("-heal", "-sethp") and len(p) >= 2:
+            # `-sethp` (pokemon.js sethp / battle.js Pain Split) is an ABSOLUTE
+            # HP set ("79/100"), not a delta — the belief just records the new HP
+            # (_set_hp), so the heal path is the right fit (no reflector last_hit,
+            # no move-source attribution — it is not a move hit).
             return self._hp_event(p[0], p[1], damage=False, context=p[2] if len(p) >= 3 else None)
         if tag == "-side damage" and len(p) >= 2:
             ev = self._hp_event(p[0], p[1], damage=True)
@@ -388,7 +420,9 @@ class LogAdapter:
             return TerrainChanged(terrain=to_id(p[0]).removesuffix("terrain") if p else "none")
 
         if tag == "win":
-            return BattleEnd(winner_side=p[0] if p else None)
+            # ladder logs use "|win| p1" (space-padded payload) — strip, like
+            # every other branch (a " p1" winner_side would break == "p1" checks)
+            return BattleEnd(winner_side=p[0].strip() if p else None)
         if tag == "tie":
             return BattleEnd(winner_side=None)
 
