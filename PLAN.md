@@ -75,13 +75,13 @@ from scratch, draft head) is **superseded** by the 10-step plan below.
 | 1 | Move/species database | lookup layer over Showdown data + Smogon common sets (Gen 9) + format level rules | known lookups correct; learnset integrity (no missing keys); set probabilities sum to 1; level rules match live fork | ✅ **2026-11-07** — `legality/tests/test_step1.py` **21/21 green**; **+2026-11-08 (D33 level fix):** schema v4, all 50 formats carry fork-verified level rules, `battle_level()` helper, live-fork match guard — suite **24/24 green** |
 | 2 | Damage calculator wrapper | `calc_damage(att, def, move, field, fmt) → (min%, max%, expected%)` via @smogon/calc (Node) | 15–20 hand-checked matchups within rounding; screens/boosts/immunities; speed helper | ✅ **2026-11-08** — `damage/tests/test_step2.py` **34/34 green** (17 hand-checked matchups + 3 immunities + STAB/eff/burn/boost/weather/screen/item/ability/crit/speed); **+ format-key addendum (D32+D33):** `fmt=` param on all 3 APIs — engine key from `mod` (`champions`→0, `genN`→N) and each mon's level resolved by the format's level rules (BSS/VGC/champions L50, LC L5, ladder L100; illegal level → error), `damage/tests/test_format_key.py` **10/10 green** — full gate **68/68** | **+ cross-check vs live fork sim (D34, 2026-11-09):** 11 mechanics × 24 seeds all 11/11; **item/ability id-vs-name contract bug fixed** (`normItem`/`normAbility`) + 3 regression tests — full gate **71/71**; **+ 10 more matchups + Guts/veil/burn deep-dive (D35, 2026-11-09):** +10 hand-checked matchups (incl. dual-type Surging Strikes, Life Orb, +2 boost, Adaptability, priority Aqua Jet — 2 sim-confirmed) and +10 Guts/Aurora-Veil/burn-interaction tests — full gate **91/91**; **+ damage-ability audit + current-HP pass-through (D36, 2026-11-09):** 192/192 ability name-contract clean (no silent drops); the ONE real wrapper gap fixed — current HP was never passed, so **every** HP-gated effect was wrong (low-HP attacker effects never fired, full-HP-only defender effects always did); each mon now accepts `hp` (0.0-1.0 fraction) / `curHP` (absolute) — Defeatist, Overgrow/Blaze/Torrent/Swarm, Eruption/Water Spout/Flail/Reversal, Multiscale/Shadow Shield/Tera Shell, Brine; +21 engine-verified tests — full gate **112/112** | **+ special-damage (non-basePower) moves (D37, 2026-11-10):** `@smogon/calc` returned 0 for 11 formula-based moves (Super Fang, Ruination, Nature's Madness, Guardian of Alola, Final Gambit, Endeavor, Psywave, and the 4 reflectors Counter/Mirror Coat/Metal Burst/Comeuppance) — `node_calc.js` now completes them with the official fork-verified formulas; **Super Fang's gen-aware Ghost immunity** (immune vs Ghost in gen 2+, hits Ghost in gen 1); reflectors take a new `move.lastHitDamage` (belief-state prior hit; absent → fails 0, matching the fork's thisTurn gate). `damage/tests/test_special_damage_moves.py` +17 fork-pinned tests — full gate **134/134** | **+ T2–T4 special-damage moves + fork-exact type-immunity gate (D38, 2026-11-10):** T2 level moves (Nightshade/Seismic Toss = attacker level), T3 OHKO (Fissure/Guillotine/Horn Drill always-KO; Sheer Cold = KO or Ice-immune), T4 (Explosion/Self-Destruct/Misty Explosion via the library's base-power path; faint-support moves report 0); **type-immunity gate rebuilt** — `@smogon/calc` ignores immunities on formula moves, so `node_calc.js` now gates them via a fork-exact precomputed table `damage/special_move_immunity.json` (regen: `scratch/gen_special_move_immunity.js`) + fork-dispatch rules (Iron Ball overrides Flying/Levitate/Eelevate/Air Balloon for Ground moves; Sheer Cold Ice-immunity); a prior from-memory move-type map was found **wrong** (fork data was right — Natures Madness=Fairy, Final Gambit=Fighting, Seismic Toss=Fighting, Ruination=Dark, …). +12 tests — full gate **146/146** | **+ T5 state-dependent base-power moves + champions hardening (D39, 2026-11-15):** 9 BSS-legal `bpCallback` moves (avalanche/beatup/pledges/lastrespects/spitup/ST/TF) completed via a fork-exact per-engine base-BP table + belief-state flags → `Move(overrides:{basePower})` into the one library pipeline (fixes the `beatup`/`spitup` **0-damage bug**; ST/TF = prev-move-fail, lastrespects = absolute 50+50×fainted — both formula corrections); champions engine hardened: banned pledges report 0/immune (no more crash) and non-whitelist species (chansey etc.) now raise a clean legality error instead of an opaque library crash; +17 tests — full gate **163/163** |
 | 3 | Opponent belief sampler | belief over hidden info; `update(event)`, `sample(n)`, `move_probabilities(mon)` | revealed move in every sample; illegal sets = 0; probs sum to 1 after each update; Choice-lock shift | ✅ **3.1–3.8 ✅ 2026-11-16** (belief 84/84; D43, D46, D47, D48) — 3.7 whole-battle fuzz bug-catcher **GREEN** (12 seeded BSS battles; the 🔴 was a real Step-1 "Past"-tag data bug, fixed per D47) · 3.8 perf bench (**update ~0.5–0.75s** Node-spawn-bounded, **sample(100) ~0.5ms** — acceptable for per-turn; a batch endpoint is the flagged deep-tree follow-up) · **D48 post-milestone bug-hunt:** residual-vs-move classification (burn ticks were collapsing the posterior) + `last_hit` reflector input, all fork-verified + regression-gated |
-| 4 | Observation encoder | structured per-mon + damage block + field + legal mask (replaces flat 892-dim) | fixed shapes; no leakage (unrevealed move absent); deterministic; bench swap = slot permutation only | ⬜ |
-| 5 | Network | set encoder + GRU core + masked policy/value heads (hidden 128–256) | illegal actions = exactly 0 prob; permutation invariance; overfit-32 sanity; GRU reset per battle | ⬜ |
-| 6 | Behavior cloning | replay parser → BC from human replays (cross-entropy, **no reward**) | switch rate within a few pts of human (~15–25%); per-action-type accuracy; beats random, competitive with max-damage | ⬜ |
-| 7 | PPO fine-tune + league | reuse PPO loop; win/loss + annealed shaping; KL→BC annealed; entropy; league bots | switch/setup rates stay non-zero (alarm <3%); >60% vs max-damage and rising; ≥400 battles per comparison | ⬜ |
-| 8 | Payoff matrix builder | depth-1 matrix: own legal actions × belief-weighted opponent actions → value head | OHKO case → switch row wins; harmless-slow case → setup row wins; dims match; no NaNs | ⬜ |
-| 9 | LP / Nash solver | `linprog` zero-sum solve → mixed strategy over own actions | RPS = [⅓,⅓,⅓]; matching pennies = [½,½]; dominant row → 1; valid simplex | ⬜ |
-| 10 | Integration & eval | player class: obs → net → (optional 8–9) → sample | A vs B ≥400 battles each, 95% CIs, switch/setup rates; B not worse than A (else debug value head/matrix) | ⬜ |
+| 4 | Observation encoder | structured per-mon + damage block + field + legal mask (replaces flat 892-dim) | fixed shapes; no leakage (unrevealed move absent); deterministic; bench swap = slot permutation only | 📋 **PLANNED (§3c S4.1, D58)** |
+| 5 | Network | set encoder + GRU core + masked policy/value heads (hidden 128–256) | illegal actions = exactly 0 prob; permutation invariance; overfit-32 sanity; GRU reset per battle | 📋 **PLANNED (§3c S4.2, D58)** |
+| 6 | Behavior cloning | replay parser → BC from human replays (cross-entropy, **no reward**) | switch rate within a few pts of human (~15–25%); per-action-type accuracy; beats random, competitive with max-damage | 📋 **PLANNED (§3c S4.3, D58)** — corpus = human top-player replays (D58) |
+| 7 | PPO fine-tune + league | reuse PPO loop; win/loss + annealed shaping; KL→BC annealed; entropy; league bots | switch/setup rates stay non-zero (alarm <3%); >60% vs max-damage and rising; ≥400 battles per comparison | 📋 **PLANNED (§3c S4.4, D58)** — full league + champion transfer |
+| 8 | Payoff matrix builder | depth-1 matrix: own legal actions × belief-weighted opponent actions → value head | OHKO case → switch row wins; harmless-slow case → setup row wins; dims match; no NaNs | ⬜ D58: subsumed by the hybrid stage (§3c S4.5 — depth-1 MCTS = this matrix) |
+| 9 | LP / Nash solver | `linprog` zero-sum solve → mixed strategy over own actions | RPS = [⅓,⅓,⅓]; matching pennies = [½,½]; dominant row → 1; valid simplex | ⬜ D58: deferred (MCTS hybrid is the decision layer; Nash tail only if the S4.5 gate fails) |
+| 10 | Integration & eval | player class: obs → net → (optional 8–9) → sample | A vs B ≥400 battles each, 95% CIs, switch/setup rates; B not worse than A (else debug value head/matrix) | ⬜ D58: = the final gate of the hybrid stage (§3c S4.5) |
 
 **Step spec text (Build + TESTS per step):** see [build_plan_10step.txt](build_plan_10step.txt)
 — the user's plan, kept verbatim.
@@ -443,6 +443,10 @@ turn, so the Node spawn IS the realistic per-turn cost) · **sample(100) ~0.5ms*
 
 ### 3b. Step 4 stage (observation encoder / belief sampler) — STAGE LAID, NOT BUILT (2026-11-16)
 
+> **The full execution plan now lives in §3c (2026-11-17, D58)** — it incorporates this
+> section's observation surface (§3b-A) + the C1 (GRU) recommendation. This section stays as
+> the observation-surface reference.
+
 > Per user: "continue setting up the stage for part 4" — this lays the ground
 > (observation completeness + the open network decisions + recommendations) so
 > Step 4 can start cleanly. The Step-4 net/sampler code is **NOT implemented yet.**
@@ -513,6 +517,113 @@ items from this class:** §3a-5 (Revenge not in calc, gen ≤7) + §3a-6 (reflec
 **F. Per-gen move data (D56 + D57) — ✅ RESOLVED 2026-11-16 (Option A, user-approved; A2 done).**
 Move metadata (type/category/power/accuracy/pp/priority) AND the effect flags (side_condition/side_status/boosts/drain/recoil) are now **per-generation in the DB** (`move_gen`, engine-keyed, fork-sourced, 1628 override rows) and `lookup.get_move(name, gen)` is gen-aware — so the Step-4 net + team-building see the correct move data for whatever format they train on (champions Slash 80, gen 1-3 Dragon Claw special, gen-1 Light Screen is a boost not a screen, Tail Glow +2 not +3). The D55 reflector **category** gate + the **speed-order priority** evidence both key off the format's engine key (`formats.engine_key(fmt)`). **A1 (6 data cols) + A2 (5 effect flags) both DONE** — move data is fully per-gen (schema v6).
 
+### 3c. Step 4–7 execution plan (net-first → hybrid-last) — PLANNED, NOT BUILT (2026-11-17, D58)
+
+> **Locked architecture (user decisions, D58):** **net → BC warm-start (human top-player
+> replays) → full-league self-play + champion transfer → hybrid (MCTS over the belief state +
+> exact calc) as the END GOAL.** Hybrid = MCTS (net = prior + leaf eval · belief =
+> opponent sampling / transition · `calc_damage_many` = exact damage) — NOT a learned world
+> model (Dreamer/MuZero stay documented as a ceiling upgrade if Node cost bites). One step at a
+> time, strong checkpoints, pytest-gated (rules 1–2). **Nothing in this section is built yet.**
+> Baseline at planning: **331/331 green (144 s, 2026-11-17)**. Roadmap steps 8–10 are
+> re-interpreted by D58 (S4.5 subsumes them).
+
+**A. Reuse (do NOT write twice):** `belief/` (all — the net's input via `get_context()` AND the
+hybrid's transition + opponent sampling), `damage/` (all — incl. batch `calc_damage_many`,
+22.5×), `legality/` (all — format engine keys, per-gen move data), the fork server + poke-env
+harness (battle loop), the HF human replay data. **Replaced (old-bot legacy, kept read-only in
+`bot/`):** `bot/obs.py` (892-dim flat obs → the §3b-A observation surface) and `bot/policy.py`
+(→ the new `net/` package).
+
+**B. OPEN DECISIONS (user to decide before S4.1 starts):**
+1. **Primary training format.** D27 = `gen9bss3v3` (3-active 3v3, level 50 — custom to this
+   server build). But the user's recent direction says "6v6 singles", and ALL public human data
+   is 1v1 (gen9 OU/UU ≈ 4M battles) or 2v2 (VGC ≈ 89k) — there is **no public 3v3 data**. Options:
+   (a) keep `gen9bss3v3` primary (D27); BC from 1v1/2v2 as transferable warm-start, 3v3
+   specialization via self-play; (b) **6v6 singles (gen9ou/uu) primary** — best data alignment,
+   simplest env, Metamon's Gen9OU model as a free baseline opponent; (c) both: primary 6v6
+   singles + a 3v3 side-ladder (2× env work). **Recommendation: (b)** — the format with the most
+   data and comparisons; the stack is format-agnostic by design (engine keys, per-gen data), so
+   3v3 can be revisited as a transfer test. **AWAITING USER.**
+2. **Action space.** (a) **compact per-state legal-action enumeration** — action =
+   (slot, kind, target); policy logits ONLY over legal actions (mask = −inf ⇒ probability
+   exactly 0, the step-5 gate); (b) the old bot's unified move-identity space (963 moves + 6
+   switches + 3 transforms) with boolean masks (reuses `bot/action_space.py`, proven, but a
+   ~972-wide logit space designed for the old obs). **Recommendation: (a)** — smaller, cleaner
+   interface to `get_context()`; the env adapter still translates to poke-env orders.
+   **AWAITING USER.**
+
+**C. Sub-steps (sequential; each starts ONLY when the previous gate is green):**
+
+**S4.0 — BC corpus pipeline** (pure data work; unblocks S4.3 and measures the human
+switch-rate the step-6 gate targets). New `corpus/` package: pull HF parquet (HolidayOugi
+`pokemon-showdown-replays` primary; `jakegrigsby/metamon-raw-replays` cross-check), filter
+(gen 9, rated, standard rules, both players' rating ≥ 1400 default — tunable), normalize to
+Showdown log lines, then run the EXISTING `belief/log_events.py` adapter + `get_context()` at
+each decision point → `(context_seq, action, result)` trajectories, both POVs.
+*Gate:* 200 real human battles through the adapter with **0 unknown-tag errors** (human logs
+carry tags the fork-fuzz never saw — `|hint|`, team preview, `|upkeep|` — the adapter must
+handle/ignore them, not crash); ≥ 95% of decision points yield a legal action; deterministic
+resumable puller (fixture unit test); corpus report (battle count, format mix, rating
+distribution, **human switch rate** = the S4.3 target); 331/331 baseline green.
+
+**S4.1 — Observation encoder (roadmap step 4).** New `net/` package: **dim registry = the single
+source of truth** for the tensor layout (checksum-pinned drift-catcher test); `get_context()`
+(§3b-A surface) → fixed float tensor; per-mon encoder inputs (own active + bench / opponent
+active); LayerNorm; battle-length padding/mask.
+*Gate (user spec):* fixed shapes (unit); **no leakage** — explicit test that unrevealed
+opponent info reaches the net ONLY through the posterior/unknown channels (rule 4);
+deterministic (same context → same tensor, 2×); bench swap = slot permutation only
+(permutation invariance); dim-registry checksum test; baseline green.
+
+**S4.2 — Network core + heads (roadmap step 5).** 4×GRU-512 (user-approved 3–4 layer depth) over
+the turn sequence + per-mon encoder (128); LayerNorm between layers; **GRU state reset per
+battle**; policy head = masked logits over the legal actions (decision B2); value head = scalar
+(logistic squash).
+*Gate (user spec):* **illegal actions = exactly 0 probability** (mask test over 500 sampled
+states); permutation invariance (active/bench slot swap → same logits); **overfit-32 sanity:
+memorize a 32-battle subset → train loss < 0.05** (the "never learns" disaster guard);
+save/load round-trip = identical logits; no NaN/inf grads on a real-corpus batch; baseline green.
+
+**S4.3 — BC warm-start (roadmap step 6).** Train the policy head (cross-entropy on the human
+action; both POVs; ablate a winner-POV up-weight). Value head = phase 2 (win/loss regression on
+the same corpus) — only after the policy gate.
+*Gate (user spec):* **switch rate within a few pts of the human rate** (target from the S4.0
+corpus report); per-action-type accuracy (move/switch/item/tera) reported + held-out top-1
+reported vs chance (1/|legal|); **beats random and is competitive with a max-damage baseline**
+(≥ 40 battles each, logged); best checkpoint saved on the held-out metric.
+
+**S4.4 — Self-play + full league + champion transfer (roadmap step 7).** Env: poke-env wrapper
+for the confirmed format (decision B1; `SinglesEnv` for 6v6 / `MultiBattleEnv` for 3v3) —
+reusing the `bot/` harness where it fits; full-game loop; **every game logged in Showdown log
+format** (feeds the league + future BC); baselines: random, max-damage, BC-clone, old 3.6G
+checkpoints (if the format matches). League: 12–20 agents, round-robin eval per generation,
+cull the weakest ~20% (gradual — keep diversity), refill with mutants (ES mutation of the
+champion + occasional BC-reseed); champion tracked. **Champion transfer (user-approved
+mechanism, D58):** advantage-weighted delta (rank-based advantage, per-node scale-normalized)
+with a **per-node sign-agreement gate** (apply where |agreement| ≥ 0.6, else shrink — the user's
+"convergent direction / uncertainty at node 60" idea, formalized in D58) + behavior
+distillation from the top-20% winners on their winning states (the robust primary channel);
+α ≈ 0.05–0.1 over a few generations; **A/B against no-transfer every generation** (measurable,
+no faith); per-node agreement map logged (debug artifact).
+*Gate (user spec):* **switch/setup rates stay non-zero (alarm < 3%)**; **> 60% vs max-damage
+and rising**; **≥ 400 battles per comparison**; 100 self-play games with 0 crashes/forfeits;
+seeded-reproducible game pair; checkpoint load test; 5-generation league stability.
+
+**S4.5 — Hybrid: MCTS over belief + exact calc (END GOAL; subsumes roadmap steps 8–9).** MCTS
+with: prior = net policy · leaf eval = net value · opponent sampling = `belief.sample()` ·
+transitions = `belief.update(event)` · damage eval = `calc_damage_many` (batched; 24 calcs ≈
+0.27 s). **Depth-1 MCTS == the old step-8 payoff matrix** (own actions × belief-weighted
+opponent actions → value head), so the old design is a special case, not a throwaway. Node
+budget + per-turn latency budget (p95 ≤ ~2 s target — set from S4.4 throughput, not guessed).
+*Gate:* MCTS (fixed budget) **beats the argmax net over ≥ 200 games with a 95% CI**; latency
+budget met (p95); seeded determinism; full suite green. **This is the "greatest Pokemon AI"
+checkpoint.**
+
+**D. Non-goals for Step 4 (scope stays tight):** team preview/selection learning; learned team
+building; VGC doubles (the VGC dataset stays available for later); multi-format league; the
+Nash/LP tail (roadmap step 9) — only if the S4.5 gate fails and depth-1 is the bottleneck.
+
 ## 4. Decision log
 
 Continues the old project's log (D1–D19 in the old `showdown AI/legality/PLAN.md`, still
@@ -560,6 +671,7 @@ Step 1 wrap-up.
 | D55 | **Reflector CATEGORY gate fixed (user: "yes, fix that calculator error next please").** The fork reflects only a MATCHING category — Counter/Metal Burst record a PHYSICAL hit, Mirror Coat/Comeuppance a SPECIAL one (moves.js `onDamagingHit`: `getCategory(move) === "Physical"` / `"Special"`); a mismatch means the reflector FAILS (0). Our calc applied `2× lastHit` to Counter/Mirror Coat **regardless of category** (node_calc.js:486-493) and `last_hit` recorded no category → a special-hit + Counter (or physical-hit + Mirror Coat) over-reported 2× where the fork fails at 0. **Fix (Python data pipe; calc UNCHANGED — D37 keeps @smogon/calc the semantic authority):** (a) `Facts.last_hit_category: Optional[str]` set alongside `last_hit` in `_apply_damage` via `_move_category(ev.move)` (DB lookup, `None` on unknown) — persisted as reflector memory like `last_hit` (excluded from `turn_reset()`, cleared in `reset()`); (b) module const `_REFLECTOR_REQUIRES = {counter/metalburst: "Physical", mirrorcoat/comeuppance: "Special"}` (fork-verified); (c) `_move_with_state` attaches `lastHitDamage` **only to a reflector** (`required is not None`) **and only when** `facts.last_hit_category == required` — a mismatch falls to the calc's `lastHit==null → 0` path (base power, no over-report) and non-reflector moves never carry the field (calc reads it only for the 4 reflectors — no non-reflector consumer in node_calc.js). **Tests:** `test_reflector_preserves_narrowed_posterior` re-paired SPECIAL hit → **Mirror Coat** (fork-accurate; was the fork-inaccurate special+Counter); `test_reflector_stale_hit_not_reflected` (D54) re-paired to a **PHYSICAL** hit (Aqua Jet) → **Counter** so it reflects, + `last_hit_category == "Physical"` assertion; +1 `test_reflector_category_gate` (special opens Mirror Coat/Comeuppance but NOT Counter/Metal Burst; physical the reverse; non-reflector tackle never carries `lastHitDamage`). **Gate: 322/322** (was 321). | user: "yes, fix that calculator error next please" | 2026-11-16 |
 | D56 | **Per-gen move data now lives in the DB (Option A — user-approved).** Move metadata is mechanics-scoped and changes per generation (Dragon Claw SPECIAL gen 1-3 → PHYSICAL gen 4+; Protect priority 2→3→4; champions Slash 70→80). **A1 (implemented):** `move_gen` gains `category` + `priority` (schema v5, `db.py` bootstrap ALTER); `legality/extract_move_gen.js` (NEW, fork-sourced via `Dex.forFormat`, bakes in mod overrides) emits an **overrides-only** row per **engine key** (0=champions, 1-9=gen; `move_gen.gen` = engine key, NOT raw gen) where a move's type/category/power/accuracy/pp/priority differs from the gen-9 base — **1602 rows** (k0=134 k1=391 k2=380 k3=374 k4=141 k5=110 k6=36 k7=24 k8=12 k9=0). `lookup.get_move(name, gen)` merges the override onto the gen-9 base (backwards-compatible: empty `move_gen` ⇒ unchanged); effect flags side_condition/boosts/drain/recoil stay gen-9 on the base row (the calc models those per-gen — **A2 deferral**). Both belief consumers are now **gen-aware** via `formats.engine_key(fmt)`: the D55 reflector **category** gate (`_move_category(move, gen)`) + the **speed-order priority** evidence (`_pair_speed`). **A2 (deferred, not started):** per-gen effect flags, only when a consumer needs them. **Gate: 327/327** (was 322). | user: "the move data should live in the database and change per generation (in gens 1-3 all ice moves are special for example) … so we go for A" | 2026-11-16 |
 | D57 | **A2: per-gen EFFECT FLAGS now live in the DB (the "catch more bugs" follow-up to A1 — user: "lets do A2 now and try to catch more bugs before step 4").** A probe across all 10 engine keys found **36 real per-gen flag diffs** (all in gen 1-5 + champions; gen 6-8 clean). Biggest bug class: **gen-1 Light Screen / Reflect / Mist were stat-boost moves, NOT side conditions** — so the gen-9 `is_screen` flag misclassified them; plus boost-magnitude shifts (Tail Glow +3→+2, Amnesia gen-1 boosts BOTH SpA+SpD, minimize/stringshot/sweetscent ±1 not ±2) and recoil shifts (Double Edge 1/3→1/4, Struggle 1/2→none in gen 9). **Implemented (same A1 pattern):** `move_gen` gains side_condition/side_status/boosts/drain/recoil (schema v6, `db.py` bootstrap ALTER); `extract_move_gen.js` now emits all 11 columns (sorted-key `boosts` for an order-stable diff compare); `lookup.get_move` merges the 5 flags (is_hazard/is_screen/is_tailwind recomputed from the merged side_condition). **1628 override rows** (was 1602, +26 flag-only diffs). Fork-verified. **A1 (6 data cols) + A2 (5 effect flags) both DONE** — move data is fully per-gen. **Gate: 331/331** (was 327). | user: "lets do A2 now and try to catch more bugs before step 4" | 2026-11-16 |
+| D58 | **Architecture lock-in — net-first → hybrid-last — plus the Step 4–7 execution plan (§3c).** (a) **Pipeline (user-locked):** net (4×GRU-512 + policy/value heads over the §3b-A observation) → **BC warm-start on HUMAN TOP-PLAYER replays** (user: "i would prefer that over shitty bot replays") → **full-league self-play** (champion + diverse population, gradual cull, refill with mutants — user-approved) + **champion transfer** → **hybrid MCTS over the belief state + exact calc as the END GOAL** (user: "hybrid simulator as the end goal for now"); the hybrid keeps the EXACT calc in the loop (my recommendation, unchallenged) — NOT a learned world model; Dreamer/MuZero stay documented as a ceiling upgrade if Node cost bites. (b) **BC corpus = Hugging Face human ladder replays:** primary `HolidayOugi/pokemon-showdown-replays` (parquet + rating column, 2.5M gen9 OU), cross-check `jakegrigsby/metamon-raw-replays` (2.68M battles, Elo in logs, + their Gen9OU reference model as a free league opponent); local bot self-play replays (27,125, verified 2026-11-17) demoted to optional filler. (c) **Champion transfer formalized (user's "winning node change propositions — multiply them and apply"):** per-winner delta δᵢ = θᵢ − θ_champion; advantage Aᵢ = rank-based win-rate advantage (clipped — one lucky bot must not dominate); Δⱼ = Σ Aᵢδᵢⱼ / Σ Aᵢ; per-node sign-agreement aⱼ = Σ Aᵢ·sign(δᵢⱼ) / Σ Aᵢ; **apply Δⱼ where |aⱼ| ≥ 0.6, else shrink by aⱼ** (the user's example computes out exactly: node 115 all-agree → full application; node 60 mixed signs → ~0 = "uncertainty"); α ≈ 0.05–0.1, EMA over a few generations, per-node scale-normalized; PLUS behavior distillation from the top-20% winners on their winning states (robust against weight-space non-identifiability); **A/B vs no-transfer every generation** (strong-checkpoint style); per-node agreement map logged. Family: ES policy gradient / FedAvg / PBT. (d) **Plan:** §3c — S4.0 corpus → S4.1 encoder → S4.2 net → S4.3 BC → S4.4 league → S4.5 hybrid; each gate = the user's own roadmap gate (steps 4–7 spec) + the overfit-32 "never learns" guard. **OPEN (AWAITING USER, §3c-B):** B1 primary format (gen9bss3v3 per D27 vs 6v6 singles — rec: 6v6 singles) + B2 action space (compact per-state enumeration — rec — vs the old unified 963+ space). **NOT BUILT; baseline 331/331 (144 s, 2026-11-17).** | user: "i would prefer that over shitty bot replays" + "hybrid simulator as the end goal for now, lets set the stage for part 4 and build a plan!" (2026-11-17) | 2026-11-17 |
 
 ## 5. Verified facts about this server build (evidence — don't re-derive)
 
