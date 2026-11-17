@@ -82,6 +82,22 @@ class Faint(Event):
 
 
 @dataclass
+class VolatileChanged(Event):
+    """A CURATED per-mon volatile starts or ends on the slot's mon.
+
+    ``volatile`` is the Showdown toID of the volatile (taunt / encore /
+    disguise / trapped / curse / destinybond / gastroacid). The adapter only
+    emits this for the curated set (D61) — other `-start`/`-end` volatiles are
+    silently ignored (known, no set evidence), never Unknown."""
+
+    type: ClassVar[str] = "volatile_changed"
+    side: str = ""
+    slot: str = ""
+    volatile: str = ""
+    active: bool = False  # True = |-start|, False = |-end|
+
+
+@dataclass
 class AbilityRevealed(Event):
     """The ability becomes visible (on entry, or by an effect)."""
 

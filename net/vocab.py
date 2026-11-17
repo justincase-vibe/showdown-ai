@@ -41,6 +41,7 @@ class Vocab:
     def _add_sorted(self, ident: str) -> int:
         self._id2idx[ident] = len(self._idx2id) + 1
         self._idx2id.append(ident)
+        self.size = len(self._idx2id) + 1   # keep size live (add() must grow it)
         return self._id2idx[ident]
 
     def index(self, ident) -> int:
@@ -66,7 +67,8 @@ class Vocab:
         return self._idx2id[index - 1]
 
     def __len__(self) -> int:
-        return self.size
+        # dynamic, not the init-time snapshot: a runtime add() must be visible
+        return len(self._idx2id) + 1
 
     def __contains__(self, ident) -> bool:
         return bool(ident) and ident in self._id2idx

@@ -1,0 +1,97 @@
+{
+  "format": "gen9ou",
+  "description": "Authoritative CURRENT SV (Gen 9) OU ban list — single source of truth for the D69 fork tier patch. Captured verbatim from the user's 2026-11-17 ban list.",
+  "captured": "2026-11-17",
+  "source": "User-provided (authoritative, final)",
+  "interpretation": "Banned set = (Uber tier) UNION (banned_species below). Legal set = every other Gen 9 species. E.g. Roaring Moon, Kommo-o, Garchomp, Quaquaval, Zarude are LEGAL.",
+
+  "banned_tier": "Uber",
+  "banned_tier_note": "Players cannot use Pokemon from the Uber tier. The explicit banned_species list below is additionally banned. It is NOT the 'UUBL' — it is mostly Uber-tier mons plus a few named ones. UUBL means 'banned from UU', i.e. these mons play IN OU: Garchomp, Kommo-o, Zarude, Quaquaval, Meowscarada, Okidogi, Pelipper, etc. are UUBL and therefore LEGAL in gen9ou (do not conflate the explicit list with the UUBL).",
+
+  "clauses": [
+    "Evasion Abilities Clause",
+    "Sleep Moves Clause",
+    "Gems Clause",
+    "Baton Pass Stat Clause"
+  ],
+
+  "banned_abilities": [
+    { "name": "Arena Trap", "ps_id": "arenatrap" },
+    { "name": "Sand Rush", "ps_id": "sandrush" },
+    { "name": "Shadow Tag", "ps_id": "shadowtag" }
+  ],
+
+  "banned_items": [
+    { "name": "King's Rock", "ps_id": "kingrock" },
+    { "name": "Razor Fang", "ps_id": "razorfang" },
+    { "name": "Soul Dew", "ps_id": "souldew" }
+  ],
+
+  "banned_moves": [
+    { "name": "Assist", "ps_id": "assist" },
+    { "name": "Swagger", "ps_id": "swagger" }
+  ],
+
+  "banned_combinations": [
+    { "note": "Drizzle + Swift Swim (same side)", "abilities": ["drizzle", "swiftswim"] },
+    { "note": "Drought + Chlorophyll (same side)", "abilities": ["drought", "chlorophyll"] }
+  ],
+
+  "banned_species": [
+    { "name": "Annihilape", "ps_id": "annihilape" },
+    { "name": "Arceus (all 19 forms)", "ps_id": "arceus", "all_forms": true, "note": "base + 18 type forms (ps ids arceus, arceusbattle excluded; forms are arceus<type>)" },
+    { "name": "Archaludon", "ps_id": "archaludon" },
+    { "name": "Baxcalibur", "ps_id": "baxcalibur" },
+    { "name": "Chien-Pao", "ps_id": "chienpao" },
+    { "name": "Calyrex (all forms)", "ps_ids": ["calyrex", "calyrexshadow", "calyrexice"], "note": "user wrote 'calyrex-ice'; all Calyrex forms are Uber" },
+    { "name": "Chi-Yu", "ps_id": "chiyu" },
+    { "name": "Deoxys (base + Attack)", "ps_ids": ["deoxys", "deoxysattack"], "note": "LEGAL: Deoxys-Defense (deoxysdefense) and Deoxys-Speed (deoxysspeed)" },
+    { "name": "Dialga", "ps_id": "dialga" },
+    { "name": "Dialga-Origin", "ps_id": "dialgaorigin" },
+    { "name": "Espathra", "ps_id": "espathra" },
+    { "name": "Eternatus", "ps_id": "eternatus" },
+    { "name": "Flutter Mane", "ps_id": "fluttermane" },
+    { "name": "Giratina (base + Origin)", "ps_ids": ["giratina", "giratinaorigin"] },
+    { "name": "Groudon (all forms incl. Primal)", "ps_ids": ["groudon", "groudonprimal"] },
+    { "name": "Gouging Fire", "ps_id": "gougingfire" },
+    { "name": "Ho-Oh", "ps_id": "hoooh" },
+    { "name": "Iron Bundle", "ps_id": "ironbundle" },
+    { "name": "Magearna", "ps_id": "magearna" },
+    { "name": "Koraidon", "ps_id": "koraidon" },
+    { "name": "Kyogre (all forms incl. Primal)", "ps_ids": ["kyogre", "kyogreprimal"] },
+    { "name": "Kyurem-Black", "ps_id": "kyuremblack" },
+    { "name": "Kyurem-White", "ps_id": "kyuremwhite" },
+    { "name": "Landorus (BASE form only)", "ps_id": "landorus", "note": "LEGAL: Landorus-Therian (landorustherian) — confirmed OU" },
+    { "name": "Lugia", "ps_id": "lugia" },
+    { "name": "Lunala", "ps_id": "lunala" },
+    { "name": "Mewtwo", "ps_id": "mewtwo" },
+    { "name": "Necrozma (all forms incl. Ultra)", "ps_ids": ["nekrozma", "nekrozmadusk", "nekrozmaultrabeam", "nekrozmaultravereosonic"], "note": "user wrote 'nekrozma'; all forms banned" },
+    { "name": "Ogerpon-Hearthflame", "ps_id": "ogerponhearthflame", "note": "other Ogerpon forms are LEGAL" },
+    { "name": "Palafin (both forms)", "ps_ids": ["palafin", "palafinhero"] },
+    { "name": "Palkia (base + Origin)", "ps_ids": ["palkia", "palkiaorigin"] },
+    { "name": "Rayquaza", "ps_id": "rayquaza" },
+    { "name": "Shaymin-Sky", "ps_id": "shayminsky", "note": "base Shaymin (shaymin, Land form) is LEGAL" },
+    { "name": "Spectrier", "ps_id": "spectrier" },
+    { "name": "Regieleki", "ps_id": "regieleki" },
+    { "name": "Reshiram", "ps_id": "reshiram" },
+    { "name": "Sneasler", "ps_id": "sneasler" },
+    { "name": "Solgaleo", "ps_id": "solgaleo" },
+    { "name": "Terapagos", "ps_id": "terapagos" },
+    { "name": "Ursaluna-Bloodmoon", "ps_id": "ursalunabloodmoon", "note": "base Ursaluna (ursaluna) is LEGAL" },
+    { "name": "Urshifu (both forms)", "ps_ids": ["urshifu", "urshifusinglestrike"] },
+    { "name": "Volcarona", "ps_id": "volcarona" },
+    { "name": "Zekrom", "ps_id": "zekrom" },
+    { "name": "Zacian (base + Crowned)", "ps_ids": ["zacian", "zaciancrowned"] },
+    { "name": "Zamazenta (base + Crowned)", "ps_ids": ["zamazenta", "zamazentacrowned"] }
+  ],
+
+  "forme_clarifications": [
+    "Landorus: base (landorus) BANNED; Therian (landorustherian) LEGAL — user-confirmed OU.",
+    "Deoxys: base (deoxys) + Attack (deoxysattack) BANNED; Defense (deoxysdefense) + Speed (deoxysspeed) LEGAL — user-confirmed.",
+    "Shaymin: Sky (shayminsky) BANNED; base/Land (shaymin) LEGAL.",
+    "Ursaluna: Bloodmoon (ursalunabloodmoon) BANNED; base (ursaluna) LEGAL.",
+    "Ogerpon: Hearthflame (ogerponhearthflame) BANNED; other forms (cornerstone/wellspring/forest) LEGAL.",
+    "Calyrex / Groudon / Kyogre / Necrozma: all forms BANNED.",
+    "Urshifu: both Rapid-Strike (urshifu) and Single-Strike (urshifusinglestrike) BANNED."
+  ]
+}

@@ -129,6 +129,54 @@ def _team_species(lines: List[str]) -> List[str]:
     return seen
 
 
+def _own_team(lines: List[str]) -> Dict[str, Dict]:
+    """p1's own-team spec for the belief (D68): slot -> {'name': species}.
+
+    The corpus walker creates ``BeliefState(fid)`` with NO own team, so
+    ``get_context()['own']`` is empty and the encoder emits all-zero
+    ``own_*`` tensors — the net would train blind to its own bench (which
+    mons benched, their HP/status). This parses the team out of the log and
+    hands it to the belief; the belief/encoder/registry stay unchanged.
+
+    ``|poke|`` team-preview lines come in two shapes (both occur in the
+    corpus; the fork emits the side shape — ``battle.js``:
+    ``this.add("poke", pokemon.side.id, details, "")``):
+      * side shape: ``|poke|p1|Lokix, M|``       — p1 slots a..f in list order
+      * slot shape: ``|poke| p1a 1 | Kyurem |``   — explicit slot in the first
+        payload field
+    ``|switch|`` / ``|drag|`` / ``|replace|`` fill any slot the preview did
+    not name (a log without a team preview stays covered). Only ``name`` is
+    recoverable from the log: ability/item are hidden until a reveal, and a
+    reveal updates the belief's posterior, not this static spec. The p2 side
+    needs no spec: its slots already carry species + facts via
+    ``add_opponent`` (a p2-POV sample reads them through the same channels).
+    """
+    order = "abcdef"
+    team: Dict[str, Dict] = {}
+    n_side = 0
+    for line in lines:
+        if not isinstance(line, str):
+            continue
+        parts = line.split("|")
+        if len(parts) < 4 or parts[1] not in ("poke", "switch", "drag", "replace"):
+            continue
+        key = (parts[2].strip().split() or [""])[0]
+        name = parts[3].split(",")[0].strip()
+        if not name:
+            continue
+        slot: Optional[str] = None
+        if key == "p1":
+            if n_side < 6:
+                slot = f"p1{order[n_side]}"
+                n_side += 1
+        elif key.startswith("p1") and len(key) == 3 and key[2] in "abcdef":
+            slot = key
+        if slot is None or slot in team:
+            continue
+        team[slot] = {"name": name}
+    return team
+
+
 def _is_move_legal(move: str, species: str, fid: Optional[str],
                    pool_cache: Optional[Dict[Tuple[str, str], set]] = None) -> bool:
     """Static legality: is ``move`` a legal move for ``species`` in the format?
@@ -203,7 +251,12 @@ def replay_battle(battle: dict, max_unknown_samples: int = 30) -> BattleTrace:
     #     gate is DB-independent: it must hold even for skipped battles). Build
     #     the belief + emit decisions only when the prior is valid.
     adapter = LogAdapter()
-    belief = BeliefState(fid) if prior_ok else None
+    # D68: give the belief its own-team spec (p1) so get_context()['own'] is
+    # populated — the corpus previously left it empty (the net would train
+    # blind to its own bench). The belief API already supports this;
+    # belief/encoder/registry are unchanged.
+    own_team = _own_team(lines)
+    belief = BeliefState(fid, own_team=own_team) if prior_ok else None
     current_turn = 0
     seen_first_turn = False
     pool_cache: Dict[Tuple[str, str], set] = {}   # (species, format) -> legal moves

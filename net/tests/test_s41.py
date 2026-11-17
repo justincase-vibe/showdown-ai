@@ -55,7 +55,9 @@ from net.registry import (
 # Pinned the FIRST time the suite ran; if ANY field is added/removed/renamed/
 # reshaped/reordered the checksum changes and this FAILS (the drift-catcher).
 # Re-pin deliberately (and reconcile the encoder + S4.2 net) by updating this.
-PINNED_CHECKSUM = "4765c031263b7be3c5572a27116ffef6dbf8f109a8405c739ed0ffb387f121a8"
+PINNED_CHECKSUM = "3cadb89a98ecacee70a3049441aadcf4394daf756f57433fb7e2f0edabe21cac"
+# re-pinned 2026-11-17: +7 curated-volatile slot columns (D61 surface,
+# user-approved) — SLOT_DIM 25 -> 32. fainted column already existed.
 
 
 def _mon(
@@ -69,6 +71,8 @@ def _mon(
     last_move_failed=False,
     stockpile=0,
     used_protect=False,
+    volatiles=(),
+    fainted=False,
     name="",
     species="",
     ability="",
@@ -88,6 +92,8 @@ def _mon(
         "last_move_failed": last_move_failed,
         "stockpile": stockpile,
         "used_protect": used_protect,
+        "volatiles": list(volatiles),
+        "fainted": fainted,
     }
     if name:
         blk["name"] = name
@@ -539,6 +545,12 @@ def test_encoder_on_real_corpus_contexts():
             if np.issubdtype(out[fld.name].dtype, np.floating):
                 assert np.isfinite(out[fld.name]).all(), (fld.name, "non-finite on real ctx")
             assert np.array_equal(out[fld.name], out2[fld.name]), (fld.name, "nondeterministic")
+        # D68: the own side must be NON-ZERO on real battles. Before D68 the
+        # corpus left own_team empty, so every own_* tensor was all zeros —
+        # the net trained blind to its own bench (which mons benched, HP).
+        assert (out["own_species"] != 0).any(), "D68: empty own_species on a real ctx"
+        assert out["own_slot"][:, SLOT_INDEX["active"]].sum() == 1.0, \
+            "D68: exactly one active own member on a live turn"
 
     # the sequence (GRU input) contract on one real battle
     seq = encode_sequence(traces[0].context_seq, voc)
@@ -546,3 +558,44 @@ def test_encoder_on_real_corpus_contexts():
     for fld in LAYOUT:
         assert seq[fld.name].shape == (t,) + fld.shape, fld.name
     assert seq["battle_mask"].tolist() == [1.0] * t
+
+
+# ── D61 surface: per-slot fainted flag + curated volatiles (2026-11-17) ──
+def test_fainted_flag_distinguishes_benched_from_gone():
+    """The whole point of the flag: an untouched benched mon (hp 0, fainted 0)
+    must encode DIFFERENTLY from a fainted mon (hp 0, fainted 1)."""
+    ctx = make_ctx()
+    v = make_vocabs(ctx)
+    # p1b benched, untouched (make_ctx default: hp 1.0 -> force hp 0, fainted 0)
+    ctx["own"]["p1b"] = _mon(hp=0.0, fainted=False,
+                             name="volcarona", ability="flamebody")
+    # p1c fainted (hp 0, fainted 1)
+    ctx["own"]["p1c"] = _mon(hp=0.0, fainted=True,
+                             name="dragonite", ability="multiscale")
+    out = encode_context(ctx, v)
+    fcol = SLOT_INDEX["fainted"]
+    hcol = SLOT_INDEX["hp_frac"]
+    # both read hp_frac 0 …
+    assert out["own_slot"][1, hcol] == 0.0
+    assert out["own_slot"][2, hcol] == 0.0
+    # … but the fainted flag tells them apart
+    assert out["own_slot"][1, fcol] == 0.0   # benched, untouched -> switchable
+    assert out["own_slot"][2, fcol] == 1.0   # gone -> NOT switchable
+
+
+def test_volatiles_encode_per_slot():
+    ctx = make_ctx()
+    v = make_vocabs(ctx)
+    ctx["opponent"]["p2a"] = _mon(hp=0.5, species="garchomp",
+                                   volatiles=("taunt", "gastroacid"))
+    out = encode_context(ctx, v)
+    assert out["opp_slot"][0, SLOT_INDEX["vol_taunt"]] == 1.0
+    assert out["opp_slot"][0, SLOT_INDEX["vol_gastroacid"]] == 1.0
+    # the other five curated columns stay 0
+    for vid in ("disguise", "encore", "trapped", "curse", "destinybond"):
+        assert out["opp_slot"][0, SLOT_INDEX[f"vol_{vid}"]] == 0.0
+    # a mon with no volatiles reads 0 on all seven
+    for i in range(1, 6):
+        for vid in ("disguise", "taunt", "encore", "trapped",
+                    "curse", "destinybond", "gastroacid"):
+            assert out["opp_slot"][i, SLOT_INDEX[f"vol_{vid}"]] == 0.0

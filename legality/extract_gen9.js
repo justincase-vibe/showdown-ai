@@ -235,7 +235,12 @@ for (const fmtId of FORMATS) {
     const spId = sp.id;
     const base = dex.species.get(toID(sp.baseSpecies || sp.name));
     let problem;
-    try { problem = tv.checkSpecies({}, sp, base, {}); }
+    // D69-fix: pass the FORME (sp) as tierSpecies, not the base species. The live
+    // server validator (getValidationSpecies) resolves a plain forme to itself, so
+    // Landorus-Therian/Deoxys-Speed use their own tier (OU) and Shaymin-Sky /
+    // Ogerpon-Hearthflame use theirs (Uber). Base-forms are unchanged (sp === base),
+    // so the D47 "Past" override (base-form-only) still behaves identically.
+    try { problem = tv.checkSpecies({}, sp, sp, {}); }
     catch (e) { problem = `error: ${e.message}`; }
     // D47 (Option B): this fork marks ~454 REAL species `isNonstandard: "Past"`
     // (tier "Illegal") purely because their learnset data caps at gen 8 — a data

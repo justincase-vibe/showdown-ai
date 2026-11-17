@@ -95,6 +95,13 @@ class Facts:
     # turn, so it only blocks the turn it's used). Doubles-critical: a protected
     # opponent can't be hit, so attacking it wastes the move.
     used_protect: bool = False
+    # The CURATED per-mon volatiles (D61) currently active on this mon —
+    # toID set (taunt / encore / disguise / trapped / curse / destinybond /
+    # gastroacid). Multi-turn by nature (Taunt 4 turns, Gastro Acid 5, …) so
+    # they PERSIST across turns (turn_reset does not touch them) and are
+    # cleared only by |-end| or a new mon (reset). Stockpile + Protect are
+    # tracked by their own fields (layer count / per-turn flag).
+    volatiles: set = _dc_field(default_factory=set)
 
     def reset(self) -> None:
         """Full wipe (a NEW mon takes the slot)."""
@@ -108,6 +115,7 @@ class Facts:
         self.last_hit_category = None
         self.stockpile_layers = 0
         self.used_protect = False
+        self.volatiles = set()
         self.turn_reset()
 
     def turn_reset(self) -> None:
@@ -470,6 +478,14 @@ class BeliefState:
         # 'item', 'ability', 'tera'?}. The bot knows its own team.
         self.own_team: Dict[str, Dict] = dict(own_team or {})
         self.own_facts: Dict[str, Facts] = {}
+        # D68 (member mapping): the log's slot letters are FIELD positions (in
+        # singles every switch-in lands on p1a), NOT team members. So the
+        # belief tracks WHO occupies each field slot (species id) and maps
+        # per-member active/fainted state onto the own_team MEMBERS (preview
+        # order p1a..p1f) in get_context(). own_fainted_species is
+        # order-preserving + deduped (a fainted mon is gone for the battle).
+        self.own_active_species: Dict[str, str] = {}
+        self.own_fainted_species: List[str] = []
         # shared field — the calc's field inputs (3.4):
         self.field = {
             "weather": None, "terrain": None,
@@ -491,6 +507,13 @@ class BeliefState:
         # battle-level state
         self.turn: int = 0
         self.fainted: Dict[str, int] = {"p1": 0, "p2": 0}
+        # PER-SLOT fainted flag (S4.1: the registry's reserved `fainted` column
+        # is now real): slot id -> True iff the mon that was on that slot has
+        # fainted and the slot has NOT since been re-occupied. Set on Faint,
+        # cleared on the next SwitchIn into the same slot (a new mon is a new
+        # life). This is what lets the net tell "benched, untouched" (fainted
+        # = 0) from "gone" (fainted = 1) — both otherwise read hp_frac 0.
+        self.fainted_slots: Dict[str, bool] = {}
         self.active: Dict[str, Optional[str]] = {"p1": None, "p2": None}
         # per-turn move-order buffer (speed-order evidence, 3.4-4): entries are
         # ('m', side, slot, move) and order-breakers ('sw',) / ('break',).
@@ -535,7 +558,7 @@ class BeliefState:
                 return {"hp_frac": 0.0, "statuses": [], "boosts": {},
                         "moves": [], "last_hit": 0, "hit_this_turn": False,
                         "last_move_failed": False, "stockpile": 0,
-                        "used_protect": False}
+                        "used_protect": False, "volatiles": []}
             hp_frac = (facts.hp / facts.maxhp) if (facts.hp is not None and facts.maxhp) else 0.0
             return {
                 "hp_frac": round(hp_frac, 4),
@@ -548,6 +571,8 @@ class BeliefState:
                 "last_move_failed": facts.last_move_failed,
                 "stockpile": facts.stockpile_layers,
                 "used_protect": facts.used_protect,
+                # curated per-mon volatiles (D61), sorted for determinism
+                "volatiles": sorted(facts.volatiles),
             }
 
         ctx: Dict = {
@@ -572,17 +597,54 @@ class BeliefState:
             "own": {},
             "opponent": {},
         }
-        # own side (exactly known)
+        # own side (exactly known) — MEMBER-keyed (D68): the own_team slots
+        # p1a..p1f are the six team MEMBERS in preview order. The log's slot
+        # letters are FIELD positions (in singles every switch-in lands on
+        # p1a), so a member's active/hp/status come from the field slot its
+        # SPECIES occupies (Species Clause => species -> member is
+        # unambiguous). When NO own-side switch-in has been observed (unit-
+        # test fact injection / a log without a preview) the legacy slot-keyed
+        # semantics apply, so direct fact reads keep working.
+        own_event_slot = self.active.get("p1")
+        member_mapping = bool(self.own_active_species)
+        active_sp = (self.own_active_species.get(own_event_slot)
+                     if (member_mapping and own_event_slot) else None)
+        active_member = None
+        if active_sp is not None:
+            for slot, spec in self.own_team.items():
+                if lookup.to_id(spec.get("name", "")) == active_sp:
+                    active_member = slot
+                    break
         for slot, spec in self.own_team.items():
-            ctx["own"][slot] = _mon_block(
-                self.own_facts.get(slot), spec)
+            if member_mapping:
+                is_active = (slot == active_member)
+                facts = self.own_facts.get(own_event_slot) if is_active else None
+                sp = lookup.to_id(spec.get("name", ""))
+                fainted = sp in self.own_fainted_species
+            else:
+                is_active = (own_event_slot is not None and slot == own_event_slot)
+                facts = self.own_facts.get(slot)
+                fainted = bool(self.fainted_slots.get(slot, False))
+            ctx["own"][slot] = _mon_block(facts, spec)
             ctx["own"][slot]["name"] = spec.get("name", "")
             ctx["own"][slot]["ability"] = spec.get("ability", "")
             ctx["own"][slot]["item"] = spec.get("item", "")
+            # fainted flag: "benched, untouched" (0) vs "gone" (1) — both
+            # otherwise read hp_frac 0 (the net must not confuse them)
+            ctx["own"][slot]["fainted"] = fainted
+            ctx["own"][slot]["active"] = is_active
+        # the encoder's own-side active flag compares block slots to
+        # ctx["active"]["p1"] — under member mapping that must be the MEMBER
+        # slot (the event slot p1a does not address a member), else the active
+        # flag lands on the wrong row. (p2 stays field-slot keyed.)
+        if (member_mapping and active_member is not None
+                and ctx["active"].get("p1") is not None):
+            ctx["active"]["p1"] = active_member
         # opponent side (belief)
         for slot, sb in sorted(self._slots.items()):
             block = _mon_block(sb.facts, None)
             block["species"] = sb.species
+            block["fainted"] = bool(self.fainted_slots.get(slot, False))
             # posterior summary (top-K by weight)
             sorted_cands = sorted(enumerate(sb.candidates), key=lambda x: -x[1]["weight"])
             top_k = 5
@@ -624,6 +686,9 @@ class BeliefState:
             if event.side == "p2":
                 self.add_opponent(event.slot, event.species)
             self.active[event.side] = event.slot
+            # a new mon on the slot: the slot is no longer "fainted" (the
+            # fainted flag describes the CURRENT occupant's state)
+            self.fainted_slots.pop(event.slot, None)
             self._set_switch_facts(event)
             return False
         if isinstance(event, E.SwitchOut):
@@ -632,6 +697,14 @@ class BeliefState:
         if isinstance(event, E.Faint):
             self._set_hp(event.side, event.slot, 0)
             self.fainted[event.side] = self.fainted.get(event.side, 0) + 1
+            self.fainted_slots[event.slot] = True  # the occupant is gone
+            if event.side != "p2":
+                # D68: the fainted mon is a GONE member of the own team (the
+                # net must distinguish "benched, untouched" from "gone" —
+                # both otherwise read hp_frac 0)
+                sp = self.own_active_species.get(event.slot)
+                if sp is not None and sp not in self.own_fainted_species:
+                    self.own_fainted_species.append(sp)
             if self.active.get(event.side) == event.slot:
                 self.active[event.side] = None
             self._turn_buffer.append(("break",))
@@ -669,6 +742,21 @@ class BeliefState:
                 facts = self.own_facts.setdefault(event.slot, Facts())
             if facts is not None:
                 facts.last_move_failed = True
+            return False
+        if isinstance(event, E.VolatileChanged):
+            # Curated per-mon volatile (D61): Taunt / Encore / Disguise / Trapped /
+            # Curse / Destiny Bond / Gastro Acid. Multi-turn state on the slot's
+            # mon -> Facts (persists across turns; a new mon gets fresh Facts).
+            # Facts only — a volatile on the mon is not SET evidence (the adapter
+            # already filtered to the curated set; unknown slots are a no-op).
+            facts = self._facts_for(event.side, event.slot)
+            if facts is None and event.side != "p2":
+                facts = self.own_facts.setdefault(event.slot, Facts())
+            if facts is not None:
+                if event.active:
+                    facts.volatiles.add(event.volatile)
+                else:
+                    facts.volatiles.discard(event.volatile)
             return False
         if isinstance(event, (E.AbilityRevealed, E.ItemRevealed)):
             return self._route_set_evidence(event)
@@ -760,7 +848,11 @@ class BeliefState:
             facts, known = sb.facts, sb.species
         else:
             facts = self.own_facts.setdefault(ev.slot, Facts())
-            known = lookup.to_id((self.own_team.get(ev.slot) or {}).get("name")) or None
+            # identity = the last occupant's SPECIES on this FIELD slot (D68 —
+            # the log's slot letters are field positions, not team members,
+            # and the own_team spec is the MEMBER roster: it must NOT be
+            # rewritten by field-slot occupants).
+            known = self.own_active_species.get(ev.slot)
         same_mon = known is not None and lookup.to_id(ev.species) == known and facts.hp is not None
         if same_mon:
             if ev.hp:
@@ -779,6 +871,10 @@ class BeliefState:
         # evidence on the p2 slot (one-sided, IV-safe, no false rule-outs).
         if ev.side == "p2" and facts.maxhp:
             self._apply_maxhp_evidence(ev.slot, facts.maxhp)
+        if ev.side != "p2":
+            # record the new field-slot occupant (drives the same-mon check on
+            # the NEXT switch-in and the Faint handler's fainted-member set)
+            self.own_active_species[ev.slot] = lookup.to_id(ev.species)
 
     def _apply_status(self, ev) -> None:
         facts = self._facts_for(ev.side, ev.slot)

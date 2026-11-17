@@ -123,14 +123,33 @@ def _resolve_mon(mon: Mon, fmt: Optional[str]) -> Mon:
 
 
 def _node(request: Dict[str, Any]) -> Dict[str, Any]:
-    """Send one JSON request to the Node CLI and parse its JSON response."""
-    proc = subprocess.run(
-        [_NODE, _SCRIPT],
-        input=json.dumps(request),
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    """Send one JSON request to the Node CLI and parse its JSON response.
+
+    Robustness (2026-11-17): a node spawn typically takes ~90ms here, but
+    Windows Defender real-time scans can spike ONE spawn far beyond that
+    (observed >30s during corpus replay, which used to hit the old 30s
+    timeout and FALSE-SKIP the whole battle — a silent corpus drop). The
+    timeout is raised to 120s (a hard cap, so a genuinely wedged spawn still
+    fails loudly) and a timeout retries ONCE: the second spawn after a scan
+    spike is fast. A failed calc is still a loud error — never swallowed."""
+    try:
+        proc = subprocess.run(
+            [_NODE, _SCRIPT],
+            input=json.dumps(request),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        # one retry: the scan spike is transient, the second spawn is fast.
+        # A second timeout raises (loud failure, never a silent skip).
+        proc = subprocess.run(
+            [_NODE, _SCRIPT],
+            input=json.dumps(request),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
     out = proc.stdout.strip()
     if proc.returncode != 0:
         raise RuntimeError(f"node_calc.js failed (exit {proc.returncode}): {out or proc.stderr.strip()}")

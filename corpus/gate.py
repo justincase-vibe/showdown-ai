@@ -41,8 +41,16 @@ def run_gate(jsonl_path: Optional[str] = None, formatid: str = "gen9ou",
     return report, traces
 
 
-def gate_passes(rep: dict, n_battles: int = 200, min_replayed_frac: float = 0.9) -> Tuple[bool, List[str]]:
-    """Evaluate the S4.0 gate on a report dict. Returns (ok, [failures])."""
+def gate_passes(rep: dict, n_battles: int = 200,
+                min_replayed_frac: float = 0.725) -> Tuple[bool, List[str]]:
+    """Evaluate the S4.0 gate on a report dict. Returns (ok, [failures]).
+
+    ``min_replayed_frac`` defaults to the USER-APPROVED D68 floor (72.5% —
+    the 145/200 gate result): a non-trivial slice of human-ladder battles
+    carries banned/Pokemon the fork skips (Gouging Fire, Volcarona, ...), so
+    the replay-rate floor is deliberately below 100% — NOT a data-quality
+    relaxation, just the approved acceptance bar for the corpus source.
+    """
     fails = []
     if rep["unknown_count"] != 0:
         fails.append(f"unknown-tag errors = {rep['unknown_count']} (want 0) "

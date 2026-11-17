@@ -62,6 +62,7 @@ from .events import (
     TerrainChanged,
     Turn,
     Unknown,
+    VolatileChanged,
     WeatherChanged,
 )
 
@@ -91,7 +92,9 @@ IGNORED_TAGS = frozenset({
     # starts stay ignored).
     # `-fail` / `cant` are NOT here — they map to MoveFailed (the fork's
     # move-attempt-failure lines; see the handlers below).
-    "split", "upkeep", "-start", "-end", "-miss",
+    # `-start`/`-end` are NOT here — the curated per-mon volatiles (D61)
+    # map to VolatileChanged; non-curated ones are ignored explicitly.
+    "split", "upkeep", "-miss",
     "-transform", "-primal", "-formechange", "-enditem", "swap",
     # human-ladder extras (S4.0 gate, verified 2026-11-17 across 200 gen9ou
     # battles — 90 had >=1 Unknown, these 4 tags are the no-set-evidence ones):
@@ -122,6 +125,19 @@ IGNORED_TAGS = frozenset({
 # NOTE: ``-weather`` is NOT ignored — it is the ability-revealing weather-start
 # line (``|-weather|RainDance|[from] ability: Drizzle|[of] p1a``) and maps to
 # WeatherChanged (plus an AbilityRevealed via the [from] capture below).
+
+#: The seven CURATED per-mon volatiles (D61: "add the 7 curated volatiles to
+#: Facts"). Showdown volatile ids as they appear in |-start|/|-end| payloads
+#: (toID-normalized). Taunt (4-turn move lock), Encore (move repeat lock),
+#: Disguise (Imposter one-hit shield), Trapped (Arena Trap / Shadow Tag),
+#: Curse (the Curse-move Atk/Def/Spe volatile), Destiny Bond (retaliation KO),
+#: Gastro Acid (move-lock, 5 turns). Stockpile + Protect are already tracked
+#: separately (Facts.stockpile_layers / Facts.used_protect).
+_CURATED_VOLATILES = frozenset({
+    "disguise", "taunt", "encore", "trapped",
+    "curse", "destinybond", "gastroacid",
+})
+
 
 #: [from] <kind>: <Name> — the fork's context convention (conditions.js/battle.js):
 #:   [from] ability: Drizzle   (ability holder = the [of] slot, NOT the target)
@@ -313,6 +329,18 @@ class LogAdapter:
         if tag == "-ability" and len(p) >= 2:
             side, slot = _slot_of(p[0])
             return AbilityRevealed(side=side, slot=slot, ability=to_id(p[1]))
+
+        if tag in ("-start", "-end") and len(p) >= 2:
+            # Per-mon volatile start/end (|-start|p2a|Taunt|, |-end|p2a|Taunt|).
+            # Only the D61 curated set is surfaced (VolatileChanged); every other
+            # volatile (FocusEnergy, Intimidate-boost echoes, …) is KNOWN ambient
+            # state with no set evidence -> silent None (NOT Unknown).
+            side, slot = _slot_of(p[0])
+            vid = to_id(p[1])
+            if vid not in _CURATED_VOLATILES:
+                return None
+            return VolatileChanged(side=side, slot=slot, volatile=vid,
+                                  active=(tag == "-start"))
 
         if tag == "-sidestart" and len(p) >= 2:
             # Side-condition start (Reflect, Light Screen, Aurora Veil, Spikes,

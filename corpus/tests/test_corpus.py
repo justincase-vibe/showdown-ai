@@ -181,6 +181,106 @@ def test_drag_not_a_switch_decision():
     assert t.winner_side == "p1"
 
 
+# ── D68: the corpus populates the belief's own team ────────────────────
+def test_own_team_populated_and_member_mapped():
+    """D68: get_context()['own'] must carry the p1 team — before this fix the
+    corpus created BeliefState(fid) with no own_team, so ctx['own'] was empty
+    and the encoder emitted all-zero own_* tensors (the net trained blind to
+    its own bench).
+
+    The log's slot letters are FIELD positions (in singles every switch-in
+    lands on p1a), so the six own blocks are the team MEMBERS in preview
+    order and active/fainted are mapped onto them by SPECIES (the only
+    identity the log carries)."""
+    battle = {
+        "id": "synthetic-d68", "formatid": "gen9ou", "rating": 1500.0,
+        "log": "\n".join([
+            "|start",
+            "|poke| p1 | Kyurem, M |",
+            "|poke| p1 | Alomomola, M |",
+            "|poke| p1 | Lokix |",
+            "|poke| p1 | Slowking-Galar |",
+            "|poke| p1 | Landorus-Therian |",
+            "|poke| p1 | Garganacl |",
+            "|poke| p2 | Great Tusk |",
+            "|poke| p2 | Cinderace |",
+            # real ladder switch shape: |switch|<slot>|<details>|<hp/max>
+            "|switch| p1a | Kyurem, M | 252 / 252 |",
+            "|switch| p2a | Great Tusk, M | 183 / 183 |",
+            "|turn| 1",
+            "|move| p1a | Ice Beam | p2a",
+            "-damage| p2a | 0 / 183",
+            "|faint| p2a",
+            "|switch| p2a | Cinderace, M | 183 / 183 |",
+            "|move| p2a | Flame Charge | p1a",
+            "-damage| p1a | 200 / 252",
+            "|move| p1a | Ice Beam | p2a",
+            "-damage| p1a | 0 / 252",
+            "|faint| p1a",
+            "|switch| p1a | Alomomola, M | 240 / 240 |",
+            "|turn| 2",
+            "|win| p1",
+        ]),
+    }
+    t = replay_battle(battle)
+    assert t.skipped is None, t.skipped
+    assert t.unknown_count == 0
+
+    # turn-1 context: six own members in preview order, Kyurem active
+    own = t.context_seq[0]["own"]
+    assert list(own.keys()) == ["p1a", "p1b", "p1c", "p1d", "p1e", "p1f"]
+    assert [own[s]["name"] for s in own] == [
+        "Kyurem", "Alomomola", "Lokix", "Slowking-Galar",
+        "Landorus-Therian", "Garganacl"]
+    assert own["p1a"]["active"] is True and own["p1a"]["hp_frac"] == 1.0
+    assert own["p1a"]["fainted"] is False
+    # benched member: hp 0, NOT fainted (the net must not confuse them)
+    assert own["p1b"]["active"] is False and own["p1b"]["hp_frac"] == 0.0
+    assert own["p1b"]["fainted"] is False
+
+    # turn-2 context: Kyurem GONE, Alomomola ACTIVE (member-mapped by species)
+    own2 = t.context_seq[1]["own"]
+    assert own2["p1a"]["fainted"] is True and own2["p1a"]["active"] is False
+    assert own2["p1b"]["active"] is True and own2["p1b"]["hp_frac"] == 1.0
+    assert own2["p1c"]["fainted"] is False  # Lokix: benched, untouched
+    # the encoder's active flag addresses the MEMBER slot (p1b), not p1a
+    assert t.context_seq[1]["active"]["p1"] == "p1b"
+
+    # decisions still flow (both POVs, legal). A post-faint |switch| is a
+    # player-chosen decision (which mon to send in — a core S4.3 BC target);
+    # only |drag|/|replace| are game-forced and excluded (see
+    # test_drag_not_a_switch_decision).
+    assert {d.pov for d in t.decisions} == {"p1", "p2"}
+    assert [d.action for d in t.decisions if d.pov == "p1"] == [
+        "icebeam", "icebeam", "alomomola"]
+    assert [d.action for d in t.decisions if d.pov == "p2"] == [
+        "cinderace", "flamecharge"]
+    assert all(d.legal for d in t.decisions)
+
+
+@needs_fixture
+def test_own_side_populated_on_real_battles_d68():
+    """D68 on REAL ladder battles: every turn-start context must expose the
+    own side — six named members, exactly one active (a live battle always
+    has one mon out), with real HP. (Before D68: ctx['own'] == {}.)"""
+    traces = [t for t in replay_many(load_local(str(FIXTURE), 20))
+              if t.skipped is None]
+    assert traces
+    for t in traces:
+        for ctx in t.context_seq:
+            own = ctx["own"]
+            assert len(own) == 6, (t.battle_id, len(own))
+            assert all(b.get("name") for b in own.values()), t.battle_id
+            actives = [b for b in own.values() if b.get("active")]
+            assert len(actives) == 1, (t.battle_id, ctx["turn"])
+            assert actives[0]["hp_frac"] > 0.0
+            assert actives[0]["fainted"] is False
+            # exactly the fainted own mons are flagged gone (never the active)
+            for b in own.values():
+                if b.get("active"):
+                    assert b["fainted"] is False
+
+
 # ── winner resolution: |win| payloads are USERNAMES in ladder logs ─────
 def test_win_by_username_resolves_side():
     """Ladder logs end with `|win| <winner-username>` (verified on the
@@ -221,18 +321,24 @@ def test_winner_side_resolved_to_side_on_real_battles():
 
 # ── clean skip: no-prior species (the known P0 DB gap) ─────────────────
 def test_no_prior_species_cleanly_skipped():
-    """Landorus(-Therian) has no gen9ou prior in the current DB (fork tier
-    data tags it Uber) — the walker must SKIP with a precise reason, not
-    crash, so the corpus stays clean and the gap is reportable."""
+    """A species with no gen9ou prior must make the walker SKIP with a precise
+    reason, not crash, so the corpus stays clean and the gap is reportable
+    (D62 clean-skip: a corrupt belief is never carried into the corpus).
+
+    Kyogre is Uber — genuinely banned from gen9ou — so it has no sets and no
+    legal moves. (This test previously used Landorus-Therian, when the fork
+    wrongly tagged it Uber; the D69 fix corrected that, so Landorus-Therian is
+    now OU-legal and no longer a no-prior example. Garchomp (UUBL, OU-legal)
+    is the p2 counterpart so the skip is attributable to p1 alone.)"""
     battle = {
         "id": "synthetic-no-prior", "formatid": "gen9ou", "rating": 1500.0,
         "log": "\n".join([
             "|start",
-            "|poke| p1a 1 | Landorus-Therian",
-            "|poke| p2a 1 | Kyurem",
+            "|poke| p1a 1 | Kyogre",
+            "|poke| p2a 1 | Garchomp",
             "|turn| 1",
-            "|switch| p1a 1 | Landorus-Therian, 245 / 245",
-            "|switch| p2a 1 | Kyurem, 252 / 252",
+            "|switch| p1a 1 | Kyogre, 100 / 100",
+            "|switch| p2a 1 | Garchomp, 100 / 100",
         ]),
     }
     t = replay_battle(battle)

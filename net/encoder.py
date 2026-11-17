@@ -21,22 +21,21 @@ Contract (what it guarantees):
     ``own_slot`` / ``own_*`` (the S4.2 set-encoder is then permutation-
     invariant); the encoder itself just preserves the canonical slot order.
 
-NOT done here (deliberately, and flagged for the user):
+Done (D61 surface, user-approved 2026-11-17):
   * the 7 curated volatiles (Disguise / Taunt / Encore / Trap / Curse /
-    Destiny Bond / Gastro Acid) and the G1–G6 additions (tailwind/weather/
-    terrain turns-left, item+ability ``revealed?`` flags, own per-move PP,
-    static dex join) are NOT yet in ``Facts`` / ``get_context()`` — adding them
-    is a ``belief/`` change (331-baseline risk) that is the NEXT recorded
-    decision, not part of this S4.1 checkpoint. The registry is shaped so they
-    slot in as new fields without disturbing the existing layout.
-  * the per-slot ``fainted`` flag is a RESERVED column, left ``0.0``. The
-    present ``get_context()`` cannot distinguish "benched, untouched" from
-    "fainted" (both read hp_frac 0), and deriving it from hp_frac emitted a
-    FALSE fainted signal on untouched benched mons — a "wrong state" the net
-    must never see. It therefore reads 0.0 until the dedicated ``belief/``
-    flag lands (next decision); the column is reserved so that lands with NO
-    shape change, and the raw evidence (hp_frac / active / moves / last_hit) is
-    already in the block for the net to use. See ``_slot_vector``.
+    Destiny Bond / Gastro Acid) — ``belief`` Facts.volatiles -> the
+    ``vol_*`` slot columns (see ``_slot_vector``); Stockpile + Protect are
+    their own columns (layer count / per-turn flag).
+  * the per-slot ``fainted`` flag — ``belief`` ``fainted_slots`` -> the
+    ``fainted`` column: 1.0 = the mon on this slot is GONE, 0.0 = alive or
+    benched-untouched (both read hp_frac 0; this column is what tells them
+    apart). See ``_slot_vector``.
+
+Still NOT done (deliberately, flagged for the user):
+  * the G1–G6 additions (tailwind/weather/terrain turns-left, item+ability
+    ``revealed?`` flags, own per-move PP, static dex join) are NOT yet in
+    ``Facts`` / ``get_context()`` — a ``belief/`` change that is a later
+    recorded decision, not part of this checkpoint.
 """
 from __future__ import annotations
 
@@ -102,14 +101,11 @@ def _slot_vector(block: Dict, active: bool, is_own: bool) -> np.ndarray:
     hp = float(block.get("hp_frac", 0.0) or 0.0)
     v[SLOT_INDEX["present"]] = 1.0
     v[SLOT_INDEX["active"]] = 1.0 if active else 0.0
-    # fainted is a RESERVED per-slot flag, left 0.0 (see module docstring).
-    # get_context() cannot yet distinguish "benched, untouched" from "fainted"
-    # (both read hp_frac 0), so deriving it from hp_frac emitted a FALSE
-    # fainted=1 on untouched benched mons — exactly the "wrong state" the net
-    # must never see. The dedicated belief/Facts flag (open decision) will fill
-    # this column without a shape change; the raw evidence (hp_frac, active,
-    # moves, last_hit, ...) is already in the block for the net to use.
-    v[SLOT_INDEX["fainted"]] = 0.0
+    # Per-slot fainted flag (belief `fainted_slots`): 1.0 = the mon currently
+    # on this slot is GONE, 0.0 = it is alive OR this is a benched mon the
+    # battle has not touched yet. Both cases read hp_frac 0 — this column is
+    # what tells them apart (a benched mon is switchable, a fainted one is not).
+    v[SLOT_INDEX["fainted"]] = 1.0 if block.get("fainted") else 0.0
     v[SLOT_INDEX["hp_frac"]] = _clamp01(hp)
     for s in block.get("statuses", []) or []:
         col = STATUS_COL.get(s)
@@ -128,6 +124,11 @@ def _slot_vector(block: Dict, active: bool, is_own: bool) -> np.ndarray:
     v[SLOT_INDEX["last_move_failed"]] = 1.0 if block.get("last_move_failed") else 0.0
     v[SLOT_INDEX["stockpile"]] = min(3, int(block.get("stockpile", 0) or 0)) / 3.0
     v[SLOT_INDEX["used_protect"]] = 1.0 if block.get("used_protect") else 0.0
+    # curated per-mon volatiles (belief Facts.volatiles, toID'd names)
+    volset = set(block.get("volatiles", []) or [])
+    for vid in ("disguise", "taunt", "encore", "trapped",
+                "curse", "destinybond", "gastroacid"):
+        v[SLOT_INDEX[f"vol_{vid}"]] = 1.0 if vid in volset else 0.0
     v[SLOT_INDEX["confidence"]] = 1.0 if is_own else _clamp01(float(block.get("confidence", 0.0) or 0.0))
     return v
 

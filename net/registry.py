@@ -72,6 +72,14 @@ def _slot_features() -> Tuple[str, ...]:
         "last_move_failed",  # per-turn (fork moveLastTurnResult)
         "stockpile",         # 0..3 layers / 3 (the T5 volatile)
         "used_protect",      # per-turn Protect-family (doubles-critical)
+        # the seven CURATED per-mon volatiles (D61; belief Facts.volatiles)
+        "vol_disguise",      # Imposter one-hit shield still unbroken
+        "vol_taunt",         # move lock (4 turns)
+        "vol_encore",        # forced move repeat
+        "vol_trapped",       # Arena Trap / Shadow Tag
+        "vol_curse",         # the Curse-move Atk+ Def+ Spe- volatile
+        "vol_destinybond",   # faint-on-hit retaliation arm
+        "vol_gastroacid",    # move lock (5 turns)
         "confidence",        # own = 1.0; opponent = belief confidence in [0, 1]
     ]
     return tuple(feats)
