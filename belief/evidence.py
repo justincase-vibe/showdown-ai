@@ -180,13 +180,22 @@ _TERRAIN = {"electric": "Electric", "grassy": "Grass", "misty": "Misty",
 
 #: the calc takes ONE status per mon; order by damage/speed interaction
 #: (paralysis first: it is the only status with both).
-_STATUS_ORDER = ("par", "brn", "skl", "frz", "tox")
+# Codes are the Showdown ids the adapter stores verbatim from |-status| lines,
+# which are ALSO @smogon/calc's status codes (verified against the library:
+# it checks hasStatus('slp') for Wake-Up Slap x2 / Dream Eater and
+# hasStatus('psn') for Facade x2). The old tuple listed "skl" — a code NEITHER
+# Showdown nor the calc uses (sleep is "slp"), so a sleeping mon's status was
+# silently dropped from every calc window; "psn" (regular poison) was likewise
+# never passed through. (A mon has at most ONE status, so order is fallback,
+# not priority; "frz" is passed harmlessly — the calc never checks it.)
+_STATUS_ORDER = ("par", "brn", "slp", "frz", "tox", "psn")
 
 
 def status_of(statuses) -> Optional[str]:
-    """A fact sheet's status set -> the single status the calc takes."""
+    """A fact sheet's status set -> the single status the calc takes (None if
+    the sheet carries no damage-relevant status)."""
     for s in _STATUS_ORDER:
-        if s in (statuses or ()):  # pragma: no cover - trivial
+        if s in (statuses or ()):
             return s
     return None
 

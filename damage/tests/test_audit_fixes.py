@@ -56,6 +56,25 @@ def test_gen1_tera_type_ignored():
     assert r["max"] == 78
 
 
+def test_tera_type_lowercase_id_still_stabs():
+    # B4 — the DB (strategy.tera_type) and the adapter (to_id) pass lowercase
+    # Tera ids ('fire'), but the library compares teraType with === against
+    # CAPITALIZED names ('Fire'): lowercase silently disabled Tera STAB, Tera
+    # Shell and Stellar handling in every belief window (Tera-fire Charizard's
+    # Flamethrower computed at 31-37 instead of 42-50 — no STAB). The bridge
+    # now normalizes at the boundary (the normItem/normAbility pattern), so
+    # id and name both work and agree.
+    lower = calc.calc_damage({"name": "Charizard", "level": 50, "teraType": "fire"},
+                             {"name": "Garchomp", "level": 50}, "flamethrower", gen=9)
+    upper = calc.calc_damage({"name": "Charizard", "level": 50, "teraType": "Fire"},
+                             {"name": "Garchomp", "level": 50}, "flamethrower", gen=9)
+    plain = calc.calc_damage({"name": "Charizard", "level": 50},
+                             {"name": "Garchomp", "level": 50}, "flamethrower", gen=9)
+    assert (lower["min"], lower["max"]) == (42, 50)  # STAB applied
+    assert (upper["min"], upper["max"]) == (42, 50)  # name form still works
+    assert (plain["min"], plain["max"]) == (31, 37)  # no tera -> no STAB
+
+
 def test_champions_superfang_tera_ghost_gengar_immune():
     # Champions = engine 0: Tera-aware gate applies here too (BSS target).
     # (Gengar/Farfetchd/Beartic are in the 359-species champions whitelist;

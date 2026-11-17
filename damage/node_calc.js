@@ -50,6 +50,18 @@ const ABILITY_ID2NAME = loadId2Name('abilities', 'Abilities');
 // pass names keep passing).
 const normItem = (x) => (x && ITEM_ID2NAME[x]) || x;
 const normAbility = (x) => (x && ABILITY_ID2NAME[x]) || x;
+// Tera type: the library compares `teraType` with === against CAPITALIZED
+// type names ('Fire', 'Stellar') — STAB, Tera Shell, Stellar handling and the
+// type chart all key off it (pokemon.js hasType, gen789.js 'Stellar' checks).
+// Our pipeline passes lowercase ids (DB strategy.tera_type = 'fire'; the
+// adapter's to_id('Fire') = 'fire'), which silently disabled ALL of those:
+// e.g. Tera-fire Charizard's Flamethrower computed at 31-37 instead of 42-50
+// (no STAB). Normalize at the boundary, same pattern as normItem/normAbility
+// (accept id OR name; every one of the 18 types + 'stellar' is exactly
+// first-letter-cased).
+const normTera = (x) => (x && typeof x === 'string' && x.length
+  ? x.charAt(0).toUpperCase() + x.slice(1)
+  : x);
 
 function clean(obj) {
   if (!obj) return {};
@@ -77,7 +89,7 @@ function buildPokemon(gen, o) {
     ability: normAbility(o.ability),
     status: o.status,
     boosts: o.boosts || {},
-    teraType: o.teraType,
+    teraType: normTera(o.teraType),
     moves: o.moves,
     // belief-state flags (library options; absent = off, as before):
     abilityOn: o.abilityOn,

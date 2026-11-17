@@ -383,6 +383,23 @@ def test_calc_field_accepts_real_log_ids():
     assert ev.calc_field(None) == {}
 
 
+def test_status_of_passes_showdown_status_codes_through():
+    """The adapter stores the RAW Showdown status code from ``|-status|`` lines
+    (verified fork protocol: par/slp/frz/tox/psn/brn), and those codes ARE
+    @smogon/calc's codes — the library checks ``hasStatus('slp')`` (Wake-Up
+    Slap x2, Dream Eater's hit gate) and ``hasStatus('psn')`` (Facade x2).
+    The old ``_STATUS_ORDER`` listed "skl" (a code neither Showdown nor the
+    calc uses; sleep is "slp"), so a sleeping mon's status was silently DROPPED
+    from every calc window — Wake-Up Slap / Dream Eater windows computed at
+    half power, Facade-from-poison halved. Same false-truth class as the
+    weather-id bug: belief vocabulary and calc vocabulary must share one set.
+    """
+    for code in ("par", "brn", "slp", "frz", "tox", "psn"):
+        assert ev.status_of({code}) == code, code
+    assert ev.status_of(set()) is None
+    assert ev.status_of(None) is None
+
+
 def test_spikes_and_toxicspikes_track_layer_count():
     """The fork emits ONE |-sidestart line PER Spikes / Toxic-Spikes layer (no
     count in the line; moves.js:17536-17543: onSideStart sets layers=1 + emit,

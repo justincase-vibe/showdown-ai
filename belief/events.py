@@ -10,7 +10,8 @@ Design rules:
   * Slot ids are Showdown identifiers: ``p1a``-``p1f`` (own side),
     ``p2a``-``p2f`` (opponent side — the belief's focus).
   * ids (moves/items/abilities/teratypes) are Showdown ``toID`` strings;
-    statuses are short codes (``brn``/``par``/``skl``/``frz``/``tox``);
+    statuses are the raw Showdown short codes (``brn``/``par``/``slp``/``frz``/
+    ``tox``/``psn``) — these ARE @smogon/calc's status codes;
     stats are ``hp/atk/def/spa/spd/spe``.
   * ``Unknown`` is a first-class event: the adapter emits it for any line it
     does not map, so unmapped log lines are OBSERVABLE (bug-catcher, 3.7)
