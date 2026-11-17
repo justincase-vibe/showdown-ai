@@ -356,6 +356,33 @@ def test_field_and_tailwind_expiry():
     assert bs.field["weather"] is None
 
 
+def test_calc_field_accepts_real_log_ids():
+    """The adapter does ``to_id`` on the raw log token (log_events.py), so a
+    REAL ladder battle stores the SHOWDOWN id in ``bs.field`` — ``raindance``
+    from ``|weather| rain dance``, ``sunnyday``, ``psyshic`` (``|terrain|
+    psychic terrain`` minus ``terrain``) — NOT the short canonical ids these
+    tests used to feed ("rain"/"sun"/"psychic"). ``calc_field`` must map BOTH
+    forms to the calc's field value, else rain/sun/psychic-terrain were
+    silently dropped from every real-battle damage/speed likelihood (the
+    false-truth the canonical-id tests masked)."""
+    # real log ids (what the adapter emits from actual logs)
+    assert ev.calc_field({"weather": "raindance"}) == {"weather": "Rain"}
+    assert ev.calc_field({"weather": "sunnyday"}) == {"weather": "Sun"}
+    assert ev.calc_field({"terrain": "psyshic"}) == {"terrain": "Psychic"}
+    # canonical ids still work (the pre-fix test vocabulary)
+    assert ev.calc_field({"weather": "rain"}) == {"weather": "Rain"}
+    assert ev.calc_field({"weather": "sun"}) == {"weather": "Sun"}
+    assert ev.calc_field({"terrain": "psychic"}) == {"terrain": "Psychic"}
+    # the other weather/terrain ids stay mapped
+    assert ev.calc_field({"weather": "sandstorm"}) == {"weather": "Sand"}
+    assert ev.calc_field({"weather": "snow"}) == {"weather": "Hail"}
+    assert ev.calc_field({"terrain": "electric"}) == {"terrain": "Electric"}
+    # nothing set -> empty field
+    assert ev.calc_field({"weather": None}) == {}
+    assert ev.calc_field({}) == {}
+    assert ev.calc_field(None) == {}
+
+
 def test_spikes_and_toxicspikes_track_layer_count():
     """The fork emits ONE |-sidestart line PER Spikes / Toxic-Spikes layer (no
     count in the line; moves.js:17536-17543: onSideStart sets layers=1 + emit,

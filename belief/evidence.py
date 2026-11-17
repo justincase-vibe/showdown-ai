@@ -161,10 +161,22 @@ from typing import Any  # noqa: E402  (SOFT section keeps the HARD section pure)
 
 import json as _json
 
-#: belief field id -> @smogon/calc field value
-_WEATHER = {"rain": "Rain", "sun": "Sun", "strongwinds": "Sun",
-            "sand": "Sand", "sandstorm": "Sand", "hail": "Hail", "snow": "Hail"}
-_TERRAIN = {"electric": "Electric", "grassy": "Grass", "misty": "Misty", "psychic": "Psychic"}
+#: belief field id -> @smogon/calc field value.
+# Accepts BOTH the canonical ids the belief tests use ("rain"/"sun"/"psychic")
+# AND the raw Showdown log ids the adapter emits from real ladder logs
+# ("raindance"/"sunnyday"/"psyshic"): the adapter does toID on the log token, so
+# a real battle carries the move-id form (|weather|raindance), NOT the short form.
+# Without the real ids, calc_field silently dropped rain/sun/psychic-terrain in
+# real battles -> wrong damage/speed likelihoods (regression-tested).
+# Proper follow-up (open decision): canonicalise at the source so the belief
+# state, calc, and encoder all share ONE id set; for now this defensive mapping
+# matches the calc bridge's normItem/normAbility (accept id OR name) pattern.
+_WEATHER = {"rain": "Rain", "raindance": "Rain",
+            "sun": "Sun", "sunnyday": "Sun", "strongwinds": "Sun",
+            "sand": "Sand", "sandstorm": "Sand",
+            "hail": "Hail", "snow": "Hail"}
+_TERRAIN = {"electric": "Electric", "grassy": "Grass", "misty": "Misty",
+            "psychic": "Psychic", "psyshic": "Psychic"}
 
 #: the calc takes ONE status per mon; order by damage/speed interaction
 #: (paralysis first: it is the only status with both).
