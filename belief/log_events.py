@@ -193,6 +193,10 @@ class LogAdapter:
         # switch-in dedupe (the sim logs each switch-in twice, back-to-back):
         self._prev_line_was_switch = False   # was the previous fed line a switch-in?
         self._last_switch_sig = None         # (slot, species) of that switch-in
+        # username -> side, from |player|/|name| identity lines: human-ladder
+        # logs name the winner by USERNAME in |win| (verified 2026-11-17, all
+        # 2000 gen9ou.jsonl battles), so we resolve it to 'p1'/'p2' there.
+        self.side_by_user: Dict[str, str] = {}
         # move-source attribution for damage lines (3.4): the most recent
         # `|move|` line as (side, slot, move, target_slot). Damage lines follow
         # their move's announce line (possibly with status/boost lines in
@@ -263,6 +267,15 @@ class LogAdapter:
 
         if tag == "start":
             return BattleStart(fmt=p[0].strip() if p else None)  # "|start| gen9ou" is space-padded
+        if tag in ("player", "name") and len(p) >= 2:
+            # |player| p1 | Username | avatar | rating — ladder identity. NO
+            # belief evidence (still None), but record username -> side so the
+            # `|win| <username>` branch resolves the winner to a side.
+            side, user = p[0].strip(), p[1].strip()
+            if side in ("p1", "p2") and user:
+                self.side_by_user[user] = side
+                self.side_by_user[to_id(user)] = side
+            return None
         if tag in IGNORED_TAGS:
             return None
         if tag == "turn":
@@ -420,9 +433,16 @@ class LogAdapter:
             return TerrainChanged(terrain=to_id(p[0]).removesuffix("terrain") if p else "none")
 
         if tag == "win":
-            # ladder logs use "|win| p1" (space-padded payload) — strip, like
-            # every other branch (a " p1" winner_side would break == "p1" checks)
-            return BattleEnd(winner_side=p[0].strip() if p else None)
+            # payload is the winning SIDE ("p1"/"p2") in sim logs, but the
+            # winner's USERNAME in human-ladder logs ("|win| LT111VZ Roman") —
+            # resolve via the |player|/|name| mapping. Unresolvable -> keep the
+            # raw value (observable in the corpus, NOT silently None).
+            raw = p[0].strip() if p else None
+            if raw in ("p1", "p2"):
+                return BattleEnd(winner_side=raw)
+            return BattleEnd(winner_side=(self.side_by_user.get(raw)
+                                          or self.side_by_user.get(to_id(raw))
+                                          or raw))
         if tag == "tie":
             return BattleEnd(winner_side=None)
 

@@ -23,7 +23,7 @@ The walker doubles as the bug-catcher (3.7): it counts and samples ``Unknown``
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from belief.events import BattleEnd, MoveUsed, SwitchIn, Turn, Unknown
 from belief.log_events import LogAdapter
@@ -129,13 +129,30 @@ def _team_species(lines: List[str]) -> List[str]:
     return seen
 
 
-def _is_move_legal(move: str, species: str, fid: Optional[str]) -> bool:
+def _is_move_legal(move: str, species: str, fid: Optional[str],
+                   pool_cache: Optional[Dict[Tuple[str, str], set]] = None) -> bool:
     """Static legality: is ``move`` a legal move for ``species`` in the format?
 
     This is the S4.0 "yields a legal action" check — a move-pool test (it ignores
-    dynamic state the log never reveals: PP, status locks, Choice, …)."""
+    dynamic state the log never reveals: PP, status locks, Choice, …).
+
+    ``pool_cache`` memoizes the (species, format) -> legal-move-set lookup:
+    it is static within a battle, and one battle has ~60 move decisions but
+    only ~12 distinct (species, format) pairs — without the cache every
+    decision opens a fresh SQLite connection (legal_moves does connect/query/
+    close per call)."""
     if not (fid and species and move):
         return False
+    if pool_cache is not None:
+        key = (species, fid)
+        pool = pool_cache.get(key)
+        if pool is None:
+            try:
+                pool = set(_lookup.legal_moves(species, fid))
+            except Exception:
+                pool = set()  # species with no pool -> no legal move (same as before)
+            pool_cache[key] = pool
+        return move in pool
     try:
         return move in _lookup.legal_moves(species, fid)
     except Exception:
@@ -189,6 +206,7 @@ def replay_battle(battle: dict, max_unknown_samples: int = 30) -> BattleTrace:
     belief = BeliefState(fid) if prior_ok else None
     current_turn = 0
     seen_first_turn = False
+    pool_cache: Dict[Tuple[str, str], set] = {}   # (species, format) -> legal moves
 
     try:
         for line in lines:
@@ -219,7 +237,7 @@ def replay_battle(battle: dict, max_unknown_samples: int = 30) -> BattleTrace:
                 trace.decisions.append(Decision(
                     turn=current_turn, pov=ev.side, kind="move",
                     action=ev.move, species=species,
-                    legal=_is_move_legal(ev.move, species, fid)))
+                    legal=_is_move_legal(ev.move, species, fid, pool_cache)))
             elif isinstance(ev, SwitchIn) and seen_first_turn and not ev.forced:
                 # a player-chosen in-battle switch (a |drag|/|replace| is a game
                 # FORCED entry, not a decision — excluded from the switch-rate).
@@ -231,6 +249,13 @@ def replay_battle(battle: dict, max_unknown_samples: int = 30) -> BattleTrace:
     except ValueError as e:
         # a no-prior species slipped past the pre-scan (revealed only mid-battle)
         trace.skipped = f"no prior mid-replay: {e}"
+        trace.decisions = []
+        trace.context_seq = []
+    except Exception as e:  # noqa: BLE001 — one bad battle must not kill the corpus run
+        # a genuinely unexpected adapter/belief crash: mark skipped with a precise
+        # reason (surfaces in the corpus report's skipped_reasons, stays counted)
+        # instead of aborting the whole replay_many on one malformed battle.
+        trace.skipped = f"replay error: {type(e).__name__}: {e}"
         trace.decisions = []
         trace.context_seq = []
 

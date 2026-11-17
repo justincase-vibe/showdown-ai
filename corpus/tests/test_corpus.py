@@ -181,6 +181,44 @@ def test_drag_not_a_switch_decision():
     assert t.winner_side == "p1"
 
 
+# ── winner resolution: |win| payloads are USERNAMES in ladder logs ─────
+def test_win_by_username_resolves_side():
+    """Ladder logs end with `|win| <winner-username>` (verified on the
+    gen9ou fixture: all 2000 battles), not `|win| p1`. The adapter must
+    resolve the username to a side via the `|player|` identity lines."""
+    from belief.events import BattleEnd
+    ad = LogAdapter()
+    ad.feed_line("|player|p1|☆CT1 bea|avatar|1990")
+    ad.feed_line("|player|p2|Mimikyu Star|avatar|2010")
+    ev = ad.feed_line("|win| ☆CT1 bea")
+    assert isinstance(ev, BattleEnd) and ev.winner_side == "p1"
+    # case-insensitive usernames (Showdown ids are casefolded)
+    ad2 = LogAdapter()
+    ad2.feed_line("|player| p2 | Mimikyu Star | x | 2010")
+    ev2 = ad2.feed_line("|win| mimikyu star")
+    assert ev2.winner_side == "p2"
+    # direct side payloads (sim logs) keep working
+    ad3 = LogAdapter()
+    ev3 = ad3.feed_line("|win| p2")
+    assert ev3.winner_side == "p2"
+    # unresolvable username -> raw kept (observable), NOT silently None
+    ev4 = LogAdapter().feed_line("|win| ghost user")
+    assert ev4.winner_side == "ghost user"
+
+
+@needs_fixture
+def test_winner_side_resolved_to_side_on_real_battles():
+    """On real ladder battles, winner_side must end up as 'p1'/'p2' —
+    the false-truth trap of this session: a synthetic `|win| p1` test passed
+    while EVERY real battle carried a username."""
+    traces = [t for t in replay_many(load_local(str(FIXTURE), 20))
+              if t.skipped is None]
+    assert traces
+    for t in traces:
+        assert t.winner_side in ("p1", "p2"), \
+            f"unresolved winner_side: {t.winner_side!r} (battle {t.battle_id})"
+
+
 # ── clean skip: no-prior species (the known P0 DB gap) ─────────────────
 def test_no_prior_species_cleanly_skipped():
     """Landorus(-Therian) has no gen9ou prior in the current DB (fork tier
