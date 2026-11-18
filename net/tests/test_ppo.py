@@ -180,8 +180,9 @@ def test_ppo_update_finite_and_changes_weights(ctx_vocabs):
     with torch.no_grad():
         batch["old_logprob"] = chosen_logprobs(net, batch).clone()
         batch["old_value"] = net(batch)["value"][:, 0, 0].clone()
-    # a GAE'd (advantage, return) pair from a fake terminal-reward trajectory
-    values = batch["old_value"].numpy()
+    # a GAE'd (advantage, return) pair from a fake terminal-reward trajectory.
+    # value head = P(win) in (0,1) -> map to reward space (2V-1) before GAE.
+    values = 2.0 * batch["old_value"].numpy() - 1.0
     rewards = np.zeros(n); rewards[-1] = 1.0
     adv, ret = gae(rewards, values, gamma=0.99, lam=0.95)
 

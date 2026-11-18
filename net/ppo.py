@@ -26,6 +26,17 @@ zero-sum. So `rewards[t] == 0` for every step except the battle's last, where it
 is ±1. `gae` assumes the LAST step of a buffer entry is terminal (a self-play
 battle always ends decided — see the P3.4 loop, which only buffers COMPLETED
 battles).
+
+Value-head contract (P3 bug-hunt fix): the net's value head is a **Sigmoid**
+(see `net/model.py`), so it emits a **win-probability in (0, 1)** (P(win) — the
+pass-turn default `value=0.5` is the 50/50 state). The reward space is (−1, +1),
+so a value used by GAE / the value loss must be mapped to reward space as
+**2·V − 1**. (Feeding the raw (0,1) sigmoid directly — the pre-fix behaviour —
+could not represent negative values, so a "likely-loss" state and an "even"
+state both collapsed to V≈0, destroying the critic and distorting advantages.)
+The mapping is applied at the two consumption points (`PPOTrainer._loss` and
+the GAE call sites); `RolloutStep.old_value` stays the raw (0,1) sigmoid the
+agent reports, and the generic `gae()` takes reward-space values.
 """
 from __future__ import annotations
 
@@ -228,7 +239,9 @@ class PPOTrainer:
         s2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * advantages
         policy_loss = -torch.min(s1, s2).mean()
 
-        value_pred = out["value"][:, 0, 0]           # (B,)
+        # value head = Sigmoid = P(win) in (0,1); map to reward space (2V-1) so
+        # the critic can represent negative returns (a loss) — see module doc.
+        value_pred = 2.0 * out["value"][:, 0, 0] - 1.0   # (B,) reward space
         value_loss = F.mse_loss(value_pred, returns)
 
         entropy = -(prob * logp).sum(-1).mean()
@@ -257,9 +270,13 @@ class PPOTrainer:
                 torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.max_norm)
             self.opt.step()
             with torch.no_grad():
-                # a cheap KL(old||new) proxy (mean ratio-1) for the metrics log
-                kl = float((torch.exp(chosen_logprobs(self.net, batch)
-                                      - batch["old_logprob"]) - 1.0).mean().item())
+                # cheap KL(old||new) proxy for the metrics log (standard PPO
+                # estimator E_old[ratio * log(ratio)] = E[ratio*(logp_new-logp_old)],
+                # always >= 0). The pre-fix "exp(d)-1" form was ≈ -KL for small
+                # drift and then max(0,.)-clamped to ~0, i.e. a misleading ~0.
+                new_lp = chosen_logprobs(self.net, batch)
+                ratio_m = torch.exp(new_lp - batch["old_logprob"])
+                kl = float((ratio_m * (new_lp - batch["old_logprob"])).mean().item())
             tot["loss"] += float(loss.item()); tot["policy"] += float(pol.item())
             tot["value"] += float(val.item()); tot["entropy"] += float(ent.item())
             tot["frac_clipped"] += float(frac.item()); tot["kl_approx"] += max(0.0, kl)
