@@ -207,6 +207,29 @@ def evaluate(net: PokeNet, samples: List[Sample], device: str = "cpu",
                 human_switch += 1
 
     n = len(samples)
+
+    # POSITION-BIAS baseline: the accuracy of always predicting ONE fixed
+    # action index (the best one, per kind). A net that learned nothing can
+    # still hit this if targets are concentrated on a few indices — which is
+    # exactly what happens when action lists are short (a 1-2 revealed-move
+    # list puts the human's move at index 0 most of the time). This is the
+    # real "no learning" ceiling and MUST be in the verdict gate (the S4.3
+    # N=50 "PASS" was 0.653 = exactly the always-index-0 baseline; the net
+    # predicted index 0 on 219/219 held-out decisions and learned nothing).
+    import collections as _c
+
+    def _best_const(ss: List[Sample]) -> float:
+        if not ss:
+            return 0.0
+        d = _c.Counter(s.target for s in ss)
+        return max(d.values()) / len(ss)
+
+    move_ss = [s for s in samples if s.kind == "move"]
+    sw_ss = [s for s in samples if s.kind == "switch"]
+    move_const = _best_const(move_ss)
+    sw_const = _best_const(sw_ss)
+    top1_const = _best_const(samples)
+
     move_acc = move_correct / n_move if n_move else 0.0
     switch_acc = switch_correct / n_switch if n_switch else 0.0
     move_chance = chance_move / n_move if n_move else 0.0
@@ -220,11 +243,17 @@ def evaluate(net: PokeNet, samples: List[Sample], device: str = "cpu",
         "n": n, "n_move": n_move, "n_switch": n_switch,
         "move_acc": move_acc, "move_chance": move_chance,
         "move_chance_legal": move_chance_legal,
+        "move_const_acc": move_const,
         "move_beats_chance": bool(n_move) and move_acc > move_chance_legal,
+        "move_beats_const": bool(n_move) and move_acc > move_const,
         "switch_acc": switch_acc, "switch_chance": switch_chance,
+        "switch_const_acc": sw_const,
         "switch_beats_chance": bool(n_switch) and switch_acc > switch_chance,
+        "switch_beats_const": bool(n_switch) and switch_acc > sw_const,
         "top1_acc": top1, "overall_chance": overall_chance,
+        "top1_const_acc": top1_const,
         "top1_beats_chance": top1 > overall_chance,
+        "top1_beats_const": top1 > top1_const,
         "pred_switch_rate": pred_switch_rate,
         "human_switch_rate": human_switch_rate,
         "switch_rate_gap": pred_switch_rate - human_switch_rate,
@@ -237,24 +266,42 @@ def verdict(m: Dict) -> Tuple[bool, List[str]]:
     A net that only gets switches right FAILS (move-accuracy collapses to ~0,
     below chance). A net that only gets moves right also FAILS (switch-rate
     collapses to ~0, far from the human rate, and switch-accuracy ~0).
+
+    Every accuracy gate is two-sided: the net must beat BOTH the random
+    chance baseline (1/|legal|) AND the position-bias baseline (the best
+    single constant action index). The second is the real "learned nothing"
+    ceiling: with short action lists the human target sits at index 0 most
+    of the time, so a constant-index net can clear chance without learning
+    anything (that is exactly how the first S4.3 N=50 run "passed").
     """
     fails: List[str] = []
     if not m.get("n"):
         return False, ["no held-out samples to evaluate"]
 
-    # HARD gate 1 — move-accuracy must beat chance (anti collapse-to-switch).
+    # HARD gate 1 — move-accuracy must beat chance AND the constant-index
+    # position baseline (anti collapse-to-switch, anti index-0 bias).
     if not m.get("n_move"):
         fails.append("no move-decisions in the held-out set")
     elif not m["move_beats_chance"]:
         fails.append(f"move-accuracy {m['move_acc']:.3f} <= chance "
-                     f"{m['move_chance']:.3f}  (collapse to switches?)")
+                     f"{m.get('move_chance_legal', m.get('move_chance', 0.0)):.3f}  "
+                     f"(collapse to switches?)")
+    elif not m["move_beats_const"]:
+        fails.append(f"move-accuracy {m['move_acc']:.3f} <= constant-index "
+                     f"baseline {m['move_const_acc']:.3f}  (net is a fixed "
+                     f"action — it learned nothing)")
 
-    # HARD gate 2 — switch-accuracy must beat chance.
+    # HARD gate 2 — switch-accuracy must beat chance AND its constant-index
+    # baseline.
     if not m.get("n_switch"):
         fails.append("no switch-decisions in the held-out set")
     elif not m["switch_beats_chance"]:
         fails.append(f"switch-accuracy {m['switch_acc']:.3f} <= chance "
                      f"{m['switch_chance']:.3f}")
+    elif not m["switch_beats_const"]:
+        fails.append(f"switch-accuracy {m['switch_acc']:.3f} <= constant-"
+                     f"index baseline {m['switch_const_acc']:.3f}  (net is a "
+                     f"fixed action — it learned nothing)")
 
     # HARD gate 3 — predicted switch-rate must sit near the human rate
     # (catches ANY "always one action type" collapse, both directions).
@@ -263,10 +310,15 @@ def verdict(m: Dict) -> Tuple[bool, List[str]]:
                      f"from human {m['human_switch_rate']:.3f} "
                      f"(gap {m['switch_rate_gap']:+.3f} > {SWITCH_RATE_MARGIN})")
 
-    # overall top-1 must beat overall chance.
+    # overall top-1 must beat overall chance AND the overall constant-index
+    # baseline.
     if not m.get("top1_beats_chance"):
         fails.append(f"held-out top-1 {m['top1_acc']:.3f} <= chance "
                      f"{m['overall_chance']:.3f}")
+    elif not m.get("top1_beats_const"):
+        fails.append(f"held-out top-1 {m['top1_acc']:.3f} <= constant-index "
+                     f"baseline {m['top1_const_acc']:.3f}  (net is a fixed "
+                     f"action — it learned nothing)")
 
     return (not fails), fails
 
@@ -410,16 +462,16 @@ def run(n_battles: int = 50, fixture: str = "bot/data/replays/gen9ou.jsonl",
     log(f"held-out n          : {final['n']}  (moves {final['n_move']}, "
         f"switches {final['n_switch']})")
     log(f"move-accuracy       : {final['move_acc']:.3f}   chance "
-        f"{final['move_chance_legal']:.3f}  (1/|moves| {final['move_chance']:.3f})   "
-        f"beats-chance {'YES' if final['move_beats_chance'] else 'no'}")
+        f"{final['move_chance_legal']:.3f}  const-idx {final['move_const_acc']:.3f}   "
+        f"beats-both {'YES' if final['move_beats_chance'] and final['move_beats_const'] else 'NO'}")
     log(f"switch-accuracy     : {final['switch_acc']:.3f}   chance "
-        f"{final['switch_chance']:.3f}   beats-chance "
-        f"{'YES' if final['switch_beats_chance'] else 'no'}")
+        f"{final['switch_chance']:.3f}   const-idx {final['switch_const_acc']:.3f}   "
+        f"beats-both {'YES' if final['switch_beats_chance'] and final['switch_beats_const'] else 'NO'}")
     log(f"predicted switch-rate: {final['pred_switch_rate']:.3f}   human "
         f"{final['human_switch_rate']:.3f}   gap {final['switch_rate_gap']:+.3f}")
     log(f"held-out top-1      : {final['top1_acc']:.3f}   chance "
-        f"{final['overall_chance']:.3f}   beats-chance "
-        f"{'YES' if final['top1_beats_chance'] else 'no'}")
+        f"{final['overall_chance']:.3f}   const-idx {final['top1_const_acc']:.3f}   "
+        f"beats-both {'YES' if final['top1_beats_chance'] and final['top1_beats_const'] else 'NO'}")
     log(f"VERDICT             : {'PASS — net is learning state->action' if ok else 'FAIL'}")
     for f in fails:
         log(f"    - {f}")

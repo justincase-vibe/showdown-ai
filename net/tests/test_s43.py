@@ -44,8 +44,11 @@ def _base():
     return {
         "n": 100, "n_move": 60, "n_switch": 40,
         "move_acc": 0.7, "move_chance": 0.4, "move_beats_chance": True,
+        "move_const_acc": 0.3, "move_beats_const": True,
         "switch_acc": 0.6, "switch_chance": 0.35, "switch_beats_chance": True,
+        "switch_const_acc": 0.2, "switch_beats_const": True,
         "top1_acc": 0.65, "overall_chance": 0.2, "top1_beats_chance": True,
+        "top1_const_acc": 0.3, "top1_beats_const": True,
         "pred_switch_rate": 0.42, "human_switch_rate": 0.40, "switch_rate_gap": 0.02,
     }
 
@@ -90,6 +93,45 @@ def test_verdict_passes_healthy_net():
     ok, fails = bc.verdict(m)
     assert ok, fails
     assert fails == []
+
+
+def test_verdict_flags_fixed_action_net():
+    # THE regression that the first N=50 run exposed: a net that always
+    # predicts ONE action index can clear the chance gate without learning
+    # anything (short action lists put the human target at index 0 ~65% of
+    # the time, so always-index-0 scores 0.65 vs chance 0.22). If the net's
+    # accuracy merely EQUALS its constant-index baseline it must FAIL.
+    m = _base()
+    m.update({"move_acc": 0.65, "move_const_acc": 0.65, "move_beats_const": False,
+              "switch_acc": 0.50, "switch_const_acc": 0.50, "switch_beats_const": False,
+              "top1_acc": 0.60, "top1_const_acc": 0.60, "top1_beats_const": False})
+    ok, fails = bc.verdict(m)
+    assert not ok, fails
+    assert any("constant-index" in f for f in fails)
+
+
+def test_verdict_passes_net_that_beats_constant_baseline():
+    # the healthy case must keep passing: accuracy strictly above BOTH the
+    # chance and the constant-index baselines
+    m = _base()
+    ok, fails = bc.verdict(m)
+    assert ok, fails
+
+
+def test_evaluate_reports_constant_index_baseline():
+    # every target at index 0 -> the constant-index baseline is 1.0 for both
+    # kinds, even though an untrained net's accuracy is far below it
+    samples, vocabs = _make_synthetic_samples(12)
+    for s in samples:
+        s.target = 0
+    net = PokeNet(vocabs)
+    m = bc.evaluate(net, samples)
+    assert m["move_const_acc"] == 1.0
+    assert m["switch_const_acc"] == 1.0
+    assert m["top1_const_acc"] == 1.0
+    assert not m["move_beats_const"]
+    assert not m["switch_beats_const"]
+    assert not m["top1_beats_const"]
 
 
 def test_verdict_requires_both_action_types_present():
