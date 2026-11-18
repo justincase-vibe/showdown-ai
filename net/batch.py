@@ -37,6 +37,16 @@ Action-list construction (recorded design choice, S4.2 + D70 + D73 + D83):
     index baseline honest (~1/|list| = chance).
 
 Capped at the registry's MAX_ACTIONS (12) — the list is built to fit.
+
+Observation (recorded design choice, D85, user-approved): the own_moves
+channel of every encoded context is widened to the mon's COMPLETE moveset —
+whole-battle revealed moves + Smogon fillers up to 4 (the same D83 recipe as
+the action list), NO "revealed" marker. With the old "revealed-so-far +
+<pad>" row, the COUNT of revealed moves was itself a structural shortcut for
+first-use vs repeat decisions (exactly what the D81/D82 leak gate measures);
+the full set makes first-use and repeat states structurally identical — the
+shortcut is removed at the source. The opponent side is deliberately
+UNCHANGED: there, revealed-so-far IS the real public information.
 """
 from __future__ import annotations
 
@@ -50,7 +60,7 @@ import numpy as np
 
 from corpus.trajectories import BattleTrace, Decision
 from net.encoder import encode_context, encode_sequence
-from net.registry import LAYOUT, MAX_ACTIONS
+from net.registry import LAYOUT, MAX_ACTIONS, MAX_OWN_MOVES
 from net.vocab import Vocabs
 
 
@@ -276,6 +286,42 @@ def build_samples(trace: BattleTrace, vocabs: Vocabs,
         mv = _to_id(dec.action) or ""
         if sp and mv:
             full_moves_by_species.setdefault(sp, set()).add(mv)
+
+    # D85: the OBSERVATION's own_moves channel gets the same complete moveset
+    # as the action list (whole-battle revealed + Smogon fillers to 4), no
+    # "revealed" marker — see the module docstring. Computed per species,
+    # deterministically (function of species + format only), and injected into
+    # a shallow ctx copy at encode time (the encoder's pure contract is
+    # untouched; the shared seq_ctx snapshots are never mutated).
+    obs_cache: Dict[str, List[str]] = {}
+
+    def _obs_moves(sp: str) -> List[str]:
+        if sp not in obs_cache:
+            base = sorted(full_moves_by_species.get(sp, ()))
+            obs_cache[sp] = (base + move_decoys(sp, trace.formatid, base))[:MAX_OWN_MOVES]
+        return obs_cache[sp]
+
+    def _ctx_full_own(ctx: Dict) -> Dict:
+        """``ctx`` with each own block's ``moves`` set to that mon's complete
+        moveset (opponent side and everything else untouched)."""
+        own = ctx.get("own") or {}
+        if not own:
+            return ctx
+        new_own: Dict[str, Dict] = {}
+        changed = False
+        for slot, blk in own.items():
+            sp = _to_id(blk.get("name") or blk.get("species") or "")
+            if sp:
+                full = _obs_moves(sp)
+                if full and list(blk.get("moves") or []) != full:
+                    blk = dict(blk)
+                    blk["moves"] = list(full)
+                    changed = True
+            new_own[slot] = blk
+        if not changed:
+            return ctx
+        return {**ctx, "own": new_own}
+
     for dec in trace.decisions:
         if dec.pov != "p1" or not dec.legal:
             continue
@@ -307,7 +353,8 @@ def build_samples(trace: BattleTrace, vocabs: Vocabs,
         n_kind = sum(1 for a in actions if a.get("kind") == dec.kind)
         if n_kind < 2:
             continue
-        seq = [encode_context(ctx, vocabs, actions) for ctx in seq_ctx[:dec.turn]]
+        seq = [encode_context(_ctx_full_own(ctx), vocabs, actions)
+               for ctx in seq_ctx[:dec.turn]]
         samples.append(Sample(
             battle_id=trace.battle_id, turn=dec.turn, kind=dec.kind,
             target=target, actions=actions, seq=seq, first_use=first_use,

@@ -34,7 +34,7 @@ from net import (
     samples_to_batch,
 )
 from net.batch import (Sample, _alive_bench, _shuffle_actions, build_samples,
-                       decision_actions)
+                       decision_actions, move_decoys)
 import net.bc as bc
 from net.tests.test_s41 import make_ctx, make_vocabs
 from corpus.trajectories import Decision
@@ -462,6 +462,122 @@ def test_build_samples_target_is_human_action_after_shuffle():
     assert len(samples) == 1
     s = samples[0]
     assert s.actions[s.target]["move"] == "icebeam"    # target = the human's move
+
+
+# ── D85: observation own_moves = COMPLETE moveset (no reveal-count shortcut) ──
+
+def _decode_row(row, vocabs):
+    """An encoded move row (int array) -> the set of non-pad move ids.
+    (``Vocab.id_of`` is the public inverse map; 0 = <pad> -> ''.)"""
+    out = set()
+    for v in row.tolist():
+        ident = vocabs.move.id_of(int(v))
+        if ident:
+            out.add(ident)
+    return out
+
+
+def test_d85_first_use_and_repeat_own_moves_rows_are_identical():
+    """D85: the own_moves channel carries the mon's WHOLE-battle moveset
+    (revealed across the battle + Smogon fillers to 4) at EVERY timestep — so
+    a first-use decision (t1: nothing revealed yet) and a later repeat
+    decision (t3) have structurally IDENTICAL own_moves rows. The old
+    revealed-prefix + <pad> row leaked the reveal COUNT (exactly the shortcut
+    the D81/D82 leak gate measures)."""
+    ctx1 = copy.deepcopy(_ctx_own())
+    ctx1["turn"] = 1
+    ctx1["own"]["p1a"]["moves"] = []             # nothing revealed at turn 1
+    ctx2 = copy.deepcopy(_ctx_own())
+    ctx2["turn"] = 2
+    ctx2["own"]["p1a"]["moves"] = ["icebeam"]    # one move revealed by turn 2
+    ctx3 = copy.deepcopy(_ctx_own())
+    ctx3["turn"] = 3
+    ctx3["own"]["p1a"]["moves"] = ["icebeam", "earthquake"]
+
+    class _T:
+        battle_id = "d85"
+        formatid = "gen9ou"
+        skipped = None
+        context_seq = [ctx1, ctx2, ctx3]
+        decisions = [
+            Decision(turn=1, pov="p1", kind="move", action="icebeam",
+                     species="garchomp", legal=True),
+            Decision(turn=2, pov="p1", kind="move", action="earthquake",
+                     species="garchomp", legal=True),
+            Decision(turn=3, pov="p1", kind="move", action="icebeam",
+                     species="garchomp", legal=True),  # a REPEAT
+        ]
+
+    voc = make_vocabs(make_ctx())
+    # the filler moves must be IN the vocab to be decodable (the production
+    # build_vocabs covers them from the legality DB; add them here, as the
+    # Vocab.add docstring intends for tests)
+    filler = move_decoys("garchomp", "gen9ou", ["earthquake", "icebeam"])
+    for m in filler:
+        voc.move.add(m)
+    expected = {"earthquake", "icebeam"} | set(filler)
+    samples = build_samples(_T(), voc)
+    assert len(samples) == 3
+    row_t1 = _decode_row(samples[0].seq[-1]["own_moves"][0], voc)  # p1a = slot 0
+    row_t3 = _decode_row(samples[2].seq[-1]["own_moves"][0], voc)
+    assert row_t1 == row_t3, (row_t1, row_t3)            # NO reveal-count tell
+    assert row_t1 == expected, (row_t1, expected)        # whole-battle set + filler, at t1
+    # and the repeat sample's EARLY timestep is already the full row
+    row_early = _decode_row(samples[2].seq[0]["own_moves"][0], voc)
+    assert row_early == row_t3
+
+
+def test_d85_bench_mon_with_no_reveals_still_reads_full():
+    """D85: a bench mon that never reveals a move must not read as an all-<pad>
+    row (the 'zero revealed' tell) — it gets the Smogon filler full set,
+    deterministic per species (same row in every sample)."""
+    ctx = copy.deepcopy(_ctx_own())
+    # p1c is the bench DRAGONITE: it never acts (zero reveals) — a distinct
+    # species, so no species-collision with the acting Garchomp's full set.
+
+    class _T:
+        battle_id = "d85b"
+        formatid = "gen9ou"
+        skipped = None
+        context_seq = [ctx, ctx]
+        decisions = [
+            Decision(turn=1, pov="p1", kind="move", action="icebeam",
+                     species="garchomp", legal=True),
+            Decision(turn=2, pov="p1", kind="move", action="icebeam",
+                     species="garchomp", legal=True),
+        ]
+
+    filler = move_decoys("dragonite", "gen9ou", [])      # its full filler set
+    assert len(filler) >= 1, "DB must provide dragonite filler moves"
+    voc = make_vocabs(make_ctx())
+    for m in filler:
+        voc.move.add(m)
+    samples = build_samples(_T(), voc)
+    assert len(samples) == 2
+    row1 = _decode_row(samples[0].seq[-1]["own_moves"][2], voc)   # p1c = slot 2
+    assert row1 == set(filler), (row1, set(filler))    # full filler row, NOT all-<pad>
+    assert _decode_row(samples[1].seq[-1]["own_moves"][2], voc) == row1
+
+
+def test_d85_opponent_moves_stay_revealed_so_far():
+    """D85: the opponent side is deliberately UNCHANGED — revealed-so-far IS
+    the real public information there (no filler, no full-set assumption)."""
+    ctx = copy.deepcopy(_ctx_own())
+    ctx["opponent"] = {"p2a": {"species": "Garchomp", "moves": ["outrage"],
+                              "active": True, "fainted": False, "hp_frac": 0.5}}
+
+    class _T:
+        battle_id = "d85o"
+        formatid = "gen9ou"
+        skipped = None
+        context_seq = [ctx]
+        decisions = [Decision(turn=1, pov="p1", kind="move", action="icebeam",
+                              species="garchomp", legal=True)]
+
+    voc = make_vocabs(make_ctx())
+    samples = build_samples(_T(), voc)
+    assert len(samples) == 1
+    assert _decode_row(samples[0].seq[-1]["opp_moves"][0], voc) == {"outrage"}
 
 
 def test_own_side_move_used_populates_moves_used():
