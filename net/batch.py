@@ -16,13 +16,13 @@ p2-POV needs the p2 bench populated as "own" (open decision — the D68
 opponent-roster question); the net itself is POV-agnostic (it reads "own" as
 self), so p2-POV samples drop in once the corpus supplies them.
 
-Action-list construction (recorded design choice, S4.2 + D70 + D73):
-  * move decision:  [the mon's revealed moves (used so far) + the human's
-    move] padded to a full 4-move moveset with DECOYS (real Smogon set moves
-    ranked by frequency, else the legal pool — D73) so the human's move is no
-    longer the unique "new" action, then [alive benched own mons] sorted
-    (switch options). The human's move is ALWAYS in the list (that's what
-    makes the target legal).
+Action-list construction (recorded design choice, S4.2 + D70 + D73 + D83):
+  * move decision:  [the mon's WHOLE-battle move set (D83 — the AI always
+    knows its own full moveset) ∪ revealed-so-far ∪ the human's move] padded
+    to a full 4-move moveset with DECOYS (real Smogon set moves ranked by
+    frequency, else the legal pool — D73) so the human's move is no longer the
+    unique "new" action, then [alive benched own mons] sorted (switch options).
+    The human's move is ALWAYS in the list (that's what makes the target legal).
   * switch decision: [alive benched own mons] sorted (you must switch; moves
     are not legal here — the structural D60 forced-decision case).
   * D70 ORDER SHUFFLE: the final list is then PERMUTED with a deterministic
@@ -175,7 +175,8 @@ def move_decoys(species_id: str, fmt: str, existing: List[str],
 
 def decision_actions(ctx: Dict, dec: Decision,
                      order_seed: Optional[int] = None,
-                     fmt: str = "gen9ou") -> Tuple[List[Dict], int]:
+                     fmt: str = "gen9ou",
+                     full_moves: Optional[List[str]] = None) -> Tuple[List[Dict], int]:
     """The decision's D60 action list + the human's target index in it.
 
     ``ctx`` is the FINAL (turn-t) context snapshot — the state at which the
@@ -207,7 +208,14 @@ def decision_actions(ctx: Dict, dec: Decision,
     from net.encoder import _to_id
     want = _to_id(dec.action)
     base = []
-    for m in list(_revealed_moves(ctx)) + [dec.action]:
+    # D83: prefer the mon's WHOLE-battle move set (the AI always knows its own
+    # full moveset — it built the team); union with revealed-so-far so nothing
+    # is lost; fall back to revealed-so-far alone when full_moves is not given
+    # (direct calls / p2-POV). Decoys (D73) pad any short set to a full 4-move
+    # moveset.
+    revealed = list(_revealed_moves(ctx))
+    source = (list(full_moves) + revealed) if full_moves is not None else revealed
+    for m in source + [dec.action]:
         mid = _to_id(m)
         if mid and mid not in base:
             base.append(mid)
@@ -255,6 +263,19 @@ def build_samples(trace: BattleTrace, vocabs: Vocabs,
     # move decision (even ones later dropped), because the mon really did use
     # that move, so it is revealed for every later decision.
     seen_by_species: Dict[str, set] = {}
+    # D83: the mon's WHOLE-battle move set (per species) — every move it used
+    # across the battle, in one pass (no damage calcs). The AI always knows its
+    # own full moveset (it built the team), so this is the faithful action-list
+    # base (supersedes the "revealed so far" prefix); decoys (D73) pad a short
+    # set to a full 4-move moveset.
+    full_moves_by_species: Dict[str, set] = {}
+    for dec in trace.decisions:
+        if dec.pov != "p1" or not dec.legal or dec.kind != "move":
+            continue
+        sp = _to_id(dec.species) or ""
+        mv = _to_id(dec.action) or ""
+        if sp and mv:
+            full_moves_by_species.setdefault(sp, set()).add(mv)
     for dec in trace.decisions:
         if dec.pov != "p1" or not dec.legal:
             continue
@@ -275,8 +296,10 @@ def build_samples(trace: BattleTrace, vocabs: Vocabs,
         # D70: deterministic per-decision order shuffle (identity-based, not
         # positional, action selection).
         order_seed = _stable_seed(trace.battle_id, dec.turn, dec.kind, dec.action)
+        _sp = _to_id(dec.species) or ""
+        _full = sorted(full_moves_by_species.get(_sp, ()))
         actions, target = decision_actions(ctx_final, dec, order_seed=order_seed,
-                                           fmt=trace.formatid)
+                                           fmt=trace.formatid, full_moves=_full)
         if target >= len(actions) or target >= MAX_ACTIONS:
             continue
         # D70(B): keep only decisions with a real choice of the target's kind
