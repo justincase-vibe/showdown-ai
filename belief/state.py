@@ -625,10 +625,20 @@ class BeliefState:
                 is_active = (own_event_slot is not None and slot == own_event_slot)
                 facts = self.own_facts.get(slot)
                 fainted = bool(self.fainted_slots.get(slot, False))
-            ctx["own"][slot] = _mon_block(facts, spec)
-            ctx["own"][slot]["name"] = spec.get("name", "")
-            ctx["own"][slot]["ability"] = spec.get("ability", "")
-            ctx["own"][slot]["item"] = spec.get("item", "")
+            blk = ctx["own"][slot] = _mon_block(facts, spec)
+            blk["name"] = spec.get("name", "")
+            blk["ability"] = spec.get("ability", "")
+            blk["item"] = spec.get("item", "")
+            # D74: own-side moves. ``moves_used`` = the revealed "used so far"
+            # set (the old ``moves`` semantics, kept for BC consumers / tests);
+            # ``moves`` = the FULL known moveset when the spec carries one
+            # (self-play: the agent built the team — fully known from turn 1),
+            # else it stays the used-so-far set (BC corpus / specs without
+            # moves). The encoder fills the ``own_moves`` channel from ``moves``.
+            blk["moves_used"] = list(blk.get("moves", []) or [])
+            spec_moves = spec.get("moves") or []
+            if spec_moves:
+                blk["moves"] = [str(m) for m in spec_moves][:4]
             # fainted flag: "benched, untouched" (0) vs "gone" (1) — both
             # otherwise read hp_frac 0 (the net must not confuse them)
             ctx["own"][slot]["fainted"] = fainted

@@ -220,6 +220,7 @@ def test_evaluate_reports_switch_rate_from_actions():
 class _FakeTrace:
     def __init__(self, bid: str):
         self.battle_id = bid
+        self.formatid = "gen9ou"   # build_samples (D73 decoy padding) reads it
         self.skipped = None
         self.context_seq = [make_ctx()]
         self.decisions = [Decision(turn=1, pov="p1", kind="move",
@@ -303,34 +304,46 @@ def test_switch_decision_action_list_is_the_alive_bench():
 
 
 def test_build_samples_drops_degenerate_decisions():
-    """D70(B): a decision with exactly ONE option of the target's kind puts the
-    target at a constant index (the net can only learn a fixed action — the
-    fake-PASS failure mode). Such samples must be DROPPED; a decision with >=2
-    options of the kind must be kept."""
+    """D70(B) drop rule, restated under D73 decoy semantics.
+
+    * MOVE decisions are no longer degenerate the old way: D73 pads them to a
+      full 4-move set with species-appropriate decoys, so the old "NO revealed
+      moves" case is now KEPT (4 move options, target position varies by seed).
+    * SWITCH decisions with <2 alive-bench options still carry no selection
+      signal (target at a constant index — the fake-PASS failure mode) and
+      must be DROPPED; >=2 options must be kept. That is the case the rule
+      still guards."""
     base = _ctx_own()
 
     class _T:
         def __init__(self, ctx, decs):
             self.battle_id = "deg"
+            self.formatid = "gen9ou"   # build_samples (D73 decoy padding) reads it
             self.skipped = None
             self.context_seq = [ctx]
             self.decisions = decs
 
-    # active mon with NO revealed moves, human uses 'outrage' -> the move list
-    # is exactly [outrage] (+ bench switches) -> degenerate -> dropped
+    # (a) move decision, NO revealed moves -> D73 decoys pad to 4 -> KEPT
     ctx1 = copy.deepcopy(base)
     ctx1["own"]["p1a"]["moves"] = []
     t1 = _T(ctx1, [Decision(turn=1, pov="p1", kind="move", action="outrage",
                             species="garchomp", legal=True)])
-    # one revealed move + the human's OTHER move -> two move options -> kept
+    # (b) switch decision, NO alive bench (p1b/p1c killed, p1d already fainted)
+    #     -> exactly ONE option -> degenerate -> DROPPED
     ctx2 = copy.deepcopy(base)
-    ctx2["own"]["p1a"]["moves"] = ["earthquake"]
-    t2 = _T(ctx2, [Decision(turn=1, pov="p1", kind="move", action="icebeam",
-                            species="garchomp", legal=True)])
+    ctx2["own"]["p1b"]["fainted"] = True
+    ctx2["own"]["p1c"]["fainted"] = True
+    t2 = _T(ctx2, [Decision(turn=1, pov="p1", kind="switch", action="Dragonite",
+                            species="dragonite", legal=True)])
+    # (c) switch decision, two alive bench mons -> two options -> KEPT
+    t3 = _T(copy.deepcopy(base),
+            [Decision(turn=1, pov="p1", kind="switch", action="Dragonite",
+                      species="dragonite", legal=True)])
 
     vocabs = make_vocabs(make_ctx())
-    assert build_samples(t1, vocabs) == []
-    assert len(build_samples(t2, vocabs)) == 1
+    assert len(build_samples(t1, vocabs)) == 1   # (a) kept (D73 decoys)
+    assert build_samples(t2, vocabs) == []       # (b) degenerate -> dropped
+    assert len(build_samples(t3, vocabs)) == 1   # (c) kept
 
 
 def test_order_shuffle_is_deterministic_and_target_follows_human():
@@ -361,6 +374,7 @@ def test_build_samples_target_is_human_action_after_shuffle():
 
     class _T:
         battle_id = "shuf"
+        formatid = "gen9ou"   # build_samples (D73 decoy padding) reads it
         skipped = None
         context_seq = [ctx]
         decisions = [Decision(turn=1, pov="p1", kind="move", action="icebeam",

@@ -91,8 +91,65 @@ def swap_sides(log_text: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  own-team extraction  (populates get_context()['own'])
 # ═══════════════════════════════════════════════════════════════════════════════
+def _own_team_from_battle(battle: Any) -> Dict[str, Dict]:
+    """p1's own-team spec from the poke-env battle object — the AUTHORITATIVE
+    source for the own side (D74).
+
+    The ``|poke|`` team-preview log lines carry species+gender only — NO moves,
+    item, ability — which is exactly why the log-derived spec below left the
+    net's ``own_moves`` / ``own_ability`` / ``own_item`` channels ALL ZERO from
+    turn 1. But poke-env seeds ``battle.team`` from our OWN Teambuilder
+    (``Pokemon.from_teambuilder``), so every own mon is FULLY known from turn 1:
+    species, the complete 4-move set, item, ability. That is the self-play
+    premise (D73: "the agent's own team is FULLY KNOWN — it built it").
+
+    Deliberately EXCLUDES the tera type: the calc bridge (``node_calc.js``
+    ``effectiveTypes``) treats a mon's ``teraType`` as *currently terastallized*
+    (it replaces the base types and grants Tera STAB in EVERY window). Passing
+    the known-but-not-yet-revealed tera would therefore corrupt every pre-Tera
+    damage window for the own mon. The revealed Tera lives in the belief's
+    ``facts.tera`` (HARD evidence) and is the only tera signal the observation
+    carries (``tera_revealed``).
+
+    Returns ``slot p1a..p1f -> spec`` (the belief ``own_team`` shape, preview
+    order); ``{}`` when ``battle.team`` is not populated yet, in which case the
+    caller falls back to the log-derived name-only spec.
+    """
+    team = getattr(battle, "team", None) or {}
+    out: Dict[str, Dict] = {}
+    for i, mon in enumerate(team.values()):
+        if i >= 6:
+            break
+        # ``species`` = the ACTUAL forme id (slowkinggalar, tornadustherian);
+        # ``base_species`` strips the forme (slowking, tornadus) and must only
+        # be a fallback — encoding the base form mislabels forme mons in the
+        # own_species rows (caught by the p1_bug_hunt A probe).
+        sp = getattr(mon, "species", None) or getattr(mon, "base_species", None)
+        if not sp:
+            continue
+        moves_obj = getattr(mon, "moves", None) or {}
+        if isinstance(moves_obj, dict):
+            moves = [getattr(m, "id", None) or k for k, m in moves_obj.items()]
+        else:
+            moves = [str(m) for m in moves_obj]
+        spec: Dict[str, Any] = {"name": str(sp), "moves": moves[:4]}
+        item = getattr(mon, "item", None)
+        if item:
+            spec["item"] = str(item)
+        ability = getattr(mon, "ability", None)
+        if ability:
+            spec["ability"] = str(ability)
+        out[f"p1{'abcdef'[i]}"] = spec
+    return out
+
+
 def _own_team_from_log(lines: List[str]) -> Dict[str, Dict]:
-    """p1's own-team spec for the belief: ``slot -> {'name': species}``.
+    """DEFENSIVE FALLBACK (D74): p1's own-team spec from the log — name-only,
+    because the ``|poke|`` lines carry species+gender only (no moves/item/
+    ability). Used only when ``battle.team`` is unavailable, so the net still
+    sees the own species rows instead of an empty own side.
+
+    p1's own-team spec for the belief: ``slot -> {'name': species}``.
 
     Mirrors ``corpus.trajectories._own_team`` (deliberately re-implemented here so
     the self-play path does not import the abandoned BC ``corpus`` module). The
@@ -184,7 +241,10 @@ def build_action_list(battle: Any, max_actions: int = MAX_ACTIONS) -> List[Dict]
     # --- switches (only when not trapped) ---
     if not trapped:
         for mon in (getattr(battle, "available_switches", None) or []):
-            sp = getattr(mon, "base_species", None) or getattr(mon, "species", None)
+            # the ACTUAL forme id (``species``), not the forme-stripped
+            # ``base_species`` — the action_species channel and the opponent-
+            # side rows both use full forme ids, so switch actions must too.
+            sp = getattr(mon, "species", None) or getattr(mon, "base_species", None)
             if sp:
                 acts.append({"kind": "switch", "species": sp})
 
@@ -353,7 +413,7 @@ class ShowdownEnv(SinglesEnv):
             if side == "p2":
                 text = swap_sides(text)
             lines = [ln for ln in text.split("\n") if ln.strip()]
-            own_team = _own_team_from_log(lines)
+            own_team = _own_team_from_battle(battle) or _own_team_from_log(lines)
             belief = BeliefState(self._fmt, own_team=own_team)
             adapter = LogAdapter()
             for line in lines:
