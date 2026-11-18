@@ -51,6 +51,10 @@ def _base():
         "top1_acc": 0.65, "overall_chance": 0.2, "top1_beats_chance": True,
         "top1_const_acc": 0.3, "top1_beats_const": True,
         "pred_switch_rate": 0.42, "human_switch_rate": 0.40, "switch_rate_gap": 0.02,
+        # D81: a healthy net does first-use and repeat comparably (small gap),
+        # so the new shortcut gate does NOT fire here.
+        "n_first_use": 40, "n_repeat": 20,
+        "first_use_move_acc": 0.72, "repeat_move_acc": 0.68, "shortcut_gap": 0.04,
     }
 
 
@@ -142,6 +146,53 @@ def test_verdict_requires_both_action_types_present():
     ok, fails = bc.verdict(m)
     assert not ok
     assert any("move-decisions" in f for f in fails)
+
+
+def test_verdict_flags_first_use_shortcut():
+    # THE leak the friend flagged (D81): the net learns "new move = the one to
+    # pick" instead of state -> action. Overall move-accuracy can still beat
+    # chance (the earlier gates pass), but first-use is ~0.95 while repeat is
+    # ~0.40 -> the gap is the tell. This must FAIL.
+    m = _base()
+    m.update({"n_first_use": 40, "n_repeat": 20,
+              "first_use_move_acc": 0.95, "repeat_move_acc": 0.40,
+              "shortcut_gap": 0.55})
+    ok, fails = bc.verdict(m)
+    assert not ok, fails
+    assert any("shortcut" in f for f in fails)
+
+
+def test_verdict_skips_shortcut_gate_when_split_too_small():
+    # below MIN_SPLIT_SAMPLES on either side the split is too small to be
+    # meaningful -> the gate must NOT fire (even with a large gap).
+    m = _base()
+    m.update({"n_first_use": 3, "n_repeat": 20,              # first-use < 8
+              "first_use_move_acc": 1.0, "repeat_move_acc": 0.40,
+              "shortcut_gap": 0.60})
+    ok, fails = bc.verdict(m)
+    assert ok, fails
+    assert not any("shortcut" in f for f in fails)
+
+
+def test_evaluate_reports_first_use_repeat_split():
+    # evaluate() must split move-decision accuracy on Sample.first_use and
+    # report the two accuracies + the gap.
+    samples, vocabs = _make_synthetic_samples(8)
+    move_samples = [s for s in samples if s.kind == "move"]
+    # alternate first-use / repeat deterministically
+    for i, s in enumerate(move_samples):
+        s.first_use = (i % 2 == 0)
+    n_first = sum(1 for s in move_samples if s.first_use)
+    n_repeat = sum(1 for s in move_samples if not s.first_use)
+    net = PokeNet(vocabs)  # untrained; we only check the COUNTING, not accuracy
+    m = bc.evaluate(net, move_samples)
+    assert m["n_first_use"] == n_first
+    assert m["n_repeat"] == n_repeat
+    assert n_first > 0 and n_repeat > 0
+    # both accuracies are defined (in [0,1]) and the gap is their difference
+    assert m["first_use_move_acc"] is not None
+    assert m["repeat_move_acc"] is not None
+    assert abs(m["shortcut_gap"] - (m["first_use_move_acc"] - m["repeat_move_acc"])) < 1e-9
 
 
 # ── the evaluator on synthetic samples (fast, no replay) ────────────────

@@ -62,6 +62,18 @@ SWITCH_RATE_MARGIN = 0.15
 #:  * early-stop after this many epochs without a held-out top-1 gain.
 DEFAULT_PATIENCE = 4
 
+#: D81 — the first-use/repeat leak-check (the friend's "is it learning or just
+#: grabbing the new move?" signal). A net that keys on "is this a NEW move?" does
+#: well on first-use decisions and poorly on repeats. These bounds make the
+#: verdict FAIL that shortcut even when the overall move-accuracy beats chance:
+#:  * the gate only applies when BOTH splits have at least this many held-out
+#:    move-decisions (below that the split is too small to be meaningful);
+MIN_SPLIT_SAMPLES = 8
+#:  * ...and only when first-use move-acc exceeds repeat move-acc by MORE than
+#:    this. A gap that large is a strong "new move" signal, not a healthy
+#:    state->action net (which does both comparably). Tunable (open question).
+MAX_SHORTCUT_GAP = 0.35
+
 
 @dataclass
 class Split:
@@ -162,6 +174,9 @@ def evaluate(net: PokeNet, samples: List[Sample], device: str = "cpu",
 
     n_move = n_switch = 0
     move_correct = switch_correct = 0
+    # D81: first-use / repeat move-decision split (the leak-check signal).
+    n_first = n_repeat = 0
+    first_correct = repeat_correct = 0
     pred_switch = 0
     correct_total = 0
     chance_move = 0.0      # sum of 1/|moves| over move-decisions (insight: random
@@ -209,6 +224,13 @@ def evaluate(net: PokeNet, samples: List[Sample], device: str = "cpu",
                 move_correct += is_correct
                 chance_move += 1.0 / max(1, n_moves)
                 chance_move_legal += 1.0 / max(1, n_legal)
+                # D81: split the move-decision accuracy on first-use vs repeat.
+                if getattr(s, "first_use", False):
+                    n_first += 1
+                    first_correct += is_correct
+                else:
+                    n_repeat += 1
+                    repeat_correct += is_correct
             elif s.kind == "switch":
                 n_switch += 1
                 switch_correct += is_correct
@@ -248,6 +270,10 @@ def evaluate(net: PokeNet, samples: List[Sample], device: str = "cpu",
     overall_chance = chance_overall / n
     pred_switch_rate = pred_switch / n
     human_switch_rate = human_switch / n
+    # D81: the first-use / repeat move-accuracy split (None when a split has no
+    # samples). shortcut_gap = first_use_acc - repeat_acc (None if either is).
+    first_use_acc = first_correct / n_first if n_first else None
+    repeat_acc = repeat_correct / n_repeat if n_repeat else None
     return {
         "n": n, "n_move": n_move, "n_switch": n_switch,
         "move_acc": move_acc, "move_chance": move_chance,
@@ -266,6 +292,12 @@ def evaluate(net: PokeNet, samples: List[Sample], device: str = "cpu",
         "pred_switch_rate": pred_switch_rate,
         "human_switch_rate": human_switch_rate,
         "switch_rate_gap": pred_switch_rate - human_switch_rate,
+        "n_first_use": n_first, "n_repeat": n_repeat,
+        "first_use_move_acc": first_use_acc,
+        "repeat_move_acc": repeat_acc,
+        "shortcut_gap": (first_use_acc - repeat_acc)
+                        if (first_use_acc is not None and repeat_acc is not None)
+                        else None,
     }
 
 
@@ -328,6 +360,23 @@ def verdict(m: Dict) -> Tuple[bool, List[str]]:
         fails.append(f"held-out top-1 {m['top1_acc']:.3f} <= constant-index "
                      f"baseline {m['top1_const_acc']:.3f}  (net is a fixed "
                      f"action — it learned nothing)")
+
+    # HARD gate 4 — the first-use/repeat leak (D81, the friend's "is it
+    # learning or just grabbing the new move?" check). A net that keys on
+    # "is this a NEW move?" scores high on first-use and low on repeats even
+    # though its overall move-accuracy can still beat chance — the earlier
+    # gates do not catch that. Enforce only when BOTH splits are large enough.
+    n_fu = m.get("n_first_use") or 0
+    n_rp = m.get("n_repeat") or 0
+    fu = m.get("first_use_move_acc")
+    rp = m.get("repeat_move_acc")
+    if (n_fu >= MIN_SPLIT_SAMPLES and n_rp >= MIN_SPLIT_SAMPLES
+            and fu is not None and rp is not None
+            and (fu - rp) > MAX_SHORTCUT_GAP):
+        fails.append(
+            f"first-use move-acc {fu:.3f} >> repeat move-acc {rp:.3f} "
+            f"(gap {fu - rp:+.3f} > {MAX_SHORTCUT_GAP}) — the net is using "
+            f"\"new move\" as a shortcut, not the state")
 
     return (not fails), fails
 
@@ -478,6 +527,17 @@ def run(n_battles: int = 50, fixture: str = "bot/data/replays/gen9ou.jsonl",
         f"beats-both {'YES' if final['switch_beats_chance'] and final['switch_beats_const'] else 'NO'}")
     log(f"predicted switch-rate: {final['pred_switch_rate']:.3f}   human "
         f"{final['human_switch_rate']:.3f}   gap {final['switch_rate_gap']:+.3f}")
+    # D81: the first-use/repeat leak check (the "grab the new move?" signal).
+    _fu = final.get("first_use_move_acc")
+    _rp = final.get("repeat_move_acc")
+    if _fu is not None and _rp is not None:
+        log(f"move first-use/repeat: first {_fu:.3f} (n={final['n_first_use']})   "
+            f"repeat {_rp:.3f} (n={final['n_repeat']})   gap "
+            f"{final['shortcut_gap']:+.3f}  (shortcut gate: >" +
+            f"{MAX_SHORTCUT_GAP} FAILS)")
+    else:
+        log(f"move first-use/repeat: n/a (first n={final.get('n_first_use', 0)}, "
+            f"repeat n={final.get('n_repeat', 0)} — too few to gate)")
     log(f"held-out top-1      : {final['top1_acc']:.3f}   chance "
         f"{final['overall_chance']:.3f}   const-idx {final['top1_const_acc']:.3f}   "
         f"beats-both {'YES' if final['top1_beats_chance'] and final['top1_beats_const'] else 'NO'}")

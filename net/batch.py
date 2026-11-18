@@ -16,11 +16,13 @@ p2-POV needs the p2 bench populated as "own" (open decision — the D68
 opponent-roster question); the net itself is POV-agnostic (it reads "own" as
 self), so p2-POV samples drop in once the corpus supplies them.
 
-Action-list construction (recorded design choice, S4.2 + D70):
+Action-list construction (recorded design choice, S4.2 + D70 + D73):
   * move decision:  [the mon's revealed moves (used so far) + the human's
-    move] sorted, then [alive benched own mons] sorted (switch options).
-    The human's move is ALWAYS in the list (that's what makes the target
-    legal).
+    move] padded to a full 4-move moveset with DECOYS (real Smogon set moves
+    ranked by frequency, else the legal pool — D73) so the human's move is no
+    longer the unique "new" action, then [alive benched own mons] sorted
+    (switch options). The human's move is ALWAYS in the list (that's what
+    makes the target legal).
   * switch decision: [alive benched own mons] sorted (you must switch; moves
     are not legal here — the structural D60 forced-decision case).
   * D70 ORDER SHUFFLE: the final list is then PERMUTED with a deterministic
@@ -41,6 +43,7 @@ from __future__ import annotations
 import random as _random
 import zlib
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -60,6 +63,13 @@ class Sample:
     target: int
     actions: List[Dict]          # the D60 legal-action list (dicts)
     seq: List[Dict]             # encoded contexts (len = turn), each registry-shaped
+    # D81 (first-use/repeat leak check): True iff, at a MOVE decision, the acting
+    # mon had NOT yet used this exact move earlier in the battle (it is a "new"
+    # move for that mon). False = a repeat (the move is already in the mon's
+    # revealed set). For switch decisions this is irrelevant (kept False). The
+    # verdict's shortcut gate splits move-accuracy on this to catch a net that
+    # just "grabs the new move" instead of learning state -> action.
+    first_use: bool = False
 
 
 def _alive_bench(ctx: Dict) -> List[str]:
@@ -108,8 +118,64 @@ def _shuffle_actions(acts: List[Dict], target: int,
     return [acts[i] for i in idx], idx.index(target)
 
 
+REAL_MOVES = 4  # a singles moveset — the faithful action-list size (D73)
+
+
+@lru_cache(maxsize=8192)
+def _decoy_pool(species_id: str, fmt: str) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """(ranked_real_set_moves, legal_pool) for a species in a format.
+
+    Primary = the species' real Smogon set moves, ranked by how many sets use
+    them (most-used first, then id) — a faithful proxy for the mon's actual
+    4-move set. Fallback = the full legal pool (sorted by id). Deterministic
+    DB reads; both empty on any error (graceful: no decoys).
+    """
+    try:
+        import legality.lookup as lk
+    except Exception:
+        return (), ()
+    ranked: List[str] = []
+    try:
+        freq: Dict[str, int] = {}
+        for s in lk.get_common_sets(species_id, fmt):
+            for m in s.get("moves", []):
+                freq[m] = freq.get(m, 0) + 1
+        ranked = sorted(freq, key=lambda m: (-freq[m], m))
+    except Exception:
+        ranked = []
+    pool: Tuple[str, ...] = ()
+    try:
+        pool = tuple(sorted(lk.legal_moves(species_id, fmt)))
+    except Exception:
+        pool = ()
+    return tuple(ranked), pool
+
+
+def move_decoys(species_id: str, fmt: str, existing: List[str],
+                k_total: int = REAL_MOVES) -> List[str]:
+    """Up to ``k_total - len(existing)`` decoy move ids for a faithful full
+    moveset action list (D73). Prefers real set moves, falls back to the legal
+    pool; excludes ``existing`` (revealed moves + the human's move).
+    Deterministic; empty when the species has no pool (graceful no-op)."""
+    existing = set(existing)
+    need = max(0, k_total - len(existing))
+    if need == 0 or not species_id:
+        return []
+    ranked, pool = _decoy_pool(species_id, fmt)
+    ranked_set = set(ranked)
+    out: List[str] = []
+    for m in list(ranked) + [p for p in pool if p not in ranked_set]:
+        if m in existing or m in out:
+            continue
+        out.append(m)
+        if len(out) >= need:
+            break
+    return out
+
+
 def decision_actions(ctx: Dict, dec: Decision,
-                     order_seed: Optional[int] = None) -> Tuple[List[Dict], int]:
+                     order_seed: Optional[int] = None,
+                     fmt: str = "gen9ou") -> Tuple[List[Dict], int]:
     """The decision's D60 action list + the human's target index in it.
 
     ``ctx`` is the FINAL (turn-t) context snapshot — the state at which the
@@ -119,6 +185,10 @@ def decision_actions(ctx: Dict, dec: Decision,
     ``order_seed`` (D70): when given, the final list is permuted with that
     seed and the target re-based — see :func:`_shuffle_actions`. ``build_samples``
     always passes one; direct calls without a seed keep the sorted order.
+
+    ``fmt`` (D73): the format id used to pad a move decision's action list to
+    a full 4-move moveset with species-appropriate decoys — see
+    :func:`move_decoys`.
     """
     if dec.kind == "switch":
         bench = _alive_bench(ctx)[:MAX_ACTIONS]
@@ -136,12 +206,17 @@ def decision_actions(ctx: Dict, dec: Decision,
     # move decision
     from net.encoder import _to_id
     want = _to_id(dec.action)
-    moves = []
+    base = []
     for m in list(_revealed_moves(ctx)) + [dec.action]:
         mid = _to_id(m)
-        if mid and mid not in moves:
-            moves.append(mid)
-    moves = sorted(moves)[:MAX_ACTIONS]
+        if mid and mid not in base:
+            base.append(mid)
+    # D73: pad to a full moveset with species-appropriate decoys so the human's
+    # move is no longer the unique "new" action (corpus artifact: revealed ∪
+    # target made the target the only unrevealed move -> a non-transferring
+    # "grab the new one" prior).
+    base = base + move_decoys(_to_id(dec.species) or "", fmt, base)
+    moves = sorted(base)[:MAX_ACTIONS]
     acts = [{"kind": "move", "move": m} for m in moves]
     target = moves.index(want)
     # pad with switch options (they are legal at a move decision: the player
@@ -174,16 +249,34 @@ def build_samples(trace: BattleTrace, vocabs: Vocabs,
         return []
     seq_ctx = trace.context_seq
     samples: List[Sample] = []
+    from net.encoder import _to_id
+    # D81: the mon's revealed-set-so-far (per species), in turn order, used to
+    # label each move decision FIRST-USE vs REPEAT. Updated for every p1 legal
+    # move decision (even ones later dropped), because the mon really did use
+    # that move, so it is revealed for every later decision.
+    seen_by_species: Dict[str, set] = {}
     for dec in trace.decisions:
         if dec.pov != "p1" or not dec.legal:
             continue
         if dec.turn < 1 or dec.turn > len(seq_ctx):
             continue  # no turn-start snapshot for this decision
+        # D81: first-use vs repeat (the friend's leak-check signal). A move
+        # decision is a REPEAT if the acting mon already used that exact move
+        # earlier in the battle; otherwise FIRST-USE.
+        first_use = True
+        if dec.kind == "move":
+            sp = _to_id(dec.species) or ""
+            mv = _to_id(dec.action) or ""
+            seen = seen_by_species.setdefault(sp, set())
+            first_use = (mv not in seen)
+            if mv:
+                seen.add(mv)
         ctx_final = seq_ctx[dec.turn - 1]
         # D70: deterministic per-decision order shuffle (identity-based, not
         # positional, action selection).
         order_seed = _stable_seed(trace.battle_id, dec.turn, dec.kind, dec.action)
-        actions, target = decision_actions(ctx_final, dec, order_seed=order_seed)
+        actions, target = decision_actions(ctx_final, dec, order_seed=order_seed,
+                                           fmt=trace.formatid)
         if target >= len(actions) or target >= MAX_ACTIONS:
             continue
         # D70(B): keep only decisions with a real choice of the target's kind
@@ -194,7 +287,7 @@ def build_samples(trace: BattleTrace, vocabs: Vocabs,
         seq = [encode_context(ctx, vocabs, actions) for ctx in seq_ctx[:dec.turn]]
         samples.append(Sample(
             battle_id=trace.battle_id, turn=dec.turn, kind=dec.kind,
-            target=target, actions=actions, seq=seq,
+            target=target, actions=actions, seq=seq, first_use=first_use,
         ))
         if len(samples) >= max_decisions:
             break
