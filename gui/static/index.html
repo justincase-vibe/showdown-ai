@@ -105,26 +105,46 @@
       <h2>Training config</h2>
       <form id="cfg" onsubmit="return false">
         <div class="grid">
-          <div><label>battle format</label><input name="battle_format" value="gen9ou" size="8"></div>
+          <div class="full"><label>mode</label>
+            <select name="mode" id="mode-select">
+              <option value="selfplay" selected>Self-play (PPO)</option>
+              <option value="bc">Imitation (BC)</option>
+            </select>
+          </div>
           <div><label>device</label>
             <select name="device"><option value="cpu">cpu</option><option value="cuda">cuda</option></select>
           </div>
+          <div><label>seed</label><input name="seed" type="number" value="20261118"></div>
+          <div><label>lr</label><input name="lr" type="number" step="any" value="0.0003"></div>
+          <div><label>epochs</label><input name="epochs" type="number" min="1" value="2" id="epochs-in"></div>
+        </div>
+        <!-- self-play specific -->
+        <div id="sp-only" class="grid" style="margin-top:6px">
+          <div><label>battle format</label><input name="battle_format" value="gen9ou" size="8"></div>
           <div><label>battles / round</label><input name="battles_per_round" type="number" min="1" value="50"></div>
           <div><label>rounds</label><input name="n_rounds" type="number" min="1" value="10"></div>
           <div><label>max steps / battle</label><input name="max_steps" type="number" min="1" value="500"></div>
-          <div><label>seed</label><input name="seed" type="number" value="20261118"></div>
-          <div><label>lr</label><input name="lr" type="number" step="any" value="0.0003"></div>
           <div><label>clip eps</label><input name="clip_eps" type="number" step="any" value="0.2"></div>
           <div><label>value coef</label><input name="vf_coef" type="number" step="any" value="0.5"></div>
           <div><label>entropy coef</label><input name="ent_coef" type="number" step="any" value="0.01"></div>
           <div><label>max grad norm</label><input name="max_norm" type="number" step="any" value="0.5"></div>
           <div><label>gamma</label><input name="gamma" type="number" step="any" value="0.99"></div>
           <div><label>lambda (GAE)</label><input name="lam" type="number" step="any" value="0.95"></div>
-          <div><label>ppo epochs</label><input name="epochs" type="number" min="1" value="2"></div>
           <div><label>save every N rounds</label><input name="save_every" type="number" min="1" value="1"></div>
           <div><label>opponent</label><input name="opponent" value="random"></div>
           <div class="full"><label>resume from checkpoint (optional path)</label>
             <input name="resume_from" placeholder="…/runs/&lt;run-id&gt;/checkpoints/selfplay_roundN.pt" size="40"></div>
+        </div>
+        <!-- BC / imitation specific -->
+        <div id="bc-only" class="grid" style="margin-top:6px;display:none">
+          <div><label>battles</label><input name="n_battles" type="number" min="1" value="50"></div>
+          <div><label>max decisions</label><input name="max_decisions" type="number" min="1" value="40"></div>
+          <div><label>heldout frac</label><input name="heldout_frac" type="number" step="any" value="0.2"></div>
+          <div><label>batch size</label><input name="batch_size" type="number" min="1" value="24"></div>
+          <div class="full"><label>fixture (replay JSONL path)</label>
+            <input name="fixture" value="bot/data/replays/gen9ou.jsonl" size="40"></div>
+          <div class="full"><label>checkpoint name</label>
+            <input name="ckpt_name" value="s43_bc_best.pt" size="40"></div>
         </div>
         <div class="btns">
           <button id="bstart" type="button">▶ Start training</button>
@@ -264,6 +284,14 @@ function spark(canvasId, rows, pick) {
   });
   ctx.stroke();
 }
+
+/* ── mode toggle ─────────────────────────────────────────────────── */
+$("mode-select").onchange = function() {
+  const m = this.value;
+  $("sp-only").style.display = m === "selfplay" ? "" : "none";
+  $("bc-only").style.display = m === "bc" ? "" : "none";
+  $("epochs-in").value = m === "selfplay" ? "2" : "15";
+};
 
 /* ── control actions ──────────────────────────────────────────────── */
 function readConfig() {

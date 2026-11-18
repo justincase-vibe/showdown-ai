@@ -57,8 +57,9 @@ def _finite_float(v: Any, name: str, problems: list, lo: float = 0.0,
 
 
 def validate_train_config(d: Optional[Dict[str, Any]]) -> "TrainConfig":
-    """Validate a GUI-submitted config into a ``TrainConfig``. Raises
-    ``ValueError`` with every problem listed (not just the first)."""
+    """Validate a GUI-submitted config into a ``TrainConfig`` (mode
+    ``selfplay``, the default). Raises ``ValueError`` with every problem
+    listed (not just the first)."""
     from net.trainer import TrainConfig
     tc = TrainConfig.from_dict(d or {})
     problems = []
@@ -87,6 +88,54 @@ def validate_train_config(d: Optional[Dict[str, Any]]) -> "TrainConfig":
 
 # ── process control ──────────────────────────────────────────────────────────
 
+def validate_bc_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Validate a GUI-submitted BC/imitation config (mode ``bc``) into a
+    normalized dict. Same loud contract as :func:`validate_train_config`
+    (every problem listed). The fixture must EXIST — a missing replay file
+    is a config error (400 before spawn), not a trainer crash (D86 contract).
+    ``out_dir`` is intentionally NOT a field: the entry always checkpoints
+    into the run dir (per-run separation, like the self-play entry)."""
+    d = d or {}
+    problems: List[str] = []
+    _pos_int(d.get("n_battles"), "n_battles", problems)
+    _pos_int(d.get("max_decisions"), "max_decisions", problems)
+    _pos_int(d.get("epochs"), "epochs", problems)
+    _pos_int(d.get("batch_size"), "batch_size", problems)
+    if not isinstance(d.get("seed"), int) or isinstance(d.get("seed"), bool) or d.get("seed") < 0:
+        problems.append(f"seed must be an int >= 0 (got {d.get('seed')!r})")
+    _finite_float(d.get("lr"), "lr", problems, lo=0.0)
+    _finite_float(d.get("heldout_frac"), "heldout_frac", problems, lo=0.0, hi=1.0)
+    device = d.get("device", "cpu")
+    if device not in ("cpu", "cuda"):
+        problems.append(f"device must be 'cpu' or 'cuda' (got {device!r})")
+    fixture = d.get("fixture")
+    if not isinstance(fixture, str) or not fixture.strip():
+        problems.append("fixture must be a replay JSONL path "
+                        "(e.g. 'bot/data/replays/gen9ou.jsonl')")
+    elif not Path(fixture).expanduser().is_file():
+        problems.append(f"fixture does not exist (relative to the project root): {fixture!r}")
+    ckpt = d.get("ckpt_name", "s43_bc_best.pt")
+    if not isinstance(ckpt, str) or not ckpt.strip() or "/" in ckpt or "\\" in ckpt:
+        problems.append(f"ckpt_name must be a plain file name (got {ckpt!r})")
+    if problems:
+        raise ValueError("; ".join(problems))
+    return {
+        "mode": "bc",
+        "n_battles": d["n_battles"],
+        "fixture": fixture,
+        "max_decisions": d["max_decisions"],
+        "heldout_frac": d["heldout_frac"],
+        "epochs": d["epochs"],
+        "batch_size": d["batch_size"],
+        "lr": d["lr"],
+        "device": device,
+        "seed": d["seed"],
+        "ckpt_name": ckpt,
+    }
+
+
+# ── process control ──────────────────────────────────────────────────────────
+
 def _popen_kwargs() -> Dict[str, Any]:
     kw: Dict[str, Any] = {}
     if os.name == "nt":
@@ -101,9 +150,26 @@ def _popen_kwargs() -> Dict[str, Any]:
 
 def start_trainer(cfg: Dict[str, Any], runs_dir: Optional[Path] = None
                   ) -> Dict[str, Any]:
-    """Validate the config, refuse if a run is already active, and spawn the
-    trainer DETACHED. Returns ``{run_id, pid, run_dir}``."""
-    tc = validate_train_config(cfg)
+    """Validate the config (by mode), refuse if a run is already active, and
+    spawn the matching entry DETACHED:
+
+      * ``mode == "selfplay"`` (the default) -> ``gui.trainer_main``
+      * ``mode == "bc"``                     -> ``gui.bc_main`` (D87)
+
+    Both speak the same ``gui.runstate`` protocol, so stop / dashboard /
+    history work unchanged. Returns ``{run_id, pid, run_dir}``."""
+    cfg = dict(cfg or {})
+    mode = cfg.get("mode", "selfplay")
+    if mode == "bc":
+        payload = validate_bc_config(cfg)
+        entry = "gui.bc_main"
+        rounds_planned = int(payload["epochs"])
+    elif mode == "selfplay":
+        payload = validate_train_config(cfg).to_dict()
+        entry = "gui.trainer_main"
+        rounds_planned = int(payload["n_rounds"])
+    else:
+        raise ValueError(f"unknown mode {mode!r} (expected 'selfplay' or 'bc')")
     runs = Path(runs_dir) if runs_dir is not None else default_runs_dir()
     active = find_active_run(runs)
     if active is not None:
@@ -119,11 +185,11 @@ def start_trainer(cfg: Dict[str, Any], runs_dir: Optional[Path] = None
     except FileExistsError as exc:
         raise RuntimeError(f"run dir already exists: {rd}") from exc
 
-    (rd / "config.json").write_text(json.dumps(tc.to_dict(), indent=2), encoding="utf-8")
+    (rd / "config.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     log = open(rd / "trainer.log", "ab", buffering=0)
     try:
-        cmd = [python_exe(), "-m", "gui.trainer_main",
+        cmd = [python_exe(), "-m", entry,
                "--config", str(rd / "config.json"), "--run-dir", str(rd)]
         proc = subprocess.Popen(
             cmd, cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT,
@@ -142,7 +208,7 @@ def start_trainer(cfg: Dict[str, Any], runs_dir: Optional[Path] = None
     # finalize the run as 'failed' before the pid lands (narrow race, wrong verdict).
     runstate.write_status(rd, state="starting", run_id=run_id, pid=proc.pid,
                           started=runstate.now_iso(), round=0,
-                          rounds_planned=tc.n_rounds, error=None, exit_code=None)
+                          rounds_planned=rounds_planned, error=None, exit_code=None)
     return {"run_id": run_id, "pid": proc.pid, "run_dir": str(rd)}
 
 

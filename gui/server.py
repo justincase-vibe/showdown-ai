@@ -18,9 +18,10 @@ Routes:
                                     env info, metrics tail, checkpoints)
     GET  /api/runs                  the run HISTORY (newest first, last 20)
     POST /api/train/start           {"config": {...}} -> start_trainer.
+                                    mode="selfplay" (default) or "bc" (imitation).
                                     400 = bad config (every problem listed) or
-                                    device=cuda without CUDA; 409 = a run is
-                                    already active.
+                                    unknown mode or device=cuda without CUDA;
+                                    409 = a run is already active.
     POST /api/train/stop            {"force": false} graceful (waits for the
                                     in-flight battle, then the trainer exits
                                     clean); {"force": true} kills the tree.
@@ -126,18 +127,35 @@ def create_app(runs_dir: Optional[Path] = None) -> FastAPI:
     # ── control ────────────────────────────────────────────────────────
     @app.post("/api/train/start")
     def api_start(body: StartRequest) -> Dict[str, Any]:
-        # validate LOUDLY (every problem listed) before anything is spawned
-        try:
-            tc = launcher.validate_train_config(body.config)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+        """Validate LOUDLY (every problem listed) before anything is spawned.
+        Supports both ``selfplay`` (default) and ``bc`` (imitation) modes."""
+        cfg = body.config or {}
+        mode = cfg.get("mode", "selfplay")
+        if mode == "bc":
+            try:
+                payload = launcher.validate_bc_config(cfg)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            device = payload["device"]
+        elif mode == "selfplay":
+            try:
+                tc = launcher.validate_train_config(cfg)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            device = tc.device
+        else:
+            raise HTTPException(status_code=400,
+                                detail=f"unknown mode {mode!r} "
+                                       f"(expected 'selfplay' or 'bc')")
         # device=cuda without CUDA is a config error, not a trainer crash
-        if tc.device == "cuda" and not launcher.cuda_available():
+        if device == "cuda" and not launcher.cuda_available():
             raise HTTPException(status_code=400,
                                 detail="device='cuda' was requested but "
                                        "torch.cuda.is_available() is False on this machine")
         try:
-            info = launcher.start_trainer(body.config, runs_dir=runs)
+            info = launcher.start_trainer(cfg, runs_dir=runs)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         except RuntimeError as exc:  # a run is already active
             raise HTTPException(status_code=409, detail=str(exc))
         return {"started": True, **info}
