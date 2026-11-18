@@ -73,12 +73,13 @@ class PokeAgent:
         # default to the net's own device (a GPU net in P4 "just works").
         self.device = torch.device(device) if device else next(net.parameters()).device
         self.net.eval()
-        # A per-agent CPU generator keeps stochastic sampling reproducible under
-        # a seed (the P2 "determinism under a seed" gate) without touching the
-        # global RNG. NOTE (P4/GPU): ``Categorical.sample`` requires the generator
-        # to live on the tensor's device — on a GPU net, either drop the generator
-        # (global RNG) or move this to a CUDA generator. P2 is CPU, so CPU is fine.
-        self._gen = torch.Generator(device="cpu")
+        # A per-agent generator keeps stochastic sampling reproducible under a
+        # seed (the P2 "determinism under a seed" gate) without touching the global
+        # RNG. It lives on the NET's device (P4.1/GPU fix): ``torch.multinomial``
+        # requires the generator on the same device as the tensor, so a CPU net
+        # gets a CPU generator (identical to the P2 behaviour) and a GPU net gets
+        # a CUDA generator — the same code path works on both.
+        self._gen = torch.Generator(device=self.device)
         if seed is None:
             seed = (torch.initial_seed() >> 0) & 0xFFFFFFFF
         self._gen.manual_seed(seed)

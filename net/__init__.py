@@ -60,6 +60,7 @@ from .ppo import (
     chosen_logprobs,
     PPOTrainer,
 )
+from .trainer import TrainConfig, SelfPlayTrainer, play_and_collect
 
 __all__ = [
     "LAYOUT", "FIELDS", "SHAPES", "DTYPES", "Field",
@@ -71,4 +72,5 @@ __all__ = [
     "PokeAgent", "Decision", "make_random_net",
     "gae", "RolloutStep", "RolloutBuffer", "steps_to_batch",
     "chosen_logprobs", "PPOTrainer",
+    "TrainConfig", "SelfPlayTrainer", "play_and_collect",
 ]
