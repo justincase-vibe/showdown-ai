@@ -52,16 +52,21 @@ class Sample:
 
 
 def _alive_bench(ctx: Dict) -> List[str]:
-    """Own benched mons that are alive (present, not active, not fainted) —
-    the switch options at this state. Sorted species ids (deterministic)."""
+    """Own benched mons that are ALIVE (not active, not fainted) — the switch
+    options at this state. Sorted species ids (deterministic).
+
+    Liveness is the ``fainted`` flag, NOT ``hp_frac``: the own side only tracks
+    the ACTIVE mon's facts, so every benched own mon carries ``hp_frac=0.0`` in
+    the context (benched, untouched). A benched mon is switchable iff it has
+    not fainted — requiring ``hp_frac>0`` (the old code) excluded every bench
+    mon and degenerated every decision to a single legal action."""
     out = []
     for blk in (ctx.get("own", {}) or {}).values():
         if blk.get("active") or blk.get("fainted"):
             continue
-        if blk.get("present", 1) and blk.get("hp_frac", 0.0) > 0.0:
-            name = blk.get("name", "")
-            if name:
-                out.append(name)
+        name = blk.get("name", "")
+        if name:
+            out.append(name)
     return sorted(out)
 
 

@@ -237,8 +237,16 @@ class PokeNet(nn.Module):
             b["opp_slot"][:, :, :, _active])
         ctx = self._context_repr(b, T)
         x = self.input_proj(torch.cat([own, opp, ctx], dim=-1))   # (B,T,GRU)
-        h, _ = self.gru(x)                                          # (B,T,GRU)
-        h = self.gru_norm(h)
+        g, _ = self.gru(x)                                          # (B,T,GRU)
+        # RESIDUAL skip: the current turn-start state ``x`` must reach the head
+        # directly. A plain stacked GRU over a short (often T=1) sequence with a
+        # zero hidden state acts as a stack of gated attenuations -- each
+        # ``(1-z)*tanh(...)`` cell with closed gates kills the signal, and the net
+        # then cannot learn to open the gates (no signal -> no gradient), so it
+        # collapses to a constant (target-averaging) policy. The skip makes the
+        # state the primary signal and lets the GRU contribute only the temporal
+        # DELTA (``g``); this is what lets the net state-condition at all.
+        h = self.gru_norm(g + x)
         logits = self.policy_head(h)                                 # (B,T,A)
         value = self.value_head(h)                                   # (B,T,1)
         prob = _masked_softmax(logits, b.get("action_mask"))

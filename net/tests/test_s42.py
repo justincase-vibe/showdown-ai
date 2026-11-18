@@ -295,6 +295,36 @@ def test_overfit32_train_loss_below_005(corpus: CorpusBundle):
         "wrong (the 'never learns' guard)")
 
 
+# ── (3b) STATE-CONDITIONING guard (fast, deterministic, no replay) ──────
+# The overfit-32 gate above only ever used size-1 / constant targets, so it
+# could NOT catch a net that collapses to a single DEFAULT action (the
+# "memorized default = switch" failure the user hit in the old system). This
+# test pins the VARYING-target form: two distinct states, the SAME action list,
+# DIFFERENT targets -> the net must be able to pick a different action per state.
+def test_net_state_conditions_not_constant_action():
+    from net.batch import Sample
+    moves4 = ["earthquake", "icebeam", "roar", "toxic"]
+    ctx = make_ctx(); v = make_vocabs(ctx)
+    def enc(species, hp, turn):
+        c = copy.deepcopy(ctx)
+        c["own"]["p1a"]["name"] = species; c["own"]["p1a"]["hp_frac"] = hp
+        c["own"]["p1a"]["moves"] = moves4; c["turn"] = turn
+        return encode_context(c, v, [{"kind": "move", "move": m} for m in moves4])
+    samples = [Sample("a", 1, "move", 0, moves4, [enc("garchomp", 0.9, 1)]),
+               Sample("b", 2, "move", 2, moves4, [enc("blastoise", 0.4, 2)])]
+    torch.manual_seed(0)
+    net = PokeNet(v)
+    sb = samples_to_batch(samples)
+    b = batch_to_torch(sb["batch"])
+    targets = torch.as_tensor(sb["targets"], dtype=torch.int64)
+    ts = torch.as_tensor(sb["ts"], dtype=torch.int64)
+    final = overfit_train(net, [b], [targets], [ts], epochs=400, lr=1e-2)
+    assert final < 0.05, (
+        f"the net cannot state-condition (final loss {final:.4f} ~ ln(k)) — it "
+        "collapses to a constant/default action policy (the 'never learns' "
+        "disaster). Check the GRU residual skip in PokeNet.forward.")
+
+
 # ── (5) no NaN/inf grads on a real-corpus batch ───────────────────────────
 @needs_fixture
 def test_no_nan_inf_grads_real_corpus_batch(corpus: CorpusBundle):

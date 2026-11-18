@@ -731,6 +731,18 @@ class BeliefState:
                     facts = self.own_facts.setdefault(event.slot, Facts())
                 if facts is not None:
                     facts.used_protect = True
+            # Reveal the move on the USER's own-side facts (belief moves_used).
+            # The opponent side does this in SlotBelief.update; the own side must
+            # mirror it so get_context's own "moves" block carries the
+            # revealed-move history (the BC action list offers the acting mon's
+            # known moves; the observation carries the used set). Own facts are
+            # created on-demand; a NEW mon's moves_used is wiped by
+            # _set_switch_facts, so per-field-slot history stays per-occupant.
+            if event.side != "p2":
+                facts = self._facts_for(event.side, event.slot)
+                if facts is None:
+                    facts = self.own_facts.setdefault(event.slot, Facts())
+                facts.moves_used.add(event.move)
             return self._route_set_evidence(event)
         if isinstance(event, E.MoveFailed):
             # stompingtantrum/temperflare gate (fork moves.ts:18050/19186:
