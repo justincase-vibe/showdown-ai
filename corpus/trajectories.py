@@ -45,6 +45,12 @@ class Decision:
         return {"turn": self.turn, "pov": self.pov, "kind": self.kind,
                 "action": self.action, "species": self.species, "legal": self.legal}
 
+    @classmethod
+    def from_dict(cls, d: Dict) -> "Decision":
+        """Inverse of :meth:`to_dict` (the corpus-trace cache round-trip)."""
+        return cls(turn=d["turn"], pov=d["pov"], kind=d["kind"], action=d["action"],
+                   species=d["species"], legal=d.get("legal", False))
+
 
 @dataclass
 class BattleTrace:
@@ -93,6 +99,21 @@ class BattleTrace:
             "decisions": [d.to_dict() for d in self.decisions],
             "context_seq": self.context_seq,
         }
+
+    @classmethod
+    def from_dict(cls, d: Dict) -> "BattleTrace":
+        """Inverse of :meth:`to_dict`. Used to load a battle back from the
+        on-disk trace cache (``corpus.cache``) without re-replaying it through
+        the belief stack (the ~tens-of-seconds/battle node-spawn cost)."""
+        return cls(
+            battle_id=d["battle_id"], formatid=d["formatid"], rating=d["rating"],
+            winner_side=d.get("winner_side"), n_turns=d.get("n_turns", 0),
+            skipped=d.get("skipped"), unknown_count=d.get("unknown_count", 0),
+            unknown_tags=dict(d.get("unknown_tags", {})),
+            unknown_samples=list(d.get("unknown_samples", [])),
+            decisions=[Decision.from_dict(x) for x in d.get("decisions", [])],
+            context_seq=list(d.get("context_seq", [])),
+        )
 
 
 # ── helpers ────────────────────────────────────────────────────────────

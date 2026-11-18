@@ -44,7 +44,7 @@ import numpy as np
 import torch
 
 from corpus.pull import load_local
-from corpus.trajectories import replay_many
+from corpus.trajectories import BattleTrace, replay_many
 from net import (
     PokeNet,
     bc_loss,
@@ -85,12 +85,20 @@ class Split:
         return sum(1 for s in self.train_samples if s.kind == "switch") / n
 
 
-def make_split(battles: List[dict], vocabs, max_decisions: int = 40,
-               heldout_frac: float = 0.2, seed: int = 0) -> Split:
-    """Replay ``battles``, build p1-POV samples per battle, and split the
-    REPLAYED battles into train / held-out. Every decision of a battle lands
-    on exactly one side — no battle straddles the split (no leakage)."""
-    traces = replay_many(battles)
+def make_split(battles: Optional[List[dict]] = None, vocabs=None,
+               max_decisions: int = 40, heldout_frac: float = 0.2, seed: int = 0,
+               traces: Optional[List[BattleTrace]] = None) -> Split:
+    """Build p1-POV samples and split the REPLAYED battles into train / held-out.
+
+    Every decision of a battle lands on exactly one side — no battle straddles
+    the split (no leakage).
+
+    Supply EITHER raw ``battles`` (replayed here, the slow path) OR pre-built
+    ``traces`` (from ``corpus.cache.load_cache`` — the fast path, no replay)."""
+    if traces is None:
+        if battles is None:
+            raise ValueError("make_split needs battles= or traces=")
+        traces = replay_many(battles)
     ok = [t for t in traces if t.skipped is None]
     per: List[Tuple[object, List[Sample]]] = []
     for t in ok:
@@ -120,7 +128,8 @@ def make_split(battles: List[dict], vocabs, max_decisions: int = 40,
             reasons[t.skipped] = reasons.get(t.skipped, 0) + 1
 
     return Split(
-        n_loaded=len(battles), n_replayed=len(ok), n_skipped=len(traces) - len(ok),
+        n_loaded=(len(battles) if battles is not None else len(traces)),
+        n_replayed=len(ok), n_skipped=len(traces) - len(ok),
         skipped_reasons=reasons,
         train_samples=train_samples, heldout_samples=heldout_samples,
         n_train_battles=n_tb, n_heldout_battles=n_hb,
