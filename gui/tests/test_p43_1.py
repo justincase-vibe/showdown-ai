@@ -15,8 +15,8 @@ The contract being pinned:
   * a live 1-battle CPU run through the REAL detached subprocess: start ->
     running -> completed, one metrics line with finite loss, a checkpoint in
     the run dir, a log file, and the second start REFUSED while active;
-  * a graceful stop between rounds: zero battles needed — the trainer sees
-    the stop flag at the round boundary and exits ``stopped`` cleanly;
+  * a graceful stop: the flag is honored BETWEEN battles (D80 — the in-flight
+    battle finishes, the round completes atomically, the run exits 'stopped');
   * GUI-restart survival: a SEPARATE python process (a fresh GUI) sees the
     active run from disk alone and can stop it — the whole point of the
     detached design.
@@ -99,6 +99,17 @@ def test_runstate_torn_read_is_not_a_crash(runs):
     (rd / "metrics.jsonl").write_text('{"round": 1, "loss": 0.5}\n{"round": 2,', encoding="utf-8")
     rows = runstate.read_metrics(rd)
     assert len(rows) == 1 and rows[0]["round"] == 1  # the torn line is skipped
+
+
+def test_reconcile_pid_none_is_never_finalized(runs):
+    """D80: a 'starting' status WITHOUT a pid is the launcher mid-spawn —
+    reconcile must leave it alone (finalizing it would mark a live
+    just-started run 'failed')."""
+    rd = runs / "r6"
+    rd.mkdir()
+    runstate.write_status(rd, state="starting", run_id="r6", pid=None)
+    st = runstate.reconcile(rd)
+    assert st["state"] == "starting" and not st.get("error")
 
 
 def test_reconcile_dead_pid_finalizes(runs):
@@ -241,6 +252,45 @@ def _fresh_process(code: str, runs_s: str) -> str:
                        capture_output=True, text=True, cwd=str(ROOT))
     assert r.returncode == 0, f"fresh process failed: {r.stderr}"
     return r.stdout.strip()
+
+
+def test_live_graceful_stop_mid_round(runs):
+    """D80 live: with battles_per_round=3, a graceful stop requested right
+    after battle 0 has started must land BETWEEN battles — the in-flight
+    battle finishes, the remaining battles of the round are skipped, and the
+    round still completes ATOMICALLY (update + checkpoint on what was
+    collected). Pre-D80 this config would run ALL 3 battles and report
+    'completed' (the flag was only checked at round boundaries — with
+    n_rounds=1 it would be ignored entirely)."""
+    info = launcher.start_trainer(small_cfg(battles_per_round=3, n_rounds=1),
+                                  runs_dir=runs)
+    rd = Path(info["run_dir"])
+
+    # wait until battle 0 is provably IN FLIGHT (its pre-battle heartbeat
+    # fired) — a stop now can only land between battles 0 and 1 (or, if
+    # battle 0 is fast and already done, between 1 and 2)
+    def battle0_started():
+        hb = runstate.read_heartbeat(rd)
+        return bool(hb.get("note")) and hb.get("battle") == 0
+    wait_for(battle0_started, 90, what="battle-0 heartbeat")
+
+    launcher.stop_trainer(runs_dir=runs, timeout=170)
+    wait_for(lambda: runstate.read_status(rd)["state"] in runstate.FINAL_STATES,
+             180, what="final state after mid-round stop")
+
+    st = runstate.read_status(rd)
+    # THE discriminator: pre-D80 this would be 'completed' with battles=3
+    assert st["state"] == "stopped", f"state={st['state']} error={st.get('error')}"
+    assert st.get("exit_code") == 0
+    rows = runstate.read_metrics(rd)
+    assert len(rows) == 1, f"exactly one (atomic) round: {rows}"
+    r1 = rows[0]
+    assert r1["battles"] in (1, 2), f"in-flight battle finishes, rest skipped: {r1}"
+    assert r1["battles"] < 3, f"the stop must have been honored inside the round: {r1}"
+    assert r1.get("stopped_early") is True
+    # the round completed atomically: the checkpoint for it EXISTS
+    assert (rd / "checkpoints" / "selfplay_round1.pt").exists()
+    assert not runstate.pid_alive(st.get("pid"))
 
 
 def test_gui_restart_survival(runs):

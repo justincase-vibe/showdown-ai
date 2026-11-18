@@ -94,3 +94,42 @@ def test_checkpoint_save_load_roundtrip(tmp_path):
         assert torch.allclose(pa, pb)
     assert trB.round == 7
     assert trB._last.get("round") == 7
+
+
+# ── D80: the graceful-stop signal (stop_check) ──────────────────────────────
+def test_rollout_stop_check_halts_between_battles(monkeypatch):
+    """D80: the graceful-stop signal must be honored BETWEEN battles — the
+    in-flight battle finishes, the rest of the round's battles are skipped,
+    and ``stopped_early`` is flagged. Without this, a stop with
+    battles_per_round=50 would run all 50 battles before noticing (or force-
+    kill mid-battle after the grace period)."""
+    import net.trainer as nt
+
+    ctx = make_ctx(); v = make_vocabs(ctx)
+    net = make_random_net(v, "cpu")
+    tr = SelfPlayTrainer(net, TrainConfig(battles_per_round=5))
+
+    calls = []
+
+    def fake_collect(agent, fmt, seed, max_steps=500, **kw):
+        calls.append(seed)
+        return {"crashed": True, "error": "fake", "traj": [], "n_illegal": 0}
+    monkeypatch.setattr(nt, "play_and_collect", fake_collect)
+
+    # stop fires once 2 battles have been attempted
+    summary = tr.rollout(stop_check=lambda: len(calls) >= 2)
+    assert summary["stopped_early"] is True
+    assert len(calls) == 2, f"expected halt after 2 battles, got {len(calls)}"
+    assert summary["crashed"] == 2 and summary["battles"] == 0
+
+    # no stop_check -> the full 5
+    summary2 = tr.rollout()
+    assert summary2["stopped_early"] is False
+    assert len(calls) == 7
+
+    # stop BEFORE the round: zero battles, and train_round stays atomic
+    # (nothing buffered -> the update is skipped, no crash, round recorded)
+    out = tr.train_round(stop_check=lambda: True)
+    assert out["stopped_early"] is True and out["battles"] == 0
+    assert out.get("skipped") is True  # 0 transitions -> no partial update
+    assert len(calls) == 7  # the stopped round attempted nothing

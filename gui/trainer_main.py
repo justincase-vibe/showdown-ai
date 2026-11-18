@@ -9,8 +9,11 @@ Owns the whole run lifecycle:
   * net init — random (default) or resume via ``PokeNet.load`` (the
     vocab/layout-verified fresh-process load, D77 open item resolved);
   * the round loop with per-battle heartbeats + the graceful-stop check
-    (``stop.flag``) BETWEEN battles — a stop never abandons a half-finished
-    battle's state mid-update;
+    (``stop.flag``) BETWEEN battles (D80: the flag is checked before every
+    battle, not only at round boundaries — with 50 battles/round a
+    round-boundary-only check would turn 'graceful' into 'force-kill after
+    the grace period') — a stop never abandons a half-finished battle's
+    state mid-update:
   * metrics streaming (one JSON line per round to metrics.jsonl) + a
     non-finite-metric guard (a NaN loss is a FAIL, not a silent checkpoint);
   * checkpointing into the run dir + a loud final status (exit 0 =
@@ -121,7 +124,8 @@ def main(argv: Optional[list] = None) -> int:
                 state_final = "stopped"
                 break
             runstate.write_status(rd, round=trainer.round)
-            row: Dict[str, Any] = trainer.train_round(battle_hook=battle_hook)
+            row: Dict[str, Any] = trainer.train_round(
+                battle_hook=battle_hook, stop_check=lambda: runstate.stop_requested(rd))
             row["wall_s"] = round(time.time() - t0, 1)
             _finite(row)
             runstate.append_metric(rd, row)
@@ -130,7 +134,13 @@ def main(argv: Optional[list] = None) -> int:
                 f"transitions={row.get('transitions')} "
                 f"loss={row.get('loss')} wins={row.get('a1_wins')} "
                 f"losses={row.get('a1_losses')} draws={row.get('draws')} "
+                f"stopped_early={row.get('stopped_early')} "
                 f"ckpt={row.get('checkpoint')}")
+            if row.get("stopped_early"):
+                # graceful stop landed between battles of THIS round: the round
+                # is complete (update + checkpoint done) — exit now, clean
+                state_final = "stopped"
+                break
     except Exception as exc:  # noqa: BLE001
         runstate.write_status(rd, state="failed", round=trainer.round,
                               error=f"{type(exc).__name__}: {exc}", exit_code=1)

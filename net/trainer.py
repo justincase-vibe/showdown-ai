@@ -213,19 +213,31 @@ class SelfPlayTrainer:
 
     # ── rollout ─────────────────────────────────────────────────────────
     def rollout(self, n_battles: Optional[int] = None,
-                battle_hook: Optional[Any] = None) -> Dict[str, Any]:
+                battle_hook: Optional[Any] = None,
+                stop_check: Optional[Any] = None) -> Dict[str, Any]:
         """Collect ``n_battles`` (default ``cfg.battles_per_round``) FRESH battles,
         GAE each, and extend the buffer. Returns a rollout summary (incl. any
         per-battle crashes/draws).
 
         ``battle_hook`` (P4.3): optional ``Callable[[int], None]`` called with
         the 0-based battle index BEFORE each battle — the GUI's per-battle
-        heartbeat hook (liveness for long rounds)."""
+        heartbeat hook (liveness for long rounds).
+
+        ``stop_check`` (P4.3, D80): optional ``Callable[[], bool]`` checked
+        BEFORE every battle — the GUI's graceful-stop signal. The in-flight
+        battle ALWAYS finishes (the check is between battles, never inside
+        one); when it fires, collection stops early and
+        ``summary["stopped_early"]`` is True. ``train_round`` still completes
+        the round atomically (update + checkpoint on what was collected), so
+        a stop never abandons a half-finished battle's state mid-update."""
         n = self.cfg.battles_per_round if n_battles is None else int(n_battles)
         summary: Dict[str, Any] = {"battles": 0, "transitions": 0, "crashed": 0,
                                   "draws": 0, "a1_wins": 0, "a1_losses": 0,
-                                  "n_illegal": 0, "errors": []}
+                                  "n_illegal": 0, "errors": [], "stopped_early": False}
         for i in range(n):
+            if stop_check is not None and stop_check():
+                summary["stopped_early"] = True
+                break
             if battle_hook is not None:
                 battle_hook(i)
             seed = self.cfg.seed + self.round * 1000 + i
@@ -265,12 +277,15 @@ class SelfPlayTrainer:
         return metrics
 
     # ── a full round ────────────────────────────────────────────────────
-    def train_round(self, battle_hook: Optional[Any] = None) -> Dict[str, Any]:
+    def train_round(self, battle_hook: Optional[Any] = None,
+                    stop_check: Optional[Any] = None) -> Dict[str, Any]:
         """One round: FRESH rollout -> GAE -> on-policy PPO update -> checkpoint.
-        Returns ``{**rollout_summary, **update_metrics, "round", "transitions"}``.
+        Returns ``{**rollout_summary, **update_metrics, "round", "transitions"}``
+        (``rollout_summary`` includes ``stopped_early``).
 
-        ``battle_hook`` is forwarded to :meth:`rollout` (per-battle liveness)."""
-        roll = self.rollout(battle_hook=battle_hook)
+        ``battle_hook`` is forwarded to :meth:`rollout` (per-battle liveness);
+        ``stop_check`` is the graceful-stop signal (D80) — see :meth:`rollout`."""
+        roll = self.rollout(battle_hook=battle_hook, stop_check=stop_check)
         m = self.update() if len(self.buffer) >= 2 else {"skipped": True, "reason": "too_few_transitions"}
         self.round += 1
         out: Dict[str, Any] = {"round": self.round, **roll, **m}

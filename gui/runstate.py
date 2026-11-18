@@ -184,9 +184,15 @@ def reconcile(run_dir: Path) -> Dict[str, Any]:
     PID is gone, finalize it: stopped if a stop was requested, else failed
     (a clean completion always writes its own final status first).
 
-    Returns the (possibly updated) status. Idempotent for final states."""
+    Returns the (possibly updated) status. Idempotent for final states.
+
+    D80: a status with ``pid=None`` is NEVER finalized — that means the
+    launcher has not finished starting (the pid is the first fact that can
+    exist). Finalizing it would mark a live just-started run 'failed'."""
     st = read_status(run_dir)
     if not st or st.get("state") not in ACTIVE_STATES:
+        return st
+    if st.get("pid") is None:
         return st
     if pid_alive(st.get("pid")):
         return st

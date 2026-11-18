@@ -120,9 +120,6 @@ def start_trainer(cfg: Dict[str, Any], runs_dir: Optional[Path] = None
         raise RuntimeError(f"run dir already exists: {rd}") from exc
 
     (rd / "config.json").write_text(json.dumps(tc.to_dict(), indent=2), encoding="utf-8")
-    runstate.write_status(rd, state="starting", run_id=run_id, pid=None,
-                          started=runstate.now_iso(), round=0,
-                          rounds_planned=tc.n_rounds, error=None, exit_code=None)
 
     log = open(rd / "trainer.log", "ab", buffering=0)
     try:
@@ -133,10 +130,19 @@ def start_trainer(cfg: Dict[str, Any], runs_dir: Optional[Path] = None
             stdin=subprocess.DEVNULL, **_popen_kwargs())
     except BaseException:
         log.close()
+        # no process was ever created: remove the half-created run dir so it
+        # doesn't linger (list_runs would ignore it anyway — no status.json)
+        import shutil
+        shutil.rmtree(rd, ignore_errors=True)
         raise
     # the child now holds its own reference to trainer.log; our handle may stay
     # open harmlessly (same file, append mode)
-    runstate.write_status(rd, pid=proc.pid)
+    # D80: the status FIRST appears with the LIVE pid — a 'starting' status with
+    # pid=None would let a concurrent reconcile() (e.g. the dashboard's poll)
+    # finalize the run as 'failed' before the pid lands (narrow race, wrong verdict).
+    runstate.write_status(rd, state="starting", run_id=run_id, pid=proc.pid,
+                          started=runstate.now_iso(), round=0,
+                          rounds_planned=tc.n_rounds, error=None, exit_code=None)
     return {"run_id": run_id, "pid": proc.pid, "run_dir": str(rd)}
 
 
@@ -152,11 +158,15 @@ def find_active_run(runs_dir: Path) -> Optional[Tuple[Path, Dict[str, Any]]]:
     return None
 
 
-def stop_trainer(runs_dir: Optional[Path] = None, timeout: float = 90.0,
+def stop_trainer(runs_dir: Optional[Path] = None, timeout: float = 180.0,
                  force: bool = False) -> Dict[str, Any]:
     """Request a graceful stop (the trainer checks between battles and exits
-    cleanly after the current one). If ``force`` (or the grace period expires)
-    kill the whole process tree. Finalizes the run status either way."""
+    cleanly after the current one — D80: the flag is checked BEFORE EVERY
+    battle, so a stop lands within one battle + one update). If ``force``
+    (or the grace period expires) kill the whole process tree. Finalizes the
+    run status either way. D80: grace default 180s — a CPU battle can take
+    ~60s + the update, so the old 90s would have force-killed inside that
+    window."""
     runs = Path(runs_dir) if runs_dir is not None else default_runs_dir()
     active = find_active_run(runs)
     if active is None:
