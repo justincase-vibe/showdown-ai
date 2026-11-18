@@ -51,6 +51,15 @@ from .encoder import encode_context, encode_sequence
 from .vocab_db import build_vocabs
 from .model import PokeNet, bc_loss, overfit_train
 from .batch import build_samples, samples_to_batch, batch_to_torch
+from .agent import PokeAgent, Decision, make_random_net
+from .ppo import (
+    gae,
+    RolloutStep,
+    RolloutBuffer,
+    steps_to_batch,
+    chosen_logprobs,
+    PPOTrainer,
+)
 
 __all__ = [
     "LAYOUT", "FIELDS", "SHAPES", "DTYPES", "Field",
@@ -59,4 +68,7 @@ __all__ = [
     "encode_context", "encode_sequence",
     "PokeNet", "bc_loss", "overfit_train",
     "build_samples", "samples_to_batch", "batch_to_torch",
+    "PokeAgent", "Decision", "make_random_net",
+    "gae", "RolloutStep", "RolloutBuffer", "steps_to_batch",
+    "chosen_logprobs", "PPOTrainer",
 ]
