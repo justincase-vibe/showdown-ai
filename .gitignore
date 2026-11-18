@@ -33,3 +33,5 @@ legality/legality.db.*
 legality/data/
 # Step 3 belief artifacts (fuzz report 3.7, perf bench 3.8) — regenerated each run
 belief/artifacts/
+# P4.3 training runs (user's GPU checkpoints + logs — runtime artifacts, never commit)
+runs/

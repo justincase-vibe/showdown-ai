@@ -70,6 +70,9 @@ class TrainConfig:
     # ── checkpointing ─────────────────────────────────────────────────
     checkpoint_dir: Optional[str] = None
     save_every: int = 1              # save a checkpoint every N rounds
+    # ── P4.3 (GUI) ────────────────────────────────────────────────────
+    n_rounds: int = 10               # how many rounds a GUI-launched run executes
+    resume_from: Optional[str] = None  # checkpoint path to resume from (PokeNet.load)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -209,15 +212,22 @@ class SelfPlayTrainer:
             s.ret = float(r)
 
     # ── rollout ─────────────────────────────────────────────────────────
-    def rollout(self, n_battles: Optional[int] = None) -> Dict[str, Any]:
+    def rollout(self, n_battles: Optional[int] = None,
+                battle_hook: Optional[Any] = None) -> Dict[str, Any]:
         """Collect ``n_battles`` (default ``cfg.battles_per_round``) FRESH battles,
         GAE each, and extend the buffer. Returns a rollout summary (incl. any
-        per-battle crashes/draws)."""
+        per-battle crashes/draws).
+
+        ``battle_hook`` (P4.3): optional ``Callable[[int], None]`` called with
+        the 0-based battle index BEFORE each battle — the GUI's per-battle
+        heartbeat hook (liveness for long rounds)."""
         n = self.cfg.battles_per_round if n_battles is None else int(n_battles)
         summary: Dict[str, Any] = {"battles": 0, "transitions": 0, "crashed": 0,
                                   "draws": 0, "a1_wins": 0, "a1_losses": 0,
                                   "n_illegal": 0, "errors": []}
         for i in range(n):
+            if battle_hook is not None:
+                battle_hook(i)
             seed = self.cfg.seed + self.round * 1000 + i
             r = play_and_collect(self.agent, self.cfg.battle_format, seed,
                                  max_steps=self.cfg.max_steps)
@@ -255,10 +265,12 @@ class SelfPlayTrainer:
         return metrics
 
     # ── a full round ────────────────────────────────────────────────────
-    def train_round(self) -> Dict[str, Any]:
+    def train_round(self, battle_hook: Optional[Any] = None) -> Dict[str, Any]:
         """One round: FRESH rollout -> GAE -> on-policy PPO update -> checkpoint.
-        Returns ``{**rollout_summary, **update_metrics, "round", "transitions"}``."""
-        roll = self.rollout()
+        Returns ``{**rollout_summary, **update_metrics, "round", "transitions"}``.
+
+        ``battle_hook`` is forwarded to :meth:`rollout` (per-battle liveness)."""
+        roll = self.rollout(battle_hook=battle_hook)
         m = self.update() if len(self.buffer) >= 2 else {"skipped": True, "reason": "too_few_transitions"}
         self.round += 1
         out: Dict[str, Any] = {"round": self.round, **roll, **m}
