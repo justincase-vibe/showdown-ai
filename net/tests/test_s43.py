@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import copy
 
+import pytest
 import torch
 
 from net import (
@@ -308,7 +309,8 @@ class _FakeTrace:
 
 def test_split_is_by_battle_no_leakage(monkeypatch):
     fakes = [_FakeTrace(f"b{i}") for i in range(8)]
-    monkeypatch.setattr(bc, "replay_many", lambda battles: fakes)
+    it = iter(fakes)  # D86: make_split now loops replay_battle per battle
+    monkeypatch.setattr(bc, "replay_battle", lambda b, max_unknown_samples=30: next(it))
     vocabs = make_vocabs(make_ctx())
     split = bc.make_split([{} for _ in range(8)], vocabs, heldout_frac=0.5, seed=0)
     train_ids = {s.battle_id for s in split.train_samples}
@@ -578,6 +580,78 @@ def test_d85_opponent_moves_stay_revealed_so_far():
     samples = build_samples(_T(), voc)
     assert len(samples) == 1
     assert _decode_row(samples[0].seq[-1]["opp_moves"][0], voc) == {"outrage"}
+
+
+# ── D86: stop_check / heartbeat hooks (the GUI's graceful stop + progress) ──
+
+def test_d86_stop_check_aborts_replay_within_one_battle(monkeypatch):
+    """D86: a stop requested during the REPLAY phase lands after the previous
+    battle finished — battle 2 is never started, and ``run`` gets a clean
+    BCStopped to turn into state 'stopped'."""
+    calls = []
+
+    def fake_replay(battle, max_unknown_samples=30):
+        calls.append(battle)
+        return _FakeTrace(str(battle.get("id", "?")))
+
+    monkeypatch.setattr(bc, "replay_battle", fake_replay)
+    state = {"n": 0}
+
+    def stop_check():
+        state["n"] += 1
+        return state["n"] >= 2   # second call (before battle 2) -> stop
+
+    battles = [{"id": "b1"}, {"id": "b2"}, {"id": "b3"}]
+    with pytest.raises(bc.BCStopped):
+        bc.make_split(battles=battles, stop_check=stop_check)
+    assert len(calls) == 1, calls     # only battle 1 was replayed
+
+
+def test_d86_replay_heartbeat_ticks_per_battle(monkeypatch):
+    """D86: the replay phase reports per-battle progress (phase/battle/total)."""
+    monkeypatch.setattr(bc, "replay_battle",
+                        lambda b, max_unknown_samples=30: _FakeTrace(str(b.get("id"))))
+    monkeypatch.setattr(bc, "build_samples",
+                        lambda t, v, max_decisions=40: [])   # empty samples are fine
+    events = []
+    split = bc.make_split(battles=[{"id": f"b{i}"} for i in range(3)],
+                          heartbeat=events.append)
+    assert [e["battle"] for e in events] == [1, 2, 3]
+    assert all(e["phase"] == "replay" and e["total"] == 3 for e in events)
+    assert split.train_samples == [] and split.heldout_samples == []
+
+
+def test_d86_train_stop_check_halts_before_first_epoch():
+    """D86: a stop before the first epoch trains NOTHING (net untouched) and
+    the result is marked stopped."""
+    samples, vocabs = _make_synthetic_samples(8)
+    split = bc.Split(n_loaded=1, n_replayed=1, n_skipped=0, skipped_reasons={},
+                     train_samples=samples, heldout_samples=samples,
+                     n_train_battles=1, n_heldout_battles=1)
+    net = PokeNet(vocabs)
+    before = [p.detach().clone() for p in net.parameters()]
+    res = bc.train(net, split, epochs=5, stop_check=lambda: True,
+                   log=lambda *a, **k: None)
+    assert res["stopped"] is True
+    for p0, p1 in zip(before, net.parameters()):
+        assert torch.equal(p0, p1)     # not a single gradient step
+
+
+def test_d86_train_heartbeat_ticks_per_epoch():
+    """D86: the train phase reports per-epoch progress (with the epoch's
+    held-out top-1 — the number the dashboard should show)."""
+    samples, vocabs = _make_synthetic_samples(8)
+    split = bc.Split(n_loaded=1, n_replayed=1, n_skipped=0, skipped_reasons={},
+                     train_samples=samples, heldout_samples=samples,
+                     n_train_battles=1, n_heldout_battles=1)
+    net = PokeNet(vocabs)
+    events = []
+    res = bc.train(net, split, epochs=2, batch_size=4, patience=99,
+                   heartbeat=events.append, log=lambda *a, **k: None)
+    assert res["stopped"] is False
+    assert [e["epoch"] for e in events] == [1, 2]
+    assert all(e["phase"] == "train" and e["total_epochs"] == 2 for e in events)
+    assert all(isinstance(e["top1"], float) for e in events)
 
 
 def test_own_side_move_used_populates_moves_used():

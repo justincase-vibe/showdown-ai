@@ -38,13 +38,13 @@ import json
 import random
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 
 from corpus.pull import load_local
-from corpus.trajectories import BattleTrace, replay_many
+from corpus.trajectories import BattleTrace, replay_battle
 from net import (
     PokeNet,
     bc_loss,
@@ -85,6 +85,16 @@ REL_SHORTCUT_MARGIN = 0.30
 ABS_FIRST_USE_FLOOR = 0.35
 
 
+class BCStopped(RuntimeError):
+    """A graceful stop landed mid-run (the GUI's stop flag, D86).
+
+    Raised by ``make_split`` when ``stop_check()`` is true between battle
+    replays. ``run`` catches it: the run ends cleanly as 'stopped' — a stop
+    during the REPLAY phase trains nothing (there is no corpus yet); a stop
+    during the TRAIN phase keeps the work done so far (checkpoint saved,
+    marked stopped)."""
+
+
 @dataclass
 class Split:
     """A seeded train / held-out split of the corpus, BY BATTLE."""
@@ -109,18 +119,39 @@ class Split:
 
 def make_split(battles: Optional[List[dict]] = None, vocabs=None,
                max_decisions: int = 40, heldout_frac: float = 0.2, seed: int = 0,
-               traces: Optional[List[BattleTrace]] = None) -> Split:
+               traces: Optional[List[BattleTrace]] = None,
+               stop_check: Optional[Callable[[], bool]] = None,
+               heartbeat: Optional[Callable[[Dict], None]] = None) -> Split:
     """Build p1-POV samples and split the REPLAYED battles into train / held-out.
 
     Every decision of a battle lands on exactly one side — no battle straddles
     the split (no leakage).
 
     Supply EITHER raw ``battles`` (replayed here, the slow path) OR pre-built
-    ``traces`` (from ``corpus.cache.load_cache`` — the fast path, no replay)."""
+    ``traces`` (from ``corpus.cache.load_cache`` — the fast path, no replay).
+
+    D86 hooks (both optional; ``None`` = the old synchronous behavior):
+      * ``stop_check()`` — called BEFORE every battle replay; when it returns
+        true, :class:`BCStopped` is raised AFTER the previous battle finished
+        (a stop lands within one battle, never mid-battle).
+      * ``heartbeat(info)`` — called after every battle replay with
+        ``{"phase": "replay", "battle": i, "total": n}`` (progress for the
+        GUI dashboard)."""
     if traces is None:
         if battles is None:
             raise ValueError("make_split needs battles= or traces=")
-        traces = replay_many(battles)
+        # D86: the per-battle loop (``corpus.trajectories.replay_many`` was
+        # exactly this loop; we inline it so the hooks can land between
+        # battles — same replay_battle, same order, no second code path).
+        traces: List[BattleTrace] = []
+        n_b = len(battles)
+        for i, b in enumerate(battles, 1):
+            if stop_check is not None and stop_check():
+                raise BCStopped(f"stop requested during replay "
+                                f"(after {i - 1}/{n_b} battles)")
+            traces.append(replay_battle(b, 30))
+            if heartbeat is not None:
+                heartbeat({"phase": "replay", "battle": i, "total": n_b})
     ok = [t for t in traces if t.skipped is None]
     per: List[Tuple[object, List[Sample]]] = []
     for t in ok:
@@ -400,9 +431,19 @@ def verdict(m: Dict) -> Tuple[bool, List[str]]:
 def train(net: PokeNet, split: Split, device: str = "cpu",
           batch_size: int = 24, lr: float = 3e-3, epochs: int = 15,
           max_norm: float = 1.0, patience: int = DEFAULT_PATIENCE,
-          seed: int = 0, log=print) -> Dict:
+          seed: int = 0, log=print,
+          stop_check: Optional[Callable[[], bool]] = None,
+          heartbeat: Optional[Callable[[Dict], None]] = None) -> Dict:
     """Train ``net`` on ``split.train_samples``, early-stopping on the
-    held-out top-1. Returns the final held-out metrics + the best seen."""
+    held-out top-1. Returns the final held-out metrics + the best seen.
+
+    D86 hooks (optional; ``None`` = the old synchronous behavior):
+      * ``stop_check()`` — checked BEFORE every epoch; when true the epoch
+        loop breaks (the epochs already done keep their best-state restore);
+      * ``heartbeat(info)`` — after every epoch with
+        ``{"phase": "train", "epoch": e, "total_epochs": n, "top1": t}``.
+    The result dict gains ``"stopped"`` (True iff the loop ended via the
+    stop hook, not patience)."""
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     net.to(device)
@@ -415,7 +456,12 @@ def train(net: PokeNet, split: Split, device: str = "cpu",
     best_state: Optional[Dict] = None
     bad = 0
 
+    stopped = False
     for epoch in range(1, epochs + 1):
+        if stop_check is not None and stop_check():
+            log(f"stop requested — ending training after epoch {epoch - 1}")
+            stopped = True
+            break
         net.train()
         rng.shuffle(order)
         tot, nsteps = 0.0, 0
@@ -455,12 +501,16 @@ def train(net: PokeNet, split: Split, device: str = "cpu",
                 log(f"early stopping at epoch {epoch} "
                     f"(no held-out gain for {patience} epochs)")
                 break
+        if heartbeat is not None:
+            heartbeat({"phase": "train", "epoch": epoch, "total_epochs": epochs,
+                       "top1": round(float(top1), 5)})
 
     if best_state is not None:
         net.load_state_dict(best_state)
     net.eval()
     return {"best_top1": best_top1, "best_metrics": best_metrics,
-            "final_metrics": evaluate(net, split.heldout_samples, device=device)}
+            "final_metrics": evaluate(net, split.heldout_samples, device=device),
+            "stopped": stopped}
 
 
 def _save_checkpoint(net: PokeNet, path: str, extra: Optional[Dict] = None) -> None:
@@ -492,9 +542,18 @@ def run(n_battles: int = 50, fixture: str = "bot/data/replays/gen9ou.jsonl",
         epochs: int = 15, batch_size: int = 24, lr: float = 3e-3,
         device: str = "cpu", seed: int = 0,
         out_dir: str = "scratch", ckpt_name: str = "s43_bc_best.pt",
-        log=print) -> Dict:
+        log=print,
+        stop_check: Optional[Callable[[], bool]] = None,
+        heartbeat: Optional[Callable[[Dict], None]] = None) -> Dict:
     """Build the corpus split, train, evaluate, save the best checkpoint, and
-    return the full result dict (metrics + the verdict)."""
+    return the full result dict (metrics + the verdict).
+
+    D86: optional ``stop_check`` / ``heartbeat`` hooks are forwarded to
+    :func:`make_split` (per battle) and :func:`train` (per epoch) — the GUI's
+    graceful stop + progress. A stop during REPLAY ends the run with no
+    checkpoint (``{\"stopped\": True, \"phase\": \"replay\"}``); a stop during
+    TRAIN keeps the work so far (checkpoint saved, ``stopped: True`` in the
+    metadata). Both ``None`` = the old synchronous CLI behavior."""
     t0 = time.time()
     log(f"== S4.3 BC warm-start (increment 1) ==")
     log(f"N={n_battles} fixture={fixture} device={device} epochs={epochs} "
@@ -506,8 +565,14 @@ def run(n_battles: int = 50, fixture: str = "bot/data/replays/gen9ou.jsonl",
     log(f"[1/4] loading {n_battles} battles + replaying (cold node spawns, "
         f"~20-25 s/battle) ...")
     battles = load_local(fixture, n_battles)
-    split = make_split(battles, vocabs, max_decisions=max_decisions,
-                       heldout_frac=heldout_frac, seed=seed)
+    try:
+        split = make_split(battles, vocabs, max_decisions=max_decisions,
+                           heldout_frac=heldout_frac, seed=seed,
+                           stop_check=stop_check, heartbeat=heartbeat)
+    except BCStopped as exc:
+        log(f"STOPPED: {exc} — nothing trained, no checkpoint")
+        return {"stopped": True, "phase": "replay", "error": str(exc),
+                "elapsed_s": round(time.time() - t0, 1)}
     log(f"      replayed {split.n_replayed}/{split.n_loaded} "
         f"(skipped {split.n_skipped}): {split.skipped_reasons}")
     log(f"      battles: {split.n_train_battles} train / "
@@ -526,7 +591,8 @@ def run(n_battles: int = 50, fixture: str = "bot/data/replays/gen9ou.jsonl",
 
     log(f"[3/4] training (early stopping on held-out top-1) ...")
     res = train(net, split, device=device, batch_size=batch_size, lr=lr,
-                epochs=epochs, seed=seed, log=log)
+                epochs=epochs, seed=seed, log=log,
+                stop_check=stop_check, heartbeat=heartbeat)
 
     log(f"[4/4] final held-out verdict ...")
     final = res["final_metrics"]
@@ -570,12 +636,14 @@ def run(n_battles: int = 50, fixture: str = "bot/data/replays/gen9ou.jsonl",
     _save_checkpoint(net, ckpt_path, extra={
         "step": "S4.3", "n_battles": n_battles, "seed": seed, "fixture": fixture,
         "human_switch_rate": split.human_switch_rate, "final": final,
-        "verdict_pass": ok, "elapsed_s": round(time.time() - t0, 1),
+        "verdict_pass": ok, "stopped": bool(res.get("stopped", False)),
+        "elapsed_s": round(time.time() - t0, 1),
     })
     log(f"best checkpoint -> {ckpt_path}  "
         f"(best held top-1 {res['best_top1']:.3f})")
 
     return {
+        "stopped": bool(res.get("stopped", False)),
         "vocabs_sizes": vocabs.sizes(),
         "split": {
             "n_loaded": split.n_loaded, "n_replayed": split.n_replayed,
