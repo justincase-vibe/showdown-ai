@@ -51,8 +51,9 @@ def _base():
         "top1_acc": 0.65, "overall_chance": 0.2, "top1_beats_chance": True,
         "top1_const_acc": 0.3, "top1_beats_const": True,
         "pred_switch_rate": 0.42, "human_switch_rate": 0.40, "switch_rate_gap": 0.02,
-        # D81: a healthy net does first-use and repeat comparably (small gap),
-        # so the new shortcut gate does NOT fire here.
+        # D81/D82: a healthy net does first-use and repeat comparably (small
+        # RELATIVE gap), so the shortcut gate (relative + baseline) does NOT
+        # fire here.
         "n_first_use": 40, "n_repeat": 20,
         "first_use_move_acc": 0.72, "repeat_move_acc": 0.68, "shortcut_gap": 0.04,
     }
@@ -172,6 +173,32 @@ def test_verdict_skips_shortcut_gate_when_split_too_small():
     ok, fails = bc.verdict(m)
     assert ok, fails
     assert not any("shortcut" in f for f in fails)
+
+
+def test_verdict_does_not_flag_weak_net_both_at_chance():
+    # D82 BASELINE: a WEAK net where BOTH splits sit near chance has a large
+    # RELATIVE gap (0.30 > 0.15*1.3) but first-use is below the absolute floor
+    # -> not a real "new move" shortcut (it's just weak, caught by gates 1-3).
+    # The shortcut gate must NOT fire.
+    m = _base()
+    m.update({"n_first_use": 40, "n_repeat": 20,
+              "first_use_move_acc": 0.30, "repeat_move_acc": 0.15,
+              "shortcut_gap": 0.15})
+    ok, fails = bc.verdict(m)
+    assert not any("shortcut" in f for f in fails), fails
+
+
+def test_verdict_does_not_flag_good_net_both_high():
+    # D82 RELATIVE: a GENUINELY GOOD net does first-use and repeat both high
+    # with a small relative gap (0.90 < 0.85*1.3) -> NOT a shortcut. A pure
+    # absolute CEILING ("first-use > 0.9 fails") would FALSE-POSITIVE here;
+    # the relative tell must NOT fire.
+    m = _base()
+    m.update({"n_first_use": 40, "n_repeat": 20,
+              "first_use_move_acc": 0.90, "repeat_move_acc": 0.85,
+              "shortcut_gap": 0.05})
+    ok, fails = bc.verdict(m)
+    assert not any("shortcut" in f for f in fails), fails
 
 
 def test_evaluate_reports_first_use_repeat_split():

@@ -64,15 +64,25 @@ DEFAULT_PATIENCE = 4
 
 #: D81 — the first-use/repeat leak-check (the friend's "is it learning or just
 #: grabbing the new move?" signal). A net that keys on "is this a NEW move?" does
-#: well on first-use decisions and poorly on repeats. These bounds make the
-#: verdict FAIL that shortcut even when the overall move-accuracy beats chance:
+#: well on first-use decisions and poorly on repeats. The verdict FAILs that
+#: shortcut even when overall move-accuracy still beats chance. D82 — the user
+#: chose a MIX of a RELATIVE tell and an ABSOLUTE baseline (not a single
+#: absolute gap), so a genuinely good net (both high, small gap) is not
+#: false-flagged, and a weak net (both at chance) is not flagged either:
 #:  * the gate only applies when BOTH splits have at least this many held-out
 #:    move-decisions (below that the split is too small to be meaningful);
 MIN_SPLIT_SAMPLES = 8
-#:  * ...and only when first-use move-acc exceeds repeat move-acc by MORE than
-#:    this. A gap that large is a strong "new move" signal, not a healthy
-#:    state->action net (which does both comparably). Tunable (open question).
-MAX_SHORTCUT_GAP = 0.35
+#:  * RELATIVE tell: FAIL only when first-use acc exceeds repeat acc by more
+#:    than this (proportionally). A healthy state->action net does first-use and
+#:    repeat comparably, so this stays small even when both are high (0.90/0.85
+#:    passes); a "grab the new move?" net is far higher on first-use (0.95/0.40
+#:    fails). Tunable (open question).
+REL_SHORTCUT_MARGIN = 0.30
+#:  * ABSOLUTE baseline: the relative tell only counts when first-use acc also
+#:    clears this floor (well above a 4-move chance baseline ~0.25) — otherwise
+#:    the "gap" is just both splits sitting at chance (a weak net, already caught
+#:    by gates 1-3). Tunable (open question).
+ABS_FIRST_USE_FLOOR = 0.35
 
 
 @dataclass
@@ -365,17 +375,22 @@ def verdict(m: Dict) -> Tuple[bool, List[str]]:
     # learning or just grabbing the new move?" check). A net that keys on
     # "is this a NEW move?" scores high on first-use and low on repeats even
     # though its overall move-accuracy can still beat chance — the earlier
-    # gates do not catch that. Enforce only when BOTH splits are large enough.
+    # gates do not catch that. D82 — a MIX of a RELATIVE tell (first-use far
+    # above repeat) and an ABSOLUTE baseline (first-use clear of a floor), so
+    # a genuinely good net (both high, small gap) and a weak net (both at
+    # chance) are both NOT flagged. Enforce only when BOTH splits are large.
     n_fu = m.get("n_first_use") or 0
     n_rp = m.get("n_repeat") or 0
     fu = m.get("first_use_move_acc")
     rp = m.get("repeat_move_acc")
     if (n_fu >= MIN_SPLIT_SAMPLES and n_rp >= MIN_SPLIT_SAMPLES
             and fu is not None and rp is not None
-            and (fu - rp) > MAX_SHORTCUT_GAP):
+            and fu >= ABS_FIRST_USE_FLOOR
+            and fu > rp * (1.0 + REL_SHORTCUT_MARGIN)):
         fails.append(
             f"first-use move-acc {fu:.3f} >> repeat move-acc {rp:.3f} "
-            f"(gap {fu - rp:+.3f} > {MAX_SHORTCUT_GAP}) — the net is using "
+            f"({fu / max(rp, 1e-9):.2f}x > {1.0 + REL_SHORTCUT_MARGIN:.2f}x AND "
+            f"first-use >= {ABS_FIRST_USE_FLOOR}) — the net is using "
             f"\"new move\" as a shortcut, not the state")
 
     return (not fails), fails
@@ -532,9 +547,12 @@ def run(n_battles: int = 50, fixture: str = "bot/data/replays/gen9ou.jsonl",
     _rp = final.get("repeat_move_acc")
     if _fu is not None and _rp is not None:
         log(f"move first-use/repeat: first {_fu:.3f} (n={final['n_first_use']})   "
-            f"repeat {_rp:.3f} (n={final['n_repeat']})   gap "
-            f"{final['shortcut_gap']:+.3f}  (shortcut gate: >" +
-            f"{MAX_SHORTCUT_GAP} FAILS)")
+            f"repeat {_rp:.3f} (n={final['n_repeat']})   "
+            f"ratio {(_fu / _rp if _rp > 0 else float('inf')):.2f}x   "
+            f"gap {final['shortcut_gap']:+.3f}")
+        log(f"  shortcut gate (D81/D82): FAIL if first-use >= {ABS_FIRST_USE_FLOOR} "
+            f"AND first-use > {1.0 + REL_SHORTCUT_MARGIN:.2f}x repeat "
+            f"(both splits >= {MIN_SPLIT_SAMPLES})")
     else:
         log(f"move first-use/repeat: n/a (first n={final.get('n_first_use', 0)}, "
             f"repeat n={final.get('n_repeat', 0)} — too few to gate)")
