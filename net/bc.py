@@ -541,7 +541,7 @@ def run(n_battles: int = 50, fixture: str = "bot/data/replays/gen9ou.jsonl",
         max_decisions: int = 40, heldout_frac: float = 0.2,
         epochs: int = 15, batch_size: int = 24, lr: float = 3e-3,
         device: str = "cpu", seed: int = 0,
-        out_dir: str = "scratch", ckpt_name: str = "s43_bc_best.pt",
+        out_dir: str = "scratch", ckpt_name: Optional[str] = None,
         log=print,
         stop_check: Optional[Callable[[], bool]] = None,
         heartbeat: Optional[Callable[[Dict], None]] = None) -> Dict:
@@ -554,10 +554,14 @@ def run(n_battles: int = 50, fixture: str = "bot/data/replays/gen9ou.jsonl",
     checkpoint (``{\"stopped\": True, \"phase\": \"replay\"}``); a stop during
     TRAIN keeps the work so far (checkpoint saved, ``stopped: True`` in the
     metadata). Both ``None`` = the old synchronous CLI behavior."""
+    # D91: default checkpoint name = {date}_bc_{n}b.pt (date, type, battles)
+    if ckpt_name is None:
+        ckpt_name = time.strftime("%Y-%m-%d") + f"_bc_{n_battles}b.pt"
+
     t0 = time.time()
     log(f"== S4.3 BC warm-start (increment 1) ==")
     log(f"N={n_battles} fixture={fixture} device={device} epochs={epochs} "
-        f"batch={batch_size} lr={lr} seed={seed}")
+        f"batch={batch_size} lr={lr} seed={seed} ckpt={ckpt_name}")
 
     vocabs = build_vocabs()
     log(f"vocabs: {vocabs.sizes()}")

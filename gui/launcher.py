@@ -114,9 +114,10 @@ def validate_bc_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
                         "(e.g. 'bot/data/replays/gen9ou.jsonl')")
     elif not Path(fixture).expanduser().is_file():
         problems.append(f"fixture does not exist (relative to the project root): {fixture!r}")
-    ckpt = d.get("ckpt_name", "s43_bc_best.pt")
-    if not isinstance(ckpt, str) or not ckpt.strip() or "/" in ckpt or "\\" in ckpt:
-        problems.append(f"ckpt_name must be a plain file name (got {ckpt!r})")
+    ckpt = d.get("ckpt_name")  # None = auto-generate ({date}_bc_{n}b.pt)
+    if ckpt is not None:
+        if not isinstance(ckpt, str) or not ckpt.strip() or "/" in ckpt or "\\" in ckpt:
+            problems.append(f"ckpt_name must be a plain file name or null (got {ckpt!r})")
     if problems:
         raise ValueError("; ".join(problems))
     return {
