@@ -1033,11 +1033,16 @@ class BeliefState:
             # gate checks whether THAT mon hit the attacker this turn.
             move_spec = _move_with_state(dmg.move, a_facts,
                                         defender=(dmg.target_side, dmg.target_slot))
+            # P4.2: batch ALL candidates' windows into ONE Node spawn (same
+            # numbers as the per-candidate defender_window calls — shared cache).
+            windows = ev.defender_windows_many(
+                sb.candidates, sb.species, a_mon, d_status, d_boosts,
+                d_frac, move_spec, field, self.fmt)
+            wins_by_id = {id(c): w for c, w in zip(sb.candidates, windows)}
 
             def lik(c: Dict) -> float:
-                w = ev.defender_window(c, sb.species, a_mon, d_status, d_boosts,
-                                       d_frac, move_spec, field, self.fmt)
-                return ev.damage_likelihood(w, delta, ko=dmg.ko, maxhp=maxhp)
+                return ev.damage_likelihood(wins_by_id[id(c)], delta,
+                                            ko=dmg.ko, maxhp=maxhp)
         else:
             # candidate = ATTACKER (p2); defender = exact own mon
             sb = self._slots.get(dmg.source_slot)
@@ -1055,11 +1060,16 @@ class BeliefState:
             # gate checks whether THAT mon hit the attacker this turn.
             move_spec = _move_with_state(dmg.move, sb.facts,
                                         defender=(dmg.target_side, dmg.target_slot))
+            # P4.2: batch ALL candidates' windows into ONE Node spawn (see the
+            # defender direction above).
+            windows = ev.attacker_windows_many(
+                sb.candidates, sb.species, a_status, sb.facts.boosts, a_frac,
+                d_mon, move_spec, field, self.fmt)
+            wins_by_id = {id(c): w for c, w in zip(sb.candidates, windows)}
 
             def lik(c: Dict) -> float:
-                w = ev.attacker_window(c, sb.species, a_status, sb.facts.boosts, a_frac,
-                                      d_mon, move_spec, field, self.fmt)
-                return ev.damage_likelihood(w, delta, ko=dmg.ko, maxhp=maxhp)
+                return ev.damage_likelihood(wins_by_id[id(c)], delta,
+                                            ko=dmg.ko, maxhp=maxhp)
         ev.apply_evidence(sb.candidates, lik)
         return True
 
@@ -1086,10 +1096,13 @@ class BeliefState:
         if sb is None or not observed_maxhp:
             return False
         field = ev.calc_field(self.field)
+        # P4.2: batch ALL candidates' max-HP probes into ONE Node spawn (same
+        # fixed probe attacker / Tackle as maxhp_for — shared cache keys).
+        windows = ev.maxhp_windows_many(sb.candidates, sb.species, field, self.fmt)
+        maxhp_by_id = {id(c): w["maxhp"] for c, w in zip(sb.candidates, windows)}
 
         def lik(c: Dict) -> float:
-            return ev.maxhp_likelihood(ev.maxhp_for(c, sb.species, field, self.fmt),
-                                       observed_maxhp)
+            return ev.maxhp_likelihood(maxhp_by_id[id(c)], observed_maxhp)
         ev.apply_evidence(sb.candidates, lik)
         return True
 

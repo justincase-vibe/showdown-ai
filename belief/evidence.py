@@ -323,10 +323,9 @@ def window_for(attacker: Dict, defender: Dict, move, field: Optional[Dict] = Non
     return _cached(key, lambda: _calc_window(attacker, defender, move, field, fmt, gen))
 
 
-def _calc_window(attacker, defender, move, field, fmt, gen) -> Dict:
-    from damage import calc  # lazy: keeps the pure section of this module import-light
-    r = calc.calc_damage(attacker=attacker, defender=defender, move=move,
-                         field=field, fmt=fmt, gen=gen)
+def _window_from_result(r: Dict) -> Dict:
+    """One raw ``calc_damage`` result dict -> belief window dict. Shared by the
+    single and batch paths — ONE place for the immune/crit/maxhp mapping."""
     if r.get("immune"):
         return {"min": 0, "max": 0, "crit_min": 0, "crit_max": 0,
                 "maxhp": int(r.get("maxhp", 0) or 0)}
@@ -338,6 +337,77 @@ def _calc_window(attacker, defender, move, field, fmt, gen) -> Dict:
         "crit_max": int(c.get("max", 0) or 0),
         "maxhp": int(r.get("maxhp", 0) or 0),  # the defender's max HP (3.6: EV inference)
     }
+
+
+def _calc_window(attacker, defender, move, field, fmt, gen) -> Dict:
+    from damage import calc  # lazy: keeps the pure section of this module import-light
+    r = calc.calc_damage(attacker=attacker, defender=defender, move=move,
+                         field=field, fmt=fmt, gen=gen)
+    return _window_from_result(r)
+
+
+def windows_many(items: List[Dict]) -> List[Dict]:
+    """Batched ``window_for`` (P4.2): N (attacker, defender, move) tuples in ONE
+    Node spawn instead of N separate spawns.
+
+    ``items`` has the ``damage.calc.calc_damage_many`` item contract: ``attacker``
+    / ``defender`` / ``move`` (required) + optional ``field`` / ``fmt`` / ``gen``.
+    Returns the windows (the SAME shape as ``window_for``) IN INPUT ORDER.
+
+    Cache semantics are identical to ``window_for``: hits come off ``_CACHE``
+    under the SAME keys (the single and batch paths share ONE cache), the misses
+    go out as ONE ``calc_damage_many`` spawn, and a per-item calc error raises
+    ``RuntimeError`` exactly like the single path (a real error — never a silent
+    zero). Empty ``items`` returns ``[]`` without spawning.
+
+    P4.2 motivation (PLAN.md D78, measured on one fresh gen9ou self-play battle):
+    252 single Node spawns = 56s = 72% of wall time. Batching the per-candidate
+    windows of one evidence event collapses that event to a single spawn.
+    """
+    if not items:
+        return []
+    # SAME key expression and element ORDER as window_for
+    # ([fmt, gen, attacker, defender, move, field]) so both paths populate and
+    # read one shared _CACHE — a batch result is a hit for the later identical
+    # single call and vice versa.
+    keys = [_json.dumps([it.get("fmt"), it.get("gen", 9), it["attacker"],
+                         it["defender"], it["move"], it.get("field")],
+                        sort_keys=True) for it in items]
+    results: List[Optional[Dict]] = [None] * len(items)
+    misses: List[int] = []
+    for i, key in enumerate(keys):
+        hit = _CACHE.get(key)
+        if hit is not None:
+            results[i] = hit
+        else:
+            misses.append(i)
+    if misses:
+        from damage import calc  # lazy: one real spawn for the whole batch
+        # Dedupe identical specs WITHIN the batch (the 3.8 bench's fallback slots
+        # are 210 candidates sharing ~3 specs — one Node-side compute per unique
+        # spec, distributed back to every candidate that carries it).
+        seen: set = set()
+        uniq_keys: List[str] = []
+        uniq_items: List[Dict] = []
+        for i in misses:
+            k = keys[i]
+            if k not in seen:
+                seen.add(k)
+                uniq_keys.append(k)
+                uniq_items.append(items[i])
+        raw = calc.calc_damage_many(uniq_items)
+        if len(raw) != len(uniq_items):  # transport contract violation (defensive)
+            raise RuntimeError(
+                f"calc_damage_many returned {len(raw)} results for {len(uniq_items)} items")
+        if len(_CACHE) > 8192:  # same cap as _cached
+            _CACHE.clear()
+        for u, r in enumerate(raw):
+            if "error" in r:
+                raise RuntimeError(r["error"])  # same loud failure as the single path
+            _CACHE[uniq_keys[u]] = _window_from_result(r)
+        for i in misses:
+            results[i] = _CACHE[keys[i]]
+    return results  # type: ignore[return-value]
 
 
 def defender_window(candidate: Dict, species: str, attacker_mon: Dict,
@@ -364,6 +434,39 @@ def attacker_window(candidate: Dict, species: str, attacker_status: Optional[str
     mon = mon_options(candidate, status=attacker_status, boosts=attacker_boosts,
                       hp_fraction=attacker_hp_fraction, name=species)
     return window_for(mon, defender_mon, move, field, fmt, gen)
+
+
+def defender_windows_many(candidates: List[Dict], species: str, attacker_mon: Dict,
+                          defender_status: Optional[str], defender_boosts: Optional[Dict],
+                          defender_hp_fraction: Optional[float], move,
+                          field: Optional[Dict], fmt: Optional[str] = None,
+                          gen: int = 9) -> List[Dict]:
+    """Batched ``defender_window`` (P4.2): one window per candidate, ALL in ONE
+    Node spawn (results in candidate order; identical numbers to the per-candidate
+    calls — same mon construction, same shared _CACHE keys)."""
+    items = []
+    for c in candidates:
+        mon = mon_options(c, status=defender_status, boosts=defender_boosts,
+                          hp_fraction=defender_hp_fraction, name=species)
+        items.append({"attacker": attacker_mon, "defender": mon, "move": move,
+                      "field": field, "fmt": fmt, "gen": gen})
+    return windows_many(items)
+
+
+def attacker_windows_many(candidates: List[Dict], species: str,
+                          attacker_status: Optional[str],
+                          attacker_boosts: Optional[Dict],
+                          attacker_hp_fraction: Optional[float],
+                          defender_mon: Dict, move, field: Optional[Dict] = None,
+                          fmt: Optional[str] = None, gen: int = 9) -> List[Dict]:
+    """Batched ``attacker_window`` (P4.2): one window per candidate, ONE spawn."""
+    items = []
+    for c in candidates:
+        mon = mon_options(c, status=attacker_status, boosts=attacker_boosts,
+                          hp_fraction=attacker_hp_fraction, name=species)
+        items.append({"attacker": mon, "defender": defender_mon, "move": move,
+                      "field": field, "fmt": fmt, "gen": gen})
+    return windows_many(items)
 
 
 def speed_of(mon: Dict, fmt: Optional[str] = None, tailwind: bool = False,
@@ -414,6 +517,19 @@ def maxhp_for(candidate: Dict, species: str, field: Optional[Dict] = None,
     """
     mon = mon_options(candidate, name=species)
     return int(window_for(_MAXHP_PROBE_ATTACKER, mon, "tackle", field, fmt, gen)["maxhp"])
+
+
+def maxhp_windows_many(candidates: List[Dict], species: str,
+                       field: Optional[Dict] = None, fmt: Optional[str] = None,
+                       gen: int = 9) -> List[Dict]:
+    """Batched ``maxhp_for`` (P4.2): every candidate's max-HP probe window in ONE
+    spawn (same fixed probe attacker + Tackle, same shared _CACHE keys)."""
+    items = []
+    for c in candidates:
+        mon = mon_options(c, name=species)
+        items.append({"attacker": _MAXHP_PROBE_ATTACKER, "defender": mon,
+                      "move": "tackle", "field": field, "fmt": fmt, "gen": gen})
+    return windows_many(items)
 
 
 def maxhp_likelihood(candidate_maxhp: int, observed_maxhp: int) -> float:
