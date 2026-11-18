@@ -16,19 +16,30 @@ p2-POV needs the p2 bench populated as "own" (open decision — the D68
 opponent-roster question); the net itself is POV-agnostic (it reads "own" as
 self), so p2-POV samples drop in once the corpus supplies them.
 
-Action-list construction (recorded design choice, S4.2):
+Action-list construction (recorded design choice, S4.2 + D70):
   * move decision:  [the mon's revealed moves (used so far) + the human's
     move] sorted, then [alive benched own mons] sorted (switch options).
     The human's move is ALWAYS in the list (that's what makes the target
-    legal); its index VARIES with the move name, so the net cannot learn a
-    constant "always pick slot 0" shortcut — it must use the state.
+    legal).
   * switch decision: [alive benched own mons] sorted (you must switch; moves
     are not legal here — the structural D60 forced-decision case).
+  * D70 ORDER SHUFFLE: the final list is then PERMUTED with a deterministic
+    per-decision seed (battle, turn, kind, action) and the target is re-based
+    to the human's action in the shuffled order. Rationale: the sorted order
+    is a POSITIONAL ARTIFACT — index 0 is always "alphabetically first",
+    and the human target sits there ~50% of the time (measured), so a fixed
+    "always slot 0" net clears the chance gate without learning (the fake
+    S4.3 PASS). In the real game a player's menu order is meaningless, so
+    the net must select by action IDENTITY (its embeddings), not position.
+    The shuffle is uniform over positions, which also makes the constant-
+    index baseline honest (~1/|list| = chance).
 
 Capped at the registry's MAX_ACTIONS (12) — the list is built to fit.
 """
 from __future__ import annotations
 
+import random as _random
+import zlib
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -78,12 +89,36 @@ def _revealed_moves(ctx: Dict) -> List[str]:
     return list((blk or {}).get("moves", []) or [])
 
 
-def decision_actions(ctx: Dict, dec: Decision) -> Tuple[List[Dict], int]:
+def _stable_seed(*parts: object) -> int:
+    """A process-stable 32-bit seed. (Builtin ``hash()`` is salted per
+    process and would make the shuffle order non-reproducible across runs.)"""
+    return zlib.crc32("|".join(str(p) for p in parts).encode("utf-8")) & 0xFFFFFFFF
+
+
+def _shuffle_actions(acts: List[Dict], target: int,
+                     seed: Optional[int]) -> Tuple[List[Dict], int]:
+    """D70: permute the action list (deterministic per-decision seed) and re-base
+    the target to the human's action in the shuffled order. Removes the
+    alphabetical positional prior (index 0 = 'alphabetically first') that let
+    a fixed-action net clear the chance gate without learning."""
+    if seed is None or len(acts) < 2:
+        return acts, target
+    idx = list(range(len(acts)))
+    _random.Random(seed).shuffle(idx)
+    return [acts[i] for i in idx], idx.index(target)
+
+
+def decision_actions(ctx: Dict, dec: Decision,
+                     order_seed: Optional[int] = None) -> Tuple[List[Dict], int]:
     """The decision's D60 action list + the human's target index in it.
 
     ``ctx`` is the FINAL (turn-t) context snapshot — the state at which the
     decision is made. Returns ``(actions, target)`` with ``target`` a legal
     position (the human's action is in the list by construction).
+
+    ``order_seed`` (D70): when given, the final list is permuted with that
+    seed and the target re-based — see :func:`_shuffle_actions`. ``build_samples``
+    always passes one; direct calls without a seed keep the sorted order.
     """
     if dec.kind == "switch":
         bench = _alive_bench(ctx)[:MAX_ACTIONS]
@@ -92,11 +127,11 @@ def decision_actions(ctx: Dict, dec: Decision) -> Tuple[List[Dict], int]:
         want = _to_id(dec.action)
         for i, s in enumerate(bench):
             if _to_id(s) == want:
-                return acts, i
+                return _shuffle_actions(acts, i, order_seed)
         # the switched-in mon is NOT in the alive bench (should not happen — a
         # post-faint switch-in comes from a live bench); keep it legal anyway
         acts.append({"kind": "switch", "species": dec.action})
-        return acts, len(acts) - 1
+        return _shuffle_actions(acts, len(acts) - 1, order_seed)
 
     # move decision
     from net.encoder import _to_id
@@ -115,16 +150,25 @@ def decision_actions(ctx: Dict, dec: Decision) -> Tuple[List[Dict], int]:
         if len(acts) >= MAX_ACTIONS:
             break
         acts.append({"kind": "switch", "species": s})
-    return acts, target
+    return _shuffle_actions(acts, target, order_seed)
 
 
 def build_samples(trace: BattleTrace, vocabs: Vocabs,
                   max_decisions: int = 40) -> List[Sample]:
-    """All p1-POV, legal decisions of one replayed battle -> BC samples.
+    """All p1-POV, legal, NON-DEGENERATE decisions of one battle -> BC samples.
 
     Only replayed battles (``skipped is None``) and only decisions the corpus
     already verified legal (``dec.legal``) — illegal human actions (the ~0.4%)
     are not learnable and are excluded, matching the S4.0 gate's legality bar.
+
+    D70(B) — degenerate decisions are DROPPED: a decision with exactly ONE
+    option of the target's kind (one revealed move / one benched mon) puts
+    the target at a constant index and carries no selection signal (it only
+    trains the action-type prior, which the switch-rate gate already enforces).
+    This is the honest bar given the corpus limit: public Showdown replays
+    carry NO ``|request|`` (verified 2026-11-18 against the PS replay API and
+    1,000 metamon-raw-replays gen9ou rows), so the full 4-move set is
+    unrecoverable and the action list = revealed moves + the human's move.
     """
     if trace.skipped is not None:
         return []
@@ -136,8 +180,16 @@ def build_samples(trace: BattleTrace, vocabs: Vocabs,
         if dec.turn < 1 or dec.turn > len(seq_ctx):
             continue  # no turn-start snapshot for this decision
         ctx_final = seq_ctx[dec.turn - 1]
-        actions, target = decision_actions(ctx_final, dec)
+        # D70: deterministic per-decision order shuffle (identity-based, not
+        # positional, action selection).
+        order_seed = _stable_seed(trace.battle_id, dec.turn, dec.kind, dec.action)
+        actions, target = decision_actions(ctx_final, dec, order_seed=order_seed)
         if target >= len(actions) or target >= MAX_ACTIONS:
+            continue
+        # D70(B): keep only decisions with a real choice of the target's kind
+        # (>= 2 options), so the target index VARIES and the net has to select.
+        n_kind = sum(1 for a in actions if a.get("kind") == dec.kind)
+        if n_kind < 2:
             continue
         seq = [encode_context(ctx, vocabs, actions) for ctx in seq_ctx[:dec.turn]]
         samples.append(Sample(

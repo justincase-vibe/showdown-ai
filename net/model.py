@@ -31,6 +31,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .registry import (
     GLOBAL_DIM,
@@ -54,6 +55,17 @@ GRU_DIM = 512
 GRU_LAYERS = 4
 #: policy / value head hidden width.
 HEAD_DIM = 256
+#: D70 pointer-head intent width (the state->intent vector the per-action
+#: embeddings are scored against).
+INTENT_DIM = 64
+#: D70 pointer-head temperature (logit scale). Cosine-similarity logits live in
+#: [-1, 1]; multiplying by LOGIT_SCALE bounds them to [-LOGIT_SCALE, +LOGIT_SCALE]
+#: so the cross-entropy is BOUNDED and well-conditioned. The raw bilinear head
+#: had UNBOUNDED dot-product logits, so a confident-wrong prediction exploded the
+#: S4.2 overfit loss (4.7 / 13.8). A max logit gap of 2*LOGIT_SCALE is still far
+#: more than softmax needs to push the target probability to ~1.0 (SCALE=8 -> gap
+#: 16 -> p_target ~ 1.0), so the net can still memorize (loss -> 0).
+LOGIT_SCALE = 8.0
 
 
 def _masked_softmax(logits: torch.Tensor, mask: Optional[torch.Tensor]) -> torch.Tensor:
@@ -161,10 +173,17 @@ class PokeNet(nn.Module):
         # between-layer conditioning the spec asks for).
         self.gru_norm = nn.LayerNorm(GRU_DIM)
 
-        self.policy_head = nn.Sequential(
+        # D70: identity-aware (pointer) policy head. logits[i] = score(state,
+        # action_i), so the net selects the correct action by IDENTITY
+        # regardless of its position in the (shuffled) action list. The old
+        # head (Linear(h)->MAX_ACTIONS) only saw a POOLED action vector, so it
+        # could learn state->position but NOT "use Ice Beam wherever it sits"
+        # — structurally unable to do identity-based action selection.
+        self.policy_intent = nn.Sequential(
             nn.Linear(GRU_DIM, HEAD_DIM), nn.ReLU(),
-            nn.Linear(HEAD_DIM, MAX_ACTIONS),
+            nn.Linear(HEAD_DIM, INTENT_DIM),
         )
+        self.policy_act_proj = nn.Linear(action_dim, INTENT_DIM)
         self.value_head = nn.Sequential(
             nn.Linear(GRU_DIM, HEAD_DIM), nn.ReLU(),
             nn.Linear(HEAD_DIM, 1), nn.Sigmoid(),
@@ -247,7 +266,28 @@ class PokeNet(nn.Module):
         # state the primary signal and lets the GRU contribute only the temporal
         # DELTA (``g``); this is what lets the net state-condition at all.
         h = self.gru_norm(g + x)
-        logits = self.policy_head(h)                                 # (B,T,A)
+        # D70: pointer head — score each action by its identity against the
+        # state intent (position-independent action selection, so the shuffled
+        # action order cannot be shortcut and the net must pick the right move
+        # by what it IS, not where it sits).
+        act_emb = torch.cat([
+            self.emb_action_kind(b["action_kind"]),   # (B,T,A,16)
+            self.emb_move_g(b["action_move"]),        # (B,T,A,E)
+            self.emb_species_g(b["action_species"]),  # (B,T,A,E)
+        ], dim=-1)                                     # (B,T,A,action_dim)
+        act_p = self.policy_act_proj(act_emb)          # (B,T,A,INTENT)
+        intent = self.policy_intent(h)                 # (B,T,INTENT)
+        # Normalized scaled dot-product (standard attention scoring): score each
+        # action by the COSINE similarity between the state intent and the
+        # action's identity embedding, then scale by LOGIT_SCALE. Normalizing both
+        # factors to unit norm keeps the logits BOUNDED ([-LOGIT_SCALE, LOGIT_SCALE]),
+        # which is what makes the cross-entropy finite and the gradient well-
+        # conditioned (the raw bilinear head's unbounded logits blew up the S4.2
+        # overfit loss). Selection is still purely by action IDENTITY — position-
+        # independent — so the D70 order shuffle cannot be shortcut.
+        intent = F.normalize(intent, dim=-1)
+        act_p = F.normalize(act_p, dim=-1)
+        logits = torch.einsum("bti,btai->bta", intent, act_p) * LOGIT_SCALE  # (B,T,A)
         value = self.value_head(h)                                   # (B,T,1)
         prob = _masked_softmax(logits, b.get("action_mask"))
         return {"logits": logits, "value": value, "prob": prob}

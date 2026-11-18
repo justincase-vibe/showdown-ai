@@ -33,7 +33,8 @@ from net import (
     overfit_train,
     samples_to_batch,
 )
-from net.batch import Sample, _alive_bench, decision_actions
+from net.batch import (Sample, _alive_bench, _shuffle_actions, build_samples,
+                       decision_actions)
 import net.bc as bc
 from net.tests.test_s41 import make_ctx, make_vocabs
 from corpus.trajectories import Decision
@@ -299,6 +300,76 @@ def test_switch_decision_action_list_is_the_alive_bench():
     assert all(a["kind"] == "switch" for a in acts)
     assert {a["species"] for a in acts} == {"Dragonite", "Volcarona"}
     assert acts[target]["species"] == "Volcarona"
+
+
+def test_build_samples_drops_degenerate_decisions():
+    """D70(B): a decision with exactly ONE option of the target's kind puts the
+    target at a constant index (the net can only learn a fixed action — the
+    fake-PASS failure mode). Such samples must be DROPPED; a decision with >=2
+    options of the kind must be kept."""
+    base = _ctx_own()
+
+    class _T:
+        def __init__(self, ctx, decs):
+            self.battle_id = "deg"
+            self.skipped = None
+            self.context_seq = [ctx]
+            self.decisions = decs
+
+    # active mon with NO revealed moves, human uses 'outrage' -> the move list
+    # is exactly [outrage] (+ bench switches) -> degenerate -> dropped
+    ctx1 = copy.deepcopy(base)
+    ctx1["own"]["p1a"]["moves"] = []
+    t1 = _T(ctx1, [Decision(turn=1, pov="p1", kind="move", action="outrage",
+                            species="garchomp", legal=True)])
+    # one revealed move + the human's OTHER move -> two move options -> kept
+    ctx2 = copy.deepcopy(base)
+    ctx2["own"]["p1a"]["moves"] = ["earthquake"]
+    t2 = _T(ctx2, [Decision(turn=1, pov="p1", kind="move", action="icebeam",
+                            species="garchomp", legal=True)])
+
+    vocabs = make_vocabs(make_ctx())
+    assert build_samples(t1, vocabs) == []
+    assert len(build_samples(t2, vocabs)) == 1
+
+
+def test_order_shuffle_is_deterministic_and_target_follows_human():
+    """D70: the per-decision order shuffle must be reproducible (same seed ->
+    same permutation) and the target must ALWAYS land on the human's action,
+    wherever the permutation puts it."""
+    acts = [{"kind": "move", "move": "earthquake"},
+            {"kind": "move", "move": "icebeam"},
+            {"kind": "switch", "species": "volcarona"}]
+    s1, t1 = _shuffle_actions(acts, 1, 12345)
+    s2, t2 = _shuffle_actions(acts, 1, 12345)
+    assert s1 == s2 and t1 == t2                        # deterministic per seed
+    assert s1[t1] == acts[1]                            # target follows the human's action
+    orders = set()
+    for seed in range(6):
+        s, t = _shuffle_actions(acts, 1, seed)
+        assert s[t] == acts[1]
+        orders.add(tuple(a["move"] if a["kind"] == "move" else a["species"] for a in s))
+    assert len(orders) >= 2                             # seeds actually vary the order
+
+
+def test_build_samples_target_is_human_action_after_shuffle():
+    """D70: end-to-end through build_samples, the shuffled target index must
+    still point at the human's move (not a stale position)."""
+    base = _ctx_own()
+    ctx = copy.deepcopy(base)
+    ctx["own"]["p1a"]["moves"] = ["earthquake"]
+
+    class _T:
+        battle_id = "shuf"
+        skipped = None
+        context_seq = [ctx]
+        decisions = [Decision(turn=1, pov="p1", kind="move", action="icebeam",
+                              species="garchomp", legal=True)]
+
+    samples = build_samples(_T(), make_vocabs(make_ctx()))
+    assert len(samples) == 1
+    s = samples[0]
+    assert s.actions[s.target]["move"] == "icebeam"    # target = the human's move
 
 
 def test_own_side_move_used_populates_moves_used():
