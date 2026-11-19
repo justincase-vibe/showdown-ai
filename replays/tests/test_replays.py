@@ -126,6 +126,30 @@ def test_save_dedup_by_id(tmp_path):
     assert lib.fetch_last(10)[0]["id"] == "gen9ou-1"
 
 
+def test_save_dedupes_recapture_even_with_new_timestamp(tmp_path):
+    # re-capturing the SAME battle (identical id+log, fresh ts) must dedup —
+    # the key excludes ts by design
+    lib = ReplayLibrary(str(tmp_path))
+    lib.save(_rec(FakeBattle(tag="gen9ou-1"), ts="2026-01-01T00:00:00Z"))
+    again = lib.save(_rec(FakeBattle(tag="gen9ou-1"), ts="2026-02-02T00:00:00Z"))
+    assert again["deduped"] is True
+    assert lib.count() == 1
+
+
+def test_save_keeps_same_id_different_log(tmp_path):
+    # D95.1: the fork's battle tag is a per-server counter — two servers CAN
+    # issue the same tag for different concurrent battles. Both must be kept.
+    lib = ReplayLibrary(str(tmp_path))
+    lib.save(_rec(FakeBattle(tag="battle-gen9ou-7",
+                             log="|turn|1\n|move|p1a|tackle\n|win|p1a")))
+    out = lib.save(_rec(FakeBattle(tag="battle-gen9ou-7",
+                                   log="|turn|1\n|move|p1a|flamethrower\n|win|p2a")))
+    assert out["deduped"] is False
+    assert lib.count() == 2
+    assert {r["log"].split("\n")[1] for r in lib.fetch_last(2)} == {
+        "|move|p1a|tackle", "|move|p1a|flamethrower"}
+
+
 def test_save_requires_id(tmp_path):
     lib = ReplayLibrary(str(tmp_path))
     with pytest.raises(ValueError):

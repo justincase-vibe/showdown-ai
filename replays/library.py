@@ -12,9 +12,13 @@ Storage (all under one root, default ``<project>/runs/replays``, gitignored):
 Design (long-term):
   * **Thread-safe by one lock** — the P4/P5 trainers save from N battle threads
     concurrently; append + index update are atomic under it.
-  * **Dedup by battle id** — a battle tag is unique; re-saving the same battle
-    is a no-op (returns the existing path), so a crashed+retried run can never
-    double-count a battle in the library or the index.
+  * **Dedup by (id + log)** (sha1, D95.1) — re-saving the SAME battle is a
+    no-op (a crashed+retried run can't double-count it; the key is stable even
+    though ``ts`` differs between captures), but TWO DIFFERENT battles that
+    happen to share an id are BOTH kept. (The fork's battle room ids —
+    ``battle-<fmt>-N`` — come from a PER-SERVER counter
+    (``server/rooms.ts::prepBattleRoom``), so two pool servers CAN issue the
+    same id for concurrent battles; id-only dedup silently dropped one of them.)
   * **Fetch is pure read** — never mutates; safe to call from the GUI while a
     training run is still appending.
   * **No pruning policy yet** — open decision #4 (save-all vs top-ELO-only +
@@ -23,6 +27,7 @@ Design (long-term):
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -50,17 +55,18 @@ class ReplayLibrary:
 
     # ── save ───────────────────────────────────────────────────────────────
     def save(self, record: dict) -> Dict[str, Any]:
-        """Append ONE record (dedup by id). Returns ``{"path", "offset",
-        "size", "deduped"}`` — the offset/size of the record's line."""
+        """Append ONE record (dedup by content hash). Returns ``{"path",
+        "offset", "size", "deduped"}`` — the offset/size of the record's line."""
         # sanitize the formatid — it becomes a FILENAME (no traversal / odd chars)
         fid = re.sub(r"[^A-Za-z0-9_-]", "_", str(record.get("formatid") or "unknown"))
         rid = str(record.get("id") or "")
         if not rid:
             raise ValueError("ReplayLibrary.save: record has no 'id'")
         line = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
+        key = self._record_key(rid, str(record.get("log") or ""))
         path = self.path(fid)
         with self._lock:
-            if any(e["id"] == rid for e in self._index):
+            if any(e.get("key") == key for e in self._index):
                 return {"path": str(path), "offset": -1, "size": len(line),
                         "deduped": True}
             self.root.mkdir(parents=True, exist_ok=True)
@@ -68,7 +74,7 @@ class ReplayLibrary:
                 fh.seek(0, os.SEEK_END)
                 offset = fh.tell()
                 fh.write(line)
-            self._index.append(self._index_entry(rid, offset, len(line), fid, record))
+            self._index.append(self._index_entry(rid, offset, len(line), fid, record, key))
             self._write_index()
         return {"path": str(path), "offset": offset, "size": len(line),
                 "deduped": False}
@@ -147,9 +153,17 @@ class ReplayLibrary:
         return len(entries)
 
     @staticmethod
-    def _index_entry(rid: str, offset: int, size: int, fid: str, rec: dict) -> Dict[str, Any]:
+    def _record_key(rid: str, log: str) -> str:
+        """The dedup identity of a record: (id + log). Stable across re-captures
+        (``ts`` excluded), yet distinguishes two different battles that happen
+        to share an id (D95.1)."""
+        return hashlib.sha1((rid + "\x00" + log).encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _index_entry(cls, rid: str, offset: int, size: int, fid: str, rec: dict,
+                     key: Optional[str] = None) -> Dict[str, Any]:
         entry: Dict[str, Any] = {"id": rid, "offset": offset, "size": size,
-                                "formatid": fid, "ts": rec.get("ts")}
+                                "formatid": fid, "ts": rec.get("ts"), "key": key}
         for k in ("rating", "elo", "winner_side", "bots"):
             entry[k] = rec.get(k)
         return entry
@@ -172,8 +186,10 @@ class ReplayLibrary:
                         except Exception:           # partial/corrupt line: skip it
                             offset += len(raw)
                             continue
+                        rid = str(rec.get("id", f"{fid}-{offset}"))
                         entries.append(self._index_entry(
-                            str(rec.get("id", f"{fid}-{offset}")), offset, len(raw), fid, rec))
+                            rid, offset, len(raw), fid, rec,
+                            self._record_key(rid, str(rec.get("log") or ""))))
                     offset += len(raw)
         return entries
 
