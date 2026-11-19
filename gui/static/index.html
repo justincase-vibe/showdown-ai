@@ -137,12 +137,35 @@
         </div>
         <!-- BC / imitation specific -->
         <div id="bc-only" class="grid" style="margin-top:6px;display:none">
-          <div><label>battles</label><input name="n_battles" type="number" min="1" value="50"></div>
+          <div class="full"><label>replay source</label>
+            <select id="bc-source">
+              <option value="fixture" selected>Fixture file (a replay JSONL path)</option>
+              <option value="library">Replay library (one-click: top-ELO N / last N)</option>
+            </select>
+          </div>
+          <div id="bc-fixture-row" class="full"><label>fixture (replay JSONL path)</label>
+            <input name="fixture" value="bot/data/replays/gen9ou.jsonl" size="40"></div>
+          <div id="bc-lib-row" class="full" style="display:none">
+            <div class="grid">
+              <div><label>selection</label>
+                <select id="replay-order">
+                  <option value="elo" selected>Top ELO (strongest games first)</option>
+                  <option value="last">Most recent</option>
+                </select>
+              </div>
+              <div><label>N replays (one knob — this is also the battle count)</label>
+                <input id="replay-n" type="number" min="1" value="50">
+              </div>
+              <div class="full" style="display:flex;align-items:center;gap:8px">
+                <button id="bpreview" type="button" style="padding:4px 10px;font-size:12px">📜 Preview library</button>
+              </div>
+            </div>
+            <div id="libpreview" class="hint" style="display:none;margin-top:6px"></div>
+          </div>
+          <div id="bc-battles-row"><label>battles (fixture mode: how many to use)</label><input name="n_battles" type="number" min="1" value="50"></div>
           <div><label>max decisions</label><input name="max_decisions" type="number" min="1" value="40"></div>
           <div><label>heldout frac</label><input name="heldout_frac" type="number" step="any" value="0.2"></div>
           <div><label>batch size</label><input name="batch_size" type="number" min="1" value="24"></div>
-          <div class="full"><label>fixture (replay JSONL path)</label>
-            <input name="fixture" value="bot/data/replays/gen9ou.jsonl" size="40"></div>
           <div class="full"><label>checkpoint name</label>
             <input name="ckpt_name" value="s43_bc_best.pt" size="40"></div>
         </div>
@@ -354,6 +377,51 @@ $("mode-select").onchange = function() {
   $("epochs-in").value = m === "selfplay" ? "2" : "15";
 };
 
+/* ── BC source toggle (D96.1: fixture file vs one-click replay library) ──
+   The new controls have NO form names on purpose: readConfig() would then
+   leak them into EVERY mode's config; they are read explicitly below and
+   folded into the validated shape (replay_source = {n, key}). */
+$("bc-source").onchange = function() {
+  const lib = this.value === "library";
+  $("bc-fixture-row").style.display = lib ? "none" : "";
+  $("bc-lib-row").style.display = lib ? "" : "none";
+  $("bc-battles-row").style.display = lib ? "none" : "";  // one knob: N IS the battle count
+  $("libpreview").style.display = "none";
+};
+
+$("bpreview").onclick = async function() {
+  const btn = $("bpreview"); btn.disabled = true;
+  const el = $("libpreview");
+  el.style.display = "block"; el.style.color = "var(--dim)";
+  el.textContent = "loading…";
+  const order = $("replay-order").value === "elo" ? "top" : "last";
+  let n = Number($("replay-n").value);
+  if (!Number.isInteger(n) || n < 1) n = 50;
+  n = Math.min(n, 500);   // the API caps at 500 anyway
+  try {
+    const r = await fetch("/api/replays?order=" + order + "&n=" + n);
+    const j = await r.json();
+    if (!r.ok) { el.style.color = "#ffb4b4"; el.textContent = "FAILED: " + (j.detail || "?"); return; }
+    const s = j.summary || {};
+    const fmts = s.per_format ? " · " + Object.entries(s.per_format).map(([f, c]) => f + ": " + c).join(", ") : "";
+    let html = "<b>" + (s.total ?? 0) + "</b> battle(s) in library" + fmts + "<br>";
+    const bs = j.battles || [];
+    if (!bs.length) {
+      html += "<span style='color:var(--warn)'>EMPTY — run self-play first to fill the library</span>";
+    } else {
+      html += bs.slice(0, 10).map(b =>
+        "· " + (b.id || "?") + " " + (b.formatid || "") +
+        (b.elo !== null && b.elo !== undefined ? " elo=" + b.elo : "") +
+        (b.ts ? " " + String(b.ts).replace("T", " ").slice(0, 16) : "")
+      ).join("<br>") + (bs.length > 10 ? "<br>… +" + (bs.length - 10) + " more" : "");
+    }
+    el.innerHTML = html;
+  } catch (e) {
+    el.style.color = "#ffb4b4"; el.textContent = "preview failed: " + e;
+  }
+  btn.disabled = false;
+};
+
 /* ── control actions ──────────────────────────────────────────────── */
 function readConfig() {
   const f = $("cfg"), cfg = {};
@@ -490,9 +558,31 @@ $("bplaystop").onclick = function() {
   });
 };
 
+/* D96.1: fold the BC source toggle into the validated config shape.
+   Library mode posts {replay_source: {n, key}} and DROPS 'fixture' (the
+   validator treats fixture + replay_source as exactly-one-of — even an empty
+   fixture string would 400) and 'n_battles' (the selection size IS the count).
+   Fixture mode is byte-identical to the pre-D96.1 shape. */
+function buildStartConfig() {
+  const cfg = readConfig();
+  if ($("mode-select").value === "bc" && $("bc-source").value === "library") {
+    const n = Number($("replay-n").value);
+    if (!Number.isInteger(n) || n < 1) {
+      $("errbox").style.display = "block";
+      $("errbox").textContent = "library mode: N must be a whole number >= 1";
+      return null;
+    }
+    cfg.replay_source = { n: n, key: $("replay-order").value };
+    delete cfg.fixture;
+    delete cfg.n_battles;
+  }
+  return cfg;
+}
 async function onStart() {
   const btn = $("bstart"); btn.disabled = true;
-  const res = await post("/api/train/start", { config: readConfig() });
+  const cfg = buildStartConfig();
+  if (cfg === null) { btn.disabled = false; return; }
+  const res = await post("/api/train/start", { config: cfg });
   btn.disabled = false;
   if (!res.ok) {
     $("errbox").style.display = "block";

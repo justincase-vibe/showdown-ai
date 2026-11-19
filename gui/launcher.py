@@ -96,7 +96,7 @@ def validate_bc_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     ``out_dir`` is intentionally NOT a field: the entry always checkpoints
     into the run dir (per-run separation, like the self-play entry)."""
     d = d or {}
-    problems: List[str] = []
+    problems: list = []
     _pos_int(d.get("max_decisions"), "max_decisions", problems)
     _pos_int(d.get("epochs"), "epochs", problems)
     _pos_int(d.get("batch_size"), "batch_size", problems)

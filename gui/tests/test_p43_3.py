@@ -184,6 +184,31 @@ def test_bc_neither_fixture_nor_source_400(client):
     assert "fixture" in r.json()["detail"]
 
 
+def test_start_trainer_bc_replay_source_config_json(client, runs, monkeypatch):
+    """D96.1 dashboard contract: exactly what the one-click button posts (a
+    replay_source config with NO fixture and NO n_battles) passes validation,
+    and start_trainer writes a config.json carrying replay_source — with
+    n_battles defaulted to the selection size — BEFORE spawn. Popen is faked,
+    so this is fast and nothing is actually launched."""
+    class _FakeProc:
+        pid = 4242
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda *a, **kw: _FakeProc())
+    cfg = bc_cfg(fixture=None)
+    del cfg["n_battles"]                       # one knob: the selection size
+    cfg["replay_source"] = {"n": 5, "key": "elo"}
+    r = client.post("/api/train/start", json={"config": cfg})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["started"] is True and body["run_dir"]
+    rd = Path(body["run_dir"])
+    assert (rd / "config.json").is_file() and (rd / "trainer.log").is_file()
+    on_disk = json.loads((rd / "config.json").read_text(encoding="utf-8"))
+    assert on_disk["mode"] == "bc"
+    assert on_disk["replay_source"] == {"n": 5, "key": "elo"}
+    assert on_disk["fixture"] is None          # carried as null, never a path
+    assert on_disk["n_battles"] == 5           # defaulted to the selection size
+
+
 def test_api_replays_lists_library(client):
     """GET /api/replays returns 200 + the library summary + a LIGHT metadata
     list (never logs). Works whether the library is empty or populated."""
