@@ -39,81 +39,87 @@ def test_slotpool_initial_state():
 
 
 def test_slotpool_acquire_release():
-    async def main():
-        p = EnvSlotPool([100, 110], 3)
-        s1 = await p.acquire()
-        assert p.in_use == 1 and p.free == 5
-        await p.release(s1)
-        assert p.in_use == 0 and p.free == 6
-    asyncio.run(main())
+    p = EnvSlotPool([100, 110], 3)
+    s1 = p.acquire()
+    assert p.in_use == 1 and p.free == 5
+    p.release(s1)
+    assert p.in_use == 0 and p.free == 6
 
 
 def test_slotpool_per_server_cap_by_construction():
-    async def main():
-        p = EnvSlotPool([100, 110], 3)          # exactly 3 slots per port
-        held = [await p.acquire() for _ in range(6)]
-        usage = {}
-        for port, _i in held:
-            usage[port] = usage.get(port, 0) + 1
-        assert usage == {100: 3, 110: 3}
-    asyncio.run(main())
+    p = EnvSlotPool([100, 110], 3)          # exactly 3 slots per port
+    held = [p.acquire() for _ in range(6)]
+    usage = {}
+    for port, _i in held:
+        usage[port] = usage.get(port, 0) + 1
+    assert usage == {100: 3, 110: 3}
 
 
 def test_slotpool_backpressure_blocks_when_full():
-    async def main():
-        p = EnvSlotPool([100, 110], 2)          # max_envs = 4
-        held = [await p.acquire() for _ in range(4)]
-        assert p.free == 0
+    import threading
+    import time
+    p = EnvSlotPool([100, 110], 2)          # max_envs = 4
+    held = [p.acquire() for _ in range(4)]
+    assert p.free == 0
 
-        got = {}
+    got, errs = {}, []
 
-        async def fifth():
-            got["slot"] = await p.acquire()
+    def fifth():
+        try:
+            got["slot"] = p.acquire(timeout=5.0)
+        except Exception as e:              # noqa: BLE001
+            errs.append(e)
 
-        task = asyncio.ensure_future(fifth())
-        await asyncio.sleep(0.05)
-        assert "slot" not in got                 # still blocked (pool is full)
+    t = threading.Thread(target=fifth, daemon=True)
+    t.start()
+    time.sleep(0.2)
+    assert "slot" not in got and not errs   # still blocked (pool is full)
 
-        await p.release(held[0])                 # free exactly one slot
-        await asyncio.wait_for(task, timeout=1.0)
-        assert got["slot"] in p._in_use          # it acquired a real slot
-    asyncio.run(main())
+    p.release(held[0])                      # free exactly one slot
+    t.join(timeout=2.0)
+    assert not t.is_alive() and not errs
+    assert got["slot"] in p._in_use         # it acquired a real slot
+
+
+def test_slotpool_acquire_timeout_raises():
+    p = EnvSlotPool([100], 1)
+    held = p.acquire()
+    try:
+        with pytest.raises(TimeoutError):
+            p.acquire(timeout=0.2)
+    finally:
+        p.release(held)
+    assert p.free == 1 and p.in_use == 0     # timed-out acquire leaked nothing; release is clean
 
 
 def test_slotpool_context_manager_releases_on_exception():
-    async def main():
-        p = EnvSlotPool([100], 3)
-        assert p.free == 3
-        try:
-            async with p.slot():
-                assert p.free == 2
-                raise RuntimeError("boom")
-        except RuntimeError:
-            pass
-        assert p.free == 3                       # released despite the exception
-    asyncio.run(main())
+    p = EnvSlotPool([100], 3)
+    assert p.free == 3
+    try:
+        with p.slot():
+            assert p.free == 2
+            raise RuntimeError("boom")
+    except RuntimeError:
+        pass
+    assert p.free == 3                       # released despite the exception
 
 
 def test_slotpool_release_is_idempotent():
-    async def main():
-        p = EnvSlotPool([100], 2)
-        s = await p.acquire()
-        await p.release(s)
-        await p.release(s)                       # second release must be a no-op
-        assert p.free == 2 and p.in_use == 0
-    asyncio.run(main())
+    p = EnvSlotPool([100], 2)
+    s = p.acquire()
+    p.release(s)
+    p.release(s)                             # second release must be a no-op
+    assert p.free == 2 and p.in_use == 0
 
 
 def test_slotpool_per_server_usage_report():
-    async def main():
-        p = EnvSlotPool([100, 110], 3)
-        for _ in range(3):
-            await p.acquire()
-        usage = p.per_server_usage()
-        assert set(usage.keys()) == {100, 110}
-        assert sum(v["used"] for v in usage.values()) == 3
-        assert all(v["cap"] == 3 for v in usage.values())
-    asyncio.run(main())
+    p = EnvSlotPool([100, 110], 3)
+    for _ in range(3):
+        p.acquire()
+    usage = p.per_server_usage()
+    assert set(usage.keys()) == {100, 110}
+    assert sum(v["used"] for v in usage.values()) == 3
+    assert all(v["cap"] == 3 for v in usage.values())
 
 
 # --- ServerPool (command / health; no real spawn) ---------------------------
@@ -165,12 +171,32 @@ def test_resourcepool_server_cfg_points_at_slot_port():
     assert ":49995/showdown/websocket" in url
 
 
-def test_resourcepool_battle_yields_cfg_and_frees_slot():
+def test_resourcepool_battle_slot_yields_cfg_and_frees():
+    rp = ResourcePool(PoolConfig(n_servers=1, port_base=49970, per_server=2))
+    with rp.battle_slot() as cfg:
+        url = cfg.websocket_url if hasattr(cfg, "websocket_url") else cfg["websocket_url"]
+        assert ":49970/showdown/websocket" in url
+        assert rp.slots.in_use == 1
+    assert rp.slots.in_use == 0              # released after the block
+
+
+def test_resourcepool_battle_slot_releases_on_exception():
+    rp = ResourcePool(PoolConfig(n_servers=1, port_base=49972, per_server=2))
+    try:
+        with rp.battle_slot():
+            raise RuntimeError("battle crashed")
+    except RuntimeError:
+        pass
+    assert rp.slots.in_use == 0
+
+
+def test_resourcepool_async_battle_front():
+    """The GUI's async front (asyncio.to_thread over the thread-based core)."""
     async def main():
-        rp = ResourcePool(PoolConfig(n_servers=1, port_base=49970, per_server=2))
+        rp = ResourcePool(PoolConfig(n_servers=1, port_base=49971, per_server=2))
         async with rp.battle() as cfg:
             url = cfg.websocket_url if hasattr(cfg, "websocket_url") else cfg["websocket_url"]
-            assert ":49970/showdown/websocket" in url
+            assert ":49971/showdown/websocket" in url
             assert rp.slots.in_use == 1
-        assert rp.slots.in_use == 0              # released after the block
+        assert rp.slots.in_use == 0
     asyncio.run(main())

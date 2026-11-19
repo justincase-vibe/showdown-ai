@@ -7,10 +7,14 @@ enforcing the machine's RAM ceiling (default: 8 servers x 3 battles/server =
 
     from pool import PoolConfig, ResourcePool
     pool = ResourcePool(PoolConfig(n_servers=4, per_server=2))
-    pool.start()
-    async with pool.battle() as server_cfg:
+    pool.start()                                        # sync: spawn + wait healthy
+    # thread-per-battle trainer (P4/P5) -- the sync front:
+    with pool.battle_slot() as server_cfg:
         env = ShowdownEnv(server_configuration=server_cfg, ...)
-    pool.shutdown()
+    # the GUI's event loop -- the async front over the SAME core:
+    # async with pool.battle() as server_cfg: ...
+    pool.status()                                       # dict for the GUI
+    pool.shutdown()                                     # sync: tree-kill all servers
 """
 from .config import PoolConfig
 from .slot_pool import EnvSlotPool
