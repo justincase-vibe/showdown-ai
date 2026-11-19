@@ -241,13 +241,29 @@ def create_app(runs_dir: Optional[Path] = None) -> FastAPI:
                     continue
                 for p in sorted(ckpt_dir.glob("*.pt")):
                     st = p.stat()
+                    # D97: BC runs checkpoint into runs/ too — the old
+                    # type="selfplay" hardcode mislabeled BC checkpoints and hid
+                    # their top1/verdict/n_battles. Read the meta exactly like the
+                    # scratch branch (same field names) so a BC checkpoint in
+                    # runs/ is indistinguishable from one in scratch/.
+                    meta_path = p.with_name(p.name + ".meta.json")
+                    meta = {}
+                    if meta_path.is_file():
+                        try:
+                            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                        except Exception:
+                            pass
                     results.append({
                         "path": str(p.relative_to(root)),
                         "name": p.name,
                         "size_mb": round(st.st_size / 1e6, 1),
                         "modified": _time.strftime("%Y-%m-%d %H:%M", _time.gmtime(st.st_mtime)),
-                        "type": "selfplay",
+                        "type": "bc" if "bc" in p.name else (
+                            "selfplay" if ("selfplay" in p.name or "round" in p.name) else "unknown"),
                         "run_id": run_dir.name,
+                        "n_battles": meta.get("n_battles"),
+                        "verdict": meta.get("verdict_pass"),
+                        "top1": (meta.get("final") or {}).get("top1_acc"),
                     })
         return {"checkpoints": results}
 
