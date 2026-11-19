@@ -454,7 +454,8 @@ def status(runs_dir: Optional[Path] = None, metrics_tail: int = 5) -> Dict[str, 
     runs = Path(runs_dir) if runs_dir is not None else default_runs_dir()
     out: Dict[str, Any] = {
         "active": False, "state": None, "run_id": None, "pid": None,
-        "round": None, "rounds_planned": None, "heartbeat_age_s": None,
+        "round": None, "rounds_planned": None, "battles_done": None,
+        "heartbeat_age_s": None,
         "error": None, "stop_requested": False,
         "metrics_tail": [], "checkpoints": [], "cuda_available": cuda_available(),
     }
@@ -472,6 +473,8 @@ def status(runs_dir: Optional[Path] = None, metrics_tail: int = 5) -> Dict[str, 
         "pid": st.get("pid"),
         "round": st.get("round"),
         "rounds_planned": st.get("rounds_planned"),
+        # self-play / league runs track progress by battles_done (round stays 0)
+        "battles_done": st.get("battles_done"),
         "heartbeat_age_s": runstate.heartbeat_age_s(rd),
         "error": st.get("error"),
         "stop_requested": bool(st.get("stop_requested")),

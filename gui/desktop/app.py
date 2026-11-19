@@ -532,13 +532,17 @@ class DesktopApp:
         run_id = st.get("run_id") or ""
         rnd = st.get("round")
         planned = st.get("rounds_planned")
+        battles_done = st.get("battles_done")
 
         status_text = f"Status: {state}"
         if active:
             status_text += "  ●"
         if run_id:
             status_text += f"  ({run_id})"
-        if rnd is not None and planned is not None:
+        if battles_done is not None:
+            # self-play / league runs track progress by battles_done (round stays 0)
+            status_text += f"  battles {battles_done}" + (f"/{planned}" if planned else "")
+        elif rnd is not None and planned is not None:
             status_text += f"  round {rnd}/{planned}"
         self._status_label.config(text=status_text)
 

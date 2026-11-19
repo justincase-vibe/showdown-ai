@@ -16,9 +16,18 @@ What it does — ONE run:
     (``max_consecutive_errors`` — a dead server must not burn n_battles
     worth of errors).
 
+League extension points (D100):
+  * ``battle_driver_factory`` — ``idx -> battle_driver``. When set, battle
+    ``idx`` is played by the driver the factory returns for it, overriding
+    ``battle_driver``. This is how the league (``league.engine``) fights
+    different checkpoints per battle WITHOUT duplicating the pool / worker /
+    stop / runstate / capture machinery — one run engine, two callers.
+  * ``on_battle`` — ``(idx, result_dict) -> None``, called after EVERY battle
+    finishes (error or not) with the booked result. THE engine-level hook:
+    the DRIVER only plays, the ENGINE records (the league does its ELO
+    bookkeeping here, keyed by ``idx`` — a driver can never bypass it).
+
 Deliberate scope (held, per the user):
-  * **league mechanics** (multi-bot / ELO / pairing) — NOT here; the driver
-    hook (``battle_driver``) is where a league driver slots in later;
   * **PPO training** — this engine COLLECTS (battles + replay capture); the
     agent/training wiring is the next step and stays out until it's designed.
 
@@ -43,6 +52,9 @@ from replays import ReplayLibrary, make_record
 #: the battle driver's signature:
 #:   (server_cfg, fmt, seed, vocabs, max_steps, on_finish) -> (a1_won, a2_won, n_steps)
 BattleDriver = Callable[..., Any]
+
+#: the per-battle driver factory's signature (D100): idx -> BattleDriver
+BattleDriverFactory = Callable[[int], BattleDriver]
 
 
 def _port_of(server_cfg: Any) -> Optional[str]:
@@ -107,13 +119,25 @@ class SelfPlayRun:
                  battle_driver: Optional[BattleDriver] = None,
                  library: Optional[ReplayLibrary] = None,
                  pool: Optional[Any] = None,
-                 log: Optional[Callable[[str], None]] = None):
+                 log: Optional[Callable[[str], None]] = None,
+                 battle_driver_factory: Optional[BattleDriverFactory] = None,
+                 on_battle: Optional[Callable[[int, Dict[str, Any]], None]] = None):
         self.cfg = cfg
         self.run_dir = Path(run_dir) if run_dir is not None else None
         # injectable for hermetic fast tests (a fake driver never touches net,
         # a fake pool never spawns node processes)
         self._driver = battle_driver or play_battle_on
         self._need_vocabs = battle_driver is None
+        # D100: per-battle driver (idx -> driver); when set it OVERRIDES
+        # ``self._driver`` (the league uses it to fight different checkpoints
+        # per battle). Note: ``_need_vocabs`` stays True unless an explicit
+        # single driver was injected — a factory's real drivers (league) need
+        # vocabs too.
+        self._driver_factory = battle_driver_factory
+        # D100: the engine-level result hook (see module docstring). Called
+        # after EVERY battle (error or not) with (idx, result) — a hook bug
+        # must not kill the run.
+        self._on_battle = on_battle
         # capture target: an injected library wins; otherwise BUILD one from
         # the config (save_replays=True) — the hook must never be a silent
         # no-op when the user asked for replay capture (caught by test).
@@ -257,7 +281,9 @@ class SelfPlayRun:
 
         try:
             with self.pool.battle_slot() as server_cfg:
-                a1_won, a2_won, steps = self._driver(
+                driver = (self._driver_factory(idx) if self._driver_factory is not None
+                          else self._driver)
+                a1_won, a2_won, steps = driver(
                     server_cfg, fmt=self.cfg.battle_format,
                     seed=self.cfg.seed + idx, vocabs=self._driver_vocabs(),
                     max_steps=self.cfg.max_steps, on_finish=on_finish)
@@ -279,6 +305,11 @@ class SelfPlayRun:
         with self._lock:
             self._results.append(result)
             done = len(self._results)
+        if self._on_battle is not None:
+            try:
+                self._on_battle(idx, result)
+            except Exception as e:  # noqa: BLE001 — a hook bug must not kill the run
+                self.log(f"[run] WARNING: on_battle hook error: {type(e).__name__}: {e}")
         self._heartbeat(battle=idx, note="done" if result["error"] is None else "error")
         self._status(battles_done=done)
         self.log(f"[run] battle {idx}: a1={result['a1_won']} a2={result['a2_won']} "

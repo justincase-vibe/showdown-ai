@@ -74,6 +74,48 @@ def test_update_result_draw(reg):
     assert reg.get("bob").elo == ELO_INITIAL
 
 
+def test_elo_magnitudes_standard(reg):
+    """Exact standard ELO magnitudes (K=32), pinned against the formula.
+
+    A=1500 vs B=1700: E_A = 1/(1+10^(200/400)) = 0.24025...
+      A wins -> A +round(32*(1-E_A)) = +24,  B -24
+      B wins -> A +round(32*(0-E_A)) = -8,   B +8   (upset reward)
+      draw   -> A +round(32*(0.5-E_A)) = +8, B -8
+    The OLD loss branch used ``-K*(1-E_A)`` (giving -24/+24 instead of
+    -8/+8) — the direction tests above cannot catch that; this one can.
+    """
+    reg.add("a", "a.pt", elo=1500)
+    reg.add("b", "b.pt", elo=1700)
+    reg.update_result("a", "b", winner="a")
+    assert reg.get("a").elo == 1524
+    assert reg.get("b").elo == 1676
+
+
+def test_elo_magnitudes_underdog_win(reg):
+    """An underdog win must pay the upset premium (K*(1-E_underdog))."""
+    reg.add("a", "a.pt", elo=1500)
+    reg.add("b", "b.pt", elo=1700)
+    reg.update_result("a", "b", winner="b")          # b (favorite) wins
+    assert reg.get("a").elo == 1492                    # -8, not -24
+    assert reg.get("b").elo == 1708
+
+    reg.add("c", "c.pt", elo=1700)
+    reg.update_result("a", "c", winner="a")          # a (underdog) wins
+    # a is now 1492 vs c's 1700 -> E_a=0.2319 -> upset premium round(32*0.768)=+25
+    assert reg.get("a").elo == 1492 + 25
+    assert reg.get("c").elo == 1700 - 25
+
+
+def test_elo_draw_unequal_ratings(reg):
+    """A draw between UNEQUAL ratings shifts ELO toward the favorite's
+    expectation (standard ELO: score 0.5 for both)."""
+    reg.add("a", "a.pt", elo=1500)
+    reg.add("b", "b.pt", elo=1700)
+    reg.update_result("a", "b", winner=None)
+    assert reg.get("a").elo == 1508                    # +8
+    assert reg.get("b").elo == 1692                    # -8
+
+
 def test_elo_convergence(reg):
     """A bot that wins repeatedly should climb in ELO; one that loses
     should drop. After 10 wins/losses, the gap should be significant."""

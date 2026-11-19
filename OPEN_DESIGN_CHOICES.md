@@ -10,8 +10,9 @@ Pipeline audited this pass:
 detached → entry main → run → runstate protocol → stop/status` **and** the
 capture path `control/selfplay → pool → battle → replay capture → library`
 **and** the imitation path `resolve fixture (raw|library) → bc.run → verdict →
-checkpoint`. Fast stack green: **109/109** (gui+replays+pool+control, live
-deselected); gui alone **43/43**.
+checkpoint` **and** the league path `league/engine → SelfPlayRun (factory +
+on_battle) → league/driver → PokeAgent + BotRegistry ELO`. Fast stack green:
+**173/173** (gui+replays+pool+control+league, live deselected) as of D100.
 
 ---
 
@@ -67,7 +68,7 @@ revealed-flag shortcut).
 |---|----------|---------|---------|
 | 1 | **GUI framework** | ~~A = extend the existing **web** GUI~~ vs B = **native** desktop | **RESOLVED (2026-11-19): B — native Python GUI (tkinter).** The user explicitly requested a native Python GUI and asked to retire the browser one once it works. See D98 for Phase 1 (control-plane) and the Phase 2 (tkinter) plan. |
 | 2 | **Self-play → capture in GUI** | expose `control/selfplay_main` as a "Self-play (collect)" mode so the library fills from the GUI | **RESOLVED (2026-11-19): FIXED as D98.** `launcher.start_trainer` now routes `selfplay-collect` → `control.selfplay_main`; the server's `api_start` handles it; the fast test stack is green (119/119). The biggest gap (item A2) is closed. |
-| 3 | **Multi-bot model** | league/ELO/pairing vs independent parallel bots | **held** (per your note) — league is the bigger build |
+| 3 | **Multi-bot model** | league/ELO/pairing vs independent parallel bots | **BUILT (2026-11-19, D100):** league infra complete — `league/registry.py` (roster + standard ELO K=32), `league/pairing.py` (round_robin / elo_weighted), `league/driver.py` (checkpoint-vs-checkpoint battle, live-play decision path), `league/engine.py` (pair -> battle -> ELO, reusing `SelfPlayRun` via the `battle_driver_factory` + `on_battle` hooks), `league/league_main.py` (subprocess entry). **Still needs a decision before the first real run:** which checkpoints form the initial roster (the board in section C has 4 candidates) + pairing strategy + whether to expose a "league" mode in the native GUI (not wired yet). An ELO magnitude bug (underdog wins under-rewarded) was found + fixed in this pass. |
 | 4 | **Formats per run** | one format per run vs multiple simultaneously | one for now (simpler, verified) |
 | 5 | **Replay storage** | keep all vs top-ELO only? disk budget? (library has no pruning — ready for either) | keep all for now; add pruning later |
 | 6 | **Server lifetime** | 8 always-on vs start-on-demand | on-demand (saves RAM when idle) |

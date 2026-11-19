@@ -133,6 +133,13 @@ class BotRegistry:
         bb = self.get(b)
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
+        # ``_elo_delta(rating_a, rating_b, score)`` = K*(score - E_a) with
+        # E_a = a's expected score. So the delta is ALWAYS a's gain, computed
+        # with a's ACTUAL score (1.0 win / 0.0 loss / 0.5 draw) — the standard
+        # ELO formula. (The old code used ``-K*(1-E_a)`` for a loss, which
+        # under-rewarded upsets: an underdog win gave +K*E_a's complement
+        # instead of +K*(1-E_a). Magnitudes are pinned by
+        # tests/test_registry.py::test_elo_magnitudes_standard.)
         if winner == a:
             ba.wins += 1
             bb.losses += 1
@@ -140,11 +147,11 @@ class BotRegistry:
         elif winner == b:
             bb.wins += 1
             ba.losses += 1
-            delta = -self._elo_delta(ba.elo, bb.elo, 1.0)
+            delta = self._elo_delta(ba.elo, bb.elo, 0.0)
         else:  # draw
             ba.draws += 1
             bb.draws += 1
-            delta = 0
+            delta = self._elo_delta(ba.elo, bb.elo, 0.5)
 
         ba.elo += delta
         bb.elo -= delta

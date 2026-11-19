@@ -271,3 +271,29 @@ def test_double_start_rejected(tmp_path):
         raise AssertionError("expected double start to raise")
     except RuntimeError:
         pass
+
+
+# ── D100: the per-battle driver factory (the league's extension point) ──────
+def test_driver_factory_used_per_battle(tmp_path):
+    """battle idx i must be played by the factory's driver for i — every idx
+    exactly once (the league fights different checkpoints per pairing)."""
+    holder: dict = {}
+    seen = {"idxs": [], "lk": threading.Lock()}
+
+    def factory(idx: int):
+        base = make_driver(holder)  # a real-signature driver per battle
+
+        def driver(server_cfg, fmt, seed, vocabs, max_steps, on_finish):
+            with seen["lk"]:
+                seen["idxs"].append(idx)
+            return base(server_cfg, fmt, seed, vocabs, max_steps, on_finish)
+        return driver
+
+    run = SelfPlayRun(_cfg(tmp_path, n_battles=6, save_replays=False),
+                      battle_driver_factory=factory, pool=FakePool(slots=3))
+    holder["run"] = run
+    run.start()
+    s = run.wait()
+    run.shutdown()
+    assert s["state"] == "completed" and s["done"] == 6
+    assert sorted(seen["idxs"]) == [0, 1, 2, 3, 4, 5]   # each battle, exactly once
