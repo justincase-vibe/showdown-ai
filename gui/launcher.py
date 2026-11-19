@@ -138,7 +138,7 @@ def validate_bc_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     # the selection size (a one-click "imitate the top-N" needs only ONE knob).
     nb = d.get("n_battles", rs_n if replay_source is not None else None)
     _pos_int(nb, "n_battles", problems)
-    ckpt = d.get("ckpt_name")  # None = auto-generate ({date}_bc_{n}b.pt)
+    ckpt = d.get("ckpt_name")  # None = auto-generate ({n}b_bc_{id}.pt, D99)
     if ckpt is not None:
         if not isinstance(ckpt, str) or not ckpt.strip() or "/" in ckpt or "\\" in ckpt:
             problems.append(f"ckpt_name must be a plain file name or null (got {ckpt!r})")

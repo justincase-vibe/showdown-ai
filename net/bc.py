@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import random
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -554,9 +555,12 @@ def run(n_battles: int = 50, fixture: str = "bot/data/replays/gen9ou.jsonl",
     checkpoint (``{\"stopped\": True, \"phase\": \"replay\"}``); a stop during
     TRAIN keeps the work so far (checkpoint saved, ``stopped: True`` in the
     metadata). Both ``None`` = the old synchronous CLI behavior."""
-    # D91: default checkpoint name = {date}_bc_{n}b.pt (date, type, battles)
+    # D99: default checkpoint name = {n}b_{type}_{id}.pt (battles, type, unique id)
+    # No date — avoids same-day collisions; the id is a 4-char uuid4 hex.
+    # League-friendly: stable, referenceable, sortable by battle count.
     if ckpt_name is None:
-        ckpt_name = time.strftime("%Y-%m-%d") + f"_bc_{n_battles}b.pt"
+        short_id = uuid.uuid4().hex[:4]
+        ckpt_name = f"{n_battles}b_bc_{short_id}.pt"
 
     t0 = time.time()
     log(f"== S4.3 BC warm-start (increment 1) ==")
