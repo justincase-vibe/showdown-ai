@@ -45,44 +45,6 @@ def test_live_one_server_smoke():
 # ═══════════════════════════════════════════════════════════════════════════
 #  THE PHASE 0 GATE -- 24 concurrent battles across 8 servers
 # ═══════════════════════════════════════════════════════════════════════════
-def _play_random_vs_random(rp: ResourcePool, fmt: str, seed: int, vocabs, max_steps: int = 200):
-    """One FULL battle (both sides uniformly random -- CPU-only, no net), on
-    one reserved slot. Mirrors ``net.trainer.play_and_collect``'s loop with a
-    random policy on BOTH agents (the legality path is exercised end to end).
-    Returns ``(a1_won, a2_won, n_steps)``."""
-    import logging
-    import numpy as np
-    from net.env import ShowdownEnv, StrongTeamBuilder, random_action, action_to_pe
-
-    with rp.battle_slot() as server_cfg:
-        env = ShowdownEnv(battle_format=fmt, team=StrongTeamBuilder(fmt, seed=seed),
-                          server_configuration=server_cfg, vocabs=vocabs,
-                          log_level=logging.ERROR)
-        a1, a2 = env.possible_agents
-        n_steps = 0
-        try:
-            obs, _info = env.reset()
-            for _ in range(max_steps):
-                if env.battle1 is not None and env.battle1.finished:
-                    break
-                actions = {a1: np.int64(-2), a2: np.int64(-2)}
-                if env.agent1_to_move:
-                    act = random_action(env.battle1)
-                    if act is not None:
-                        actions[a1] = np.int64(action_to_pe(act, env.battle1))
-                if env.agent2_to_move:
-                    act = random_action(env.battle2)
-                    if act is not None:
-                        actions[a2] = np.int64(action_to_pe(act, env.battle2))
-                obs, rew, term, trunc, _info = env.step(actions)
-                n_steps += 1
-                if term[a1] or term[a2] or trunc[a1] or trunc[a2]:
-                    break
-            return bool(env.battle1.won), bool(env.battle2.won), n_steps
-        finally:
-            env.close()
-
-
 def test_live_gate_full_budget_24_battles():
     """PHASE 0 GATE: 24 concurrent battles across 8 servers (the user's measured
     RAM ceiling: 3 battles/server), all to completion, then clean shutdown with
@@ -111,9 +73,11 @@ def test_live_gate_full_budget_24_battles():
     results, errors = [], []
     lock = threading.Lock()
 
+    from pool.battle import play_random_battle
+
     def worker(i: int) -> None:
         try:
-            r = _play_random_vs_random(rp, fmt, seed=100000 + i, vocabs=vocabs)
+            r = play_random_battle(rp, fmt, seed=100000 + i, vocabs=vocabs)
             with lock:
                 results.append((i, r))
         except Exception as e:              # noqa: BLE001
