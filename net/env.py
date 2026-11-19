@@ -315,6 +315,78 @@ def _zero_obs() -> Dict[str, np.ndarray]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  the standalone observation builder  (POV-correct, reusable by a Player)
+# ═══════════════════════════════════════════════════════════════════════════════
+def build_obs(battle: Any, fmt: str, vocabs: Any, side: str = "p1") -> Dict[str, np.ndarray]:
+    """The net's observation for ``battle`` from ``side``'s perspective.
+
+    The SAME belief -> encoder -> registry pipeline ``ShowdownEnv.embed_battle``
+    uses, factored into a free function so a poke-env ``Player`` (human-vs-bot
+    play, D92) can build the EXACT observation the net was trained on, straight
+    from a live ``battle`` object — no second, hand-maintained feature vector.
+
+    ``side`` is the player's side in the ``_build_replay_log()`` protocol log
+    ("p1"/"p2"). For "p2" the p1/p2 side tokens are swapped first, so the
+    belief's "own" team is the real p2 team (the env's POV-correctness trick).
+    Defensive: any belief/encode failure degrades to a zero observation (logged)
+    so a live battle never dies on a data gap (a species with no prior, ...).
+    """
+    try:
+        text = battle._build_replay_log()
+        if side == "p2":
+            text = swap_sides(text)
+        lines = [ln for ln in text.split("\n") if ln.strip()]
+        own_team = _own_team_from_battle(battle) or _own_team_from_log(lines)
+        belief = BeliefState(fmt, own_team=own_team)
+        adapter = LogAdapter()
+        for line in lines:
+            ev = adapter.feed_line(line)
+            if ev is None or isinstance(ev, Unknown):
+                continue
+            belief.update(ev)
+        ctx = belief.get_context()
+        actions = build_action_list(battle)
+        return encode_context(ctx, vocabs, actions)
+    except Exception as exc:  # noqa: BLE001 — a live battle must never die on obs
+        log.warning("build_obs degraded to zero obs (%s: %s)",
+                    type(exc).__name__, exc)
+        return _zero_obs()
+
+
+def my_side(battle: Any, lines: List[str]) -> str:
+    """Which side ("p1"/"p2") of the protocol log is ``battle`` (this player)
+    on? The belief pipeline is p1-POV, so a bot that is really on p2 must swap.
+
+    Detected by matching this player's team species against the ``|poke|``
+    preview lines of each side — the side sharing more species is ours. Defaults
+    to "p1", which is correct for the challenger (the human-vs-bot case and the
+    training POV). Never raises — a detection failure must not break play.
+    """
+    try:
+        mine = set()
+        for mon in (getattr(battle, "team", None) or {}).values():
+            sp = getattr(mon, "species", None) or getattr(mon, "base_species", None)
+            if sp:
+                mine.add(sp.lower())
+        if not mine:
+            return "p1"
+        p1_sp, p2_sp = set(), set()
+        for ln in lines:
+            if not ln.startswith("|poke|"):
+                continue
+            # ``|poke|p1a|Garchomp|M|`` splits to ['', 'poke', 'p1a', 'Garchomp', ...]
+            # so the side+slot token is parts[2] and the species is parts[3].
+            parts = ln.split("|")
+            if len(parts) >= 4 and parts[3]:
+                (p1_sp if parts[2][:2] == "p1" else p2_sp).add(parts[3].lower())
+        if len(mine & p2_sp) > len(mine & p1_sp):
+            return "p2"
+    except Exception:  # noqa: BLE001 — side-detect failure must never break play
+        pass
+    return "p1"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  the environment
 # ═══════════════════════════════════════════════════════════════════════════════
 class ShowdownEnv(SinglesEnv):
@@ -408,26 +480,7 @@ class ShowdownEnv(SinglesEnv):
         data gap (e.g. a species with no prior in the format).
         """
         side = "p2" if battle is self.battle2 else "p1"
-        try:
-            text = battle._build_replay_log()
-            if side == "p2":
-                text = swap_sides(text)
-            lines = [ln for ln in text.split("\n") if ln.strip()]
-            own_team = _own_team_from_battle(battle) or _own_team_from_log(lines)
-            belief = BeliefState(self._fmt, own_team=own_team)
-            adapter = LogAdapter()
-            for line in lines:
-                ev = adapter.feed_line(line)
-                if ev is None or isinstance(ev, Unknown):
-                    continue
-                belief.update(ev)
-            ctx = belief.get_context()
-            actions = build_action_list(battle)
-            return encode_context(ctx, self._vocabs, actions)
-        except Exception as exc:  # noqa: BLE001 — a live battle must never die on obs
-            log.warning("embed_battle degraded to zero obs (%s: %s)",
-                        type(exc).__name__, exc)
-            return _zero_obs()
+        return build_obs(battle, self._fmt, self._vocabs, side)
 
     # ------------------------------------------------------------------ teardown
     def close(self, force: bool = True, wait: bool = True):
