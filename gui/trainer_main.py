@@ -55,6 +55,7 @@ def main(argv: Optional[list] = None) -> int:
     cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
 
     from gui import runstate
+    runstate.harden_stdio()   # a non-ASCII log char must never kill the run on cp1252
     from net.trainer import SelfPlayTrainer, TrainConfig
     import torch
 

@@ -39,6 +39,7 @@ Routes:
 Run it:  ``python -m gui``  (or ``start_gui.bat``) -> http://127.0.0.1:8700
 """
 import asyncio
+import json
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -128,12 +129,25 @@ def create_app(runs_dir: Optional[Path] = None) -> FastAPI:
     @app.post("/api/train/start")
     def api_start(body: StartRequest) -> Dict[str, Any]:
         """Validate LOUDLY (every problem listed) before anything is spawned.
-        Supports both ``selfplay`` (default) and ``bc`` (imitation) modes."""
+        Supports ``selfplay`` (default), ``bc`` (imitation), ``eval`` (fight vs
+        random), and ``play`` (interactive — YOU vs the checkpoint in the browser)."""
         cfg = body.config or {}
         mode = cfg.get("mode", "selfplay")
         if mode == "bc":
             try:
                 payload = launcher.validate_bc_config(cfg)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            device = payload["device"]
+        elif mode == "eval":
+            try:
+                payload = launcher.validate_eval_config(cfg)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            device = payload["device"]
+        elif mode == "play":
+            try:
+                payload = launcher.validate_play_config(cfg)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
             device = payload["device"]
@@ -146,7 +160,7 @@ def create_app(runs_dir: Optional[Path] = None) -> FastAPI:
         else:
             raise HTTPException(status_code=400,
                                 detail=f"unknown mode {mode!r} "
-                                       f"(expected 'selfplay' or 'bc')")
+                                       f"(expected 'selfplay', 'bc', 'eval', or 'play')")
         # device=cuda without CUDA is a config error, not a trainer crash
         if device == "cuda" and not launcher.cuda_available():
             raise HTTPException(status_code=400,
@@ -170,6 +184,52 @@ def create_app(runs_dir: Optional[Path] = None) -> FastAPI:
             return launcher.stop_trainer(runs_dir=runs, force=bool(body.force))
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
+
+    # ── checkpoint browser (all .pt files the user can pick) ─────────
+    @app.get("/api/checkpoints/browse")
+    def api_browse() -> Dict[str, Any]:
+        """List all .pt checkpoints in scratch/ and runs/*/checkpoints/."""
+        import time as _time
+        root = launcher.ROOT
+        results = []
+        scratch = root / "scratch"
+        if scratch.is_dir():
+            for p in sorted(scratch.glob("*.pt")):
+                meta_path = p.with_name(p.name + ".meta.json")
+                meta = {}
+                if meta_path.is_file():
+                    try:
+                        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
+                st = p.stat()
+                results.append({
+                    "path": str(p.relative_to(root)),
+                    "name": p.name,
+                    "size_mb": round(st.st_size / 1e6, 1),
+                    "modified": _time.strftime("%Y-%m-%d %H:%M", _time.gmtime(st.st_mtime)),
+                    "type": "bc" if "bc" in p.name else "unknown",
+                    "n_battles": meta.get("n_battles"),
+                    "verdict": meta.get("verdict_pass"),
+                    "top1": (meta.get("final") or {}).get("top1_acc"),
+                })
+        runs_dir = root / "runs"
+        if runs_dir.is_dir():
+            for run_dir in sorted(runs_dir.iterdir(), reverse=True):
+                ckpt_dir = run_dir / "checkpoints"
+                if not ckpt_dir.is_dir():
+                    continue
+                for p in sorted(ckpt_dir.glob("*.pt")):
+                    st = p.stat()
+                    results.append({
+                        "path": str(p.relative_to(root)),
+                        "name": p.name,
+                        "size_mb": round(st.st_size / 1e6, 1),
+                        "modified": _time.strftime("%Y-%m-%d %H:%M", _time.gmtime(st.st_mtime)),
+                        "type": "selfplay",
+                        "run_id": run_dir.name,
+                    })
+        return {"checkpoints": results}
 
     # ── per-run data ───────────────────────────────────────────────────
     @app.get("/api/metrics")

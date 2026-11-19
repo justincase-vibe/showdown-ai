@@ -135,6 +135,112 @@ def validate_bc_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def validate_eval_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Validate a GUI-submitted EVAL config (mode ``eval``) into a normalized
+    dict. The checkpoint must EXIST (a missing .pt is a 400, not a crash)."""
+    d = d or {}
+    problems: list = []
+    _pos_int(d.get("n_battles"), "n_battles", problems)
+    device = d.get("device", "cpu")
+    if device not in ("cpu", "cuda"):
+        problems.append(f"device must be 'cpu' or 'cuda' (got {device!r})")
+    if not isinstance(d.get("seed"), int) or isinstance(d.get("seed"), bool) or d.get("seed") < 0:
+        problems.append(f"seed must be an int >= 0 (got {d.get('seed')!r})")
+    fmt = d.get("battle_format", "gen9ou")
+    if not isinstance(fmt, str) or not fmt.strip():
+        problems.append("battle_format must be a non-empty string")
+    ckpt = d.get("ckpt_path")
+    if not isinstance(ckpt, str) or not ckpt.strip():
+        problems.append("ckpt_path must be a checkpoint file path (.pt)")
+    elif not Path(ckpt).expanduser().is_file():
+        problems.append(f"ckpt_path does not exist: {ckpt!r}")
+    if problems:
+        raise ValueError("; ".join(problems))
+    return {
+        "mode": "eval",
+        "ckpt_path": ckpt,
+        "n_battles": d["n_battles"],
+        "device": device,
+        "seed": d["seed"],
+        "battle_format": fmt,
+    }
+
+
+def validate_play_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Validate a GUI-submitted PLAY config (mode ``play``) into a normalized
+    dict — the interactive "you vs the checkpoint" battle (D92.3).
+
+    Same loud contract as the other validators (every problem listed, not just
+    the first). Differences from ``eval`` (the bot plays YOU, not a random
+    opponent, and you stop it when done):
+
+      * ``n_battles`` may be ``0`` = "play until I stop it" (the default); the
+        bot stays connected and keeps taking battles after each one finishes.
+      * ``bot_user`` is REQUIRED (the username the bot connects as); ``you`` is
+        OPTIONAL (the bot works without it — it's only used to render the
+        ``/challenge`` hint) so an empty string is a valid value, not a 400.
+      * ``greedy`` defaults to ``True`` (deterministic argmax = what you trained);
+        unchecking it samples from the policy (stochastic).
+      * ``ckpt_path`` must EXIST as a file (a missing .pt is a 400, not a crash).
+
+    ``team_seed`` is optional (int >= 0 or null) — a seed for the bot's curated
+    team draw, so you can replay the same bot team if you want.
+    """
+    d = d or {}
+    problems: list = []
+
+    n_battles = d.get("n_battles", 0)
+    if not isinstance(n_battles, int) or isinstance(n_battles, bool) or n_battles < 0:
+        problems.append(f"n_battles must be an int >= 0 (0 = play until stopped; "
+                        f"got {n_battles!r})")
+
+    device = d.get("device", "cpu")
+    if device not in ("cpu", "cuda"):
+        problems.append(f"device must be 'cpu' or 'cuda' (got {device!r})")
+
+    greedy = d.get("greedy", True)
+    if not isinstance(greedy, bool):
+        problems.append(f"greedy must be a boolean (got {greedy!r})")
+
+    fmt = d.get("battle_format", "gen9ou")
+    if not isinstance(fmt, str) or not fmt.strip():
+        problems.append("battle_format must be a non-empty string (e.g. 'gen9ou')")
+
+    bot_user = d.get("bot_user", "checkpointbot")
+    if not isinstance(bot_user, str) or not bot_user.strip():
+        problems.append("bot_user must be a non-empty string (the bot's Showdown username)")
+
+    you = d.get("you", "")
+    if not isinstance(you, str):
+        problems.append(f"you must be a string (your Showdown username; empty is allowed) "
+                        f"(got {you!r})")
+
+    ckpt = d.get("ckpt_path")
+    if not isinstance(ckpt, str) or not ckpt.strip():
+        problems.append("ckpt_path must be a checkpoint file path (.pt)")
+    elif not Path(ckpt).expanduser().is_file():
+        problems.append(f"ckpt_path does not exist: {ckpt!r}")
+
+    team_seed = d.get("team_seed")
+    if team_seed is not None and (
+            not isinstance(team_seed, int) or isinstance(team_seed, bool) or team_seed < 0):
+        problems.append(f"team_seed must be an int >= 0 or null (got {team_seed!r})")
+
+    if problems:
+        raise ValueError("; ".join(problems))
+    return {
+        "mode": "play",
+        "ckpt_path": ckpt,
+        "n_battles": n_battles,
+        "device": device,
+        "greedy": greedy,
+        "battle_format": fmt,
+        "bot_user": bot_user,
+        "you": you,
+        "team_seed": team_seed,
+    }
+
+
 # ── process control ──────────────────────────────────────────────────────────
 
 def _popen_kwargs() -> Dict[str, Any]:
@@ -156,21 +262,36 @@ def start_trainer(cfg: Dict[str, Any], runs_dir: Optional[Path] = None
 
       * ``mode == "selfplay"`` (the default) -> ``gui.trainer_main``
       * ``mode == "bc"``                     -> ``gui.bc_main`` (D87)
+      * ``mode == "eval"``                   -> ``gui.eval_main`` (D92)
+      * ``mode == "play"``                   -> ``net.human_play`` (D92.3)
 
-    Both speak the same ``gui.runstate`` protocol, so stop / dashboard /
-    history work unchanged. Returns ``{run_id, pid, run_dir}``."""
+    All speak the same ``gui.runstate`` protocol, so stop / dashboard /
+    history work unchanged. Returns ``{run_id, pid, run_dir}``.
+
+    ``play`` is the interactive "you vs the checkpoint" mode: the child connects
+    to the local fork as ``bot_user`` and waits for YOU to challenge it in the
+    browser. ``rounds_planned`` is ``n_battles`` (0 = unlimited — the run stays
+    active until you stop it or it finishes N battles)."""
     cfg = dict(cfg or {})
     mode = cfg.get("mode", "selfplay")
     if mode == "bc":
         payload = validate_bc_config(cfg)
         entry = "gui.bc_main"
         rounds_planned = int(payload["epochs"])
+    elif mode == "eval":
+        payload = validate_eval_config(cfg)
+        entry = "gui.eval_main"
+        rounds_planned = int(payload["n_battles"])
+    elif mode == "play":
+        payload = validate_play_config(cfg)
+        entry = "net.human_play"
+        rounds_planned = int(payload["n_battles"])   # 0 = unlimited (play until stopped)
     elif mode == "selfplay":
         payload = validate_train_config(cfg).to_dict()
         entry = "gui.trainer_main"
         rounds_planned = int(payload["n_rounds"])
     else:
-        raise ValueError(f"unknown mode {mode!r} (expected 'selfplay' or 'bc')")
+        raise ValueError(f"unknown mode {mode!r} (expected 'selfplay', 'bc', 'eval', or 'play')")
     runs = Path(runs_dir) if runs_dir is not None else default_runs_dir()
     active = find_active_run(runs)
     if active is not None:

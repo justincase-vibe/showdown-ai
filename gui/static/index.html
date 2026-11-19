@@ -160,6 +160,62 @@
     </div>
 
     <div class="panel">
+      <h2>⚔️ Fight a checkpoint</h2>
+      <div class="grid" style="margin-bottom:8px">
+        <div class="full"><label>checkpoint</label>
+          <select id="fight-ckpt"><option value="">— select a checkpoint —</option></select>
+        </div>
+      </div>
+
+      <!-- ── PLAY IN BROWSER (you vs the bot, interactive) ─────────────── -->
+      <div style="font-size:11px;color:var(--acc);font-weight:600;letter-spacing:.05em;margin:2px 0 6px">
+        🎮 Play in the browser (you vs the bot)
+      </div>
+      <div class="grid" style="margin-bottom:8px">
+        <div><label>your username</label><input id="play-you" value="ttvJustinCase"></div>
+        <div><label>bot username</label><input id="play-bot" value="checkpointbot"></div>
+        <div><label>battles (0 = until stopped)</label><input id="play-n" type="number" min="0" value="0"></div>
+        <div><label>device</label>
+          <select id="play-dev"><option value="cpu">cpu</option><option value="cuda">cuda</option></select>
+        </div>
+        <div class="full"><label style="display:flex;align-items:center;gap:6px;margin:0">
+          <input type="checkbox" id="play-greedy" checked style="width:auto">
+          greedy (deterministic) — uncheck to sample
+        </label></div>
+      </div>
+      <div class="btns">
+        <button id="bplay" type="button" style="background:#3a5a8a;border-color:#3a5a8a;color:#dce3ea">🎮 Start &amp; open browser</button>
+        <button id="bplaystop" type="button" disabled>⏹ Stop bot</button>
+      </div>
+      <div id="play-instruct" class="hint" style="display:none"></div>
+      <div id="play-result" style="margin-top:8px;font-family:var(--mono);font-size:12px;display:none"></div>
+      <div id="play-tally" style="margin-top:6px;font-family:var(--mono);font-size:13px;display:none"></div>
+
+      <hr style="border:0;border-top:1px solid var(--line);margin:14px 0 10px">
+
+      <!-- ── FIGHT VS RANDOM (automated eval) ───────────────────────────── -->
+      <div style="font-size:11px;color:var(--dim);font-weight:600;letter-spacing:.05em;margin:2px 0 6px">
+        ⚔️ Fight vs random (automated)
+      </div>
+      <div class="grid" style="margin-bottom:8px">
+        <div><label>battles</label><input id="fight-n" type="number" min="1" max="100" value="1"></div>
+        <div><label>device</label>
+          <select id="fight-dev"><option value="cpu">cpu</option><option value="cuda">cuda</option></select>
+        </div>
+      </div>
+      <div class="btns">
+        <button id="bfight" type="button">⚔️ Fight (vs random)</button>
+        <button id="bresume" type="button" style="font-size:11px">↻ Use for training resume</button>
+      </div>
+      <div id="fight-result" style="margin-top:8px;font-family:var(--mono);font-size:12px;display:none"></div>
+      <div class="hint">
+        Loads the checkpoint, runs N battles vs a random opponent (local fork),
+        reports W/L/D + avg turns. Pick a checkpoint to also auto-fill the
+        training resume field.
+      </div>
+    </div>
+
+    <div class="panel">
       <h2>Checkpoints (latest run)</h2>
       <div id="cklist"><span style="color:var(--dim);font-size:12px">no run yet</span></div>
     </div>
@@ -205,8 +261,10 @@ function renderStatus(s) {
   const state = s.state || "none";
   $("s-state").innerHTML = '<span class="badge ' + state + '">' + state + "</span>";
   $("s-run").textContent = s.run_id || "—";
+  const rp = (s.rounds_planned === null || s.rounds_planned === undefined) ? "?" :
+    (s.rounds_planned === 0 ? "∞" : s.rounds_planned);   // 0 = play-until-stopped
   $("s-round").textContent = (s.round === null || s.round === undefined) ? "—" :
-    (s.round + " / " + (s.rounds_planned ?? "?"));
+    (s.round + " / " + rp);
   let hb = "—";
   if (s.heartbeat_age_s !== null && s.heartbeat_age_s !== undefined) {
     const st = lastStatus;
@@ -222,6 +280,9 @@ function renderStatus(s) {
   $("bstop").disabled = !ACTIVE;
   $("bforce").disabled = !ACTIVE;
   $("bstart").disabled = ACTIVE;
+  $("bplay").disabled = ACTIVE;          // can't start another run while one is active
+  $("bplaystop").disabled = !ACTIVE;      // stop is only meaningful when something's running
+  if (ACTIVE && s.run_id) refreshTally(s.run_id);
   if (s.run_id) $("mrun").textContent = "· " + s.run_id;
   renderCheckpoints(s.checkpoints || [], s.run_id);
   renderHistory();
@@ -312,6 +373,123 @@ async function post(path, body) {
   try { detail = (await r.json()).detail; } catch (e) { /* not json */ }
   return { ok: r.ok, status: r.status, detail };
 }
+
+/* ── fight a checkpoint ─────────────────────────────────────────── */
+let FIGHT_CKPTS = []; // [{path, name, type, top1, ...}]
+async function loadFightCheckpoints() {
+  try {
+    const r = await fetch("/api/checkpoints/browse");
+    const j = await r.json();
+    FIGHT_CKPTS = j.checkpoints || [];
+    const sel = $("fight-ckpt");
+    sel.innerHTML = '<option value="">— select a checkpoint —</option>' +
+      FIGHT_CKPTS.map((c, i) => {
+        const info = c.top1 ? ` (top1=${c.top1.toFixed(3)})` : "";
+        const type = c.type ? ` [${c.type}]` : "";
+        return `<option value="${c.path}">${c.name}${type}${info}</option>`;
+      }).join("");
+  } catch (e) { /* server not ready */ }
+}
+$("bfight").onclick = async function() {
+  const ckpt = $("fight-ckpt").value;
+  if (!ckpt) { alert("Pick a checkpoint first"); return; }
+  const n = Number($("fight-n").value) || 1;
+  const dev = $("fight-dev").value;
+  const btn = $("bfight"); btn.disabled = true;
+  const res = await post("/api/train/start", { config: {
+    mode: "eval", ckpt_path: ckpt, n_battles: n, device: dev, seed: 42, battle_format: "gen9ou"
+  }});
+  btn.disabled = false;
+  const fr = $("fight-result"); fr.style.display = "block";
+  if (!res.ok) { fr.textContent = "FAILED (" + res.status + "): " + (res.detail || "?"); fr.style.color = "#ffb4b4"; }
+  else { fr.textContent = "Started (pid " + (res.pid || "?") + ") — watch the status panel above."; fr.style.color = "var(--ok)"; }
+};
+$("bresume").onclick = function() {
+  const ckpt = $("fight-ckpt").value;
+  if (!ckpt) { alert("Pick a checkpoint first"); return; }
+  const rf = document.querySelector('input[name="resume_from"]');
+  if (rf) { rf.value = ckpt; rf.style.outline = "2px solid var(--acc)"; setTimeout(() => rf.style.outline = "", 2000); }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+loadFightCheckpoints();
+
+/* ── play in the browser (you vs the bot, interactive) ─────────────── */
+let PLAY_RUN_ID = null;   // the run id of the play session the user just started
+
+function refreshTally(rid) {
+  // Read the run's metrics and tally W/L/D. Play rows carry a `won` flag;
+  // training rows do not, so a non-play run hides the tally (no false data).
+  const el = $("play-tally");
+  if (!rid) { el.style.display = "none"; return; }
+  fetch("/api/metrics?run_id=" + encodeURIComponent(rid) + "&n=1000")
+    .then(r => r.json()).then(j => {
+      const rows = j.rows || [];
+      const last = rows[rows.length - 1];
+      const isPlay = rows.length > 0 && ("won" in (last || {}));
+      if (!isPlay) { el.style.display = "none"; return; }
+      let W = 0, L = 0, D = 0;
+      for (const m of rows) { if (m.won) W++; else if (m.lost) L++; else if (m.draw) D++; }
+      el.style.display = "block";
+      el.innerHTML = "🎮 <b>" + W + "W</b> / <b>" + L + "L</b> / <b>" + D + "D</b>" +
+        ((W + L) > 0 ? " · winrate " + (W / (W + L)).toFixed(2) : "");
+    }).catch(() => {});
+}
+
+$("bplay").onclick = function() {
+  const ckpt = $("fight-ckpt").value;
+  if (!ckpt) { alert("Pick a checkpoint first"); return; }
+  const cfg = {
+    mode: "play",
+    ckpt_path: ckpt,
+    bot_user: $("play-bot").value.trim() || "checkpointbot",
+    you: $("play-you").value.trim(),
+    n_battles: Number($("play-n").value) || 0,
+    device: $("play-dev").value,
+    greedy: $("play-greedy").checked,
+    battle_format: "gen9ou"
+  };
+  // Open the browser FIRST (synchronously, in the user-gesture window) so the
+  // popup is never blocked; a config error just leaves an empty local tab.
+  window.open("http://localhost:8000", "_blank");
+  const btn = $("bplay"); btn.disabled = true;
+  const pr = $("play-result");
+  post("/api/train/start", { config: cfg }).then(res => {
+    btn.disabled = false;
+    pr.style.display = "block";
+    if (!res.ok) {
+      pr.textContent = "FAILED (" + res.status + "): " + (res.detail || "?");
+      pr.style.color = "#ffb4b4";
+      return;
+    }
+    PLAY_RUN_ID = res.run_id;
+    pr.textContent = "Bot is up (pid " + (res.pid || "?") + "). Open the browser tab → " +
+      "log in as '" + (cfg.you || "your user") + "' → type /challenge " + cfg.bot_user;
+    pr.style.color = "var(--ok)";
+    const instr = $("play-instruct");
+    instr.style.display = "block";
+    instr.innerHTML = "In the browser: log in as <b>" + (cfg.you || "your user") +
+      "</b>, then type <b>/challenge " + cfg.bot_user + "</b>" +
+      (cfg.n_battles > 0 ? " (" + cfg.n_battles + " battle(s), then it stops)" : " (it stays up until you hit ⏹ Stop bot)");
+    refreshStatus();
+  }).catch(e => {
+    btn.disabled = false;
+    pr.style.display = "block";
+    pr.textContent = "start failed: " + e;
+    pr.style.color = "#ffb4b4";
+  });
+};
+
+$("bplaystop").onclick = function() {
+  const btn = $("bplaystop"); btn.disabled = true;
+  post("/api/train/stop", { force: false }).then(res => {
+    btn.disabled = false;
+    const pr = $("play-result"); pr.style.display = "block";
+    if (!res.ok) { pr.textContent = "stop failed (" + res.status + "): " + (res.detail || "?"); pr.style.color = "#ffb4b4"; }
+    else { pr.textContent = "Bot stopped."; pr.style.color = "var(--ok)"; }
+    refreshStatus();
+  });
+};
+
 async function onStart() {
   const btn = $("bstart"); btn.disabled = true;
   const res = await post("/api/train/start", { config: readConfig() });
@@ -358,11 +536,15 @@ function applyFrame(fr) {
   if (!fr || !fr.type) return;
   if (fr.type === "status") { lastStatus = fr.status; renderStatus(fr.status); }
   else if (fr.type === "metrics") {
-    // a WS reconnect re-sends the snapshot — dedupe by round, never double-push
+    // a WS reconnect re-sends the snapshot — dedupe by round, never double-push.
+    // Training rows carry a `round`; play rows (won/lost/draw) are read directly
+    // by the W/L tally, NOT the round table, so skip them here (no `undefined` key).
     for (const m of fr.rows) {
+      if (m.round === undefined) continue;
       if (!seenRounds.has(m.round)) { METRICS.push(m); seenRounds.add(m.round); }
     }
     renderMetrics();
+    if (lastStatus && lastStatus.active && lastStatus.run_id) refreshTally(lastStatus.run_id);
   }
 }
 function connectWS() {

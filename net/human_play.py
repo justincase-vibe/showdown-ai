@@ -153,7 +153,7 @@ class CheckpointPlayer(Player):
             # instead of aborting the live battle (the same D60-env discipline).
             return SinglesEnv.action_to_order(np.int64(pe), battle, strict=False)
         except Exception as exc:  # noqa: BLE001 — a live battle must never crash on obs
-            _log(f"choose_move error ({type(exc).__name__}: {exc}) — passing the turn")
+            _log(f"choose_move error ({type(exc).__name__}: {exc}) - passing the turn")
             return self._pass_order(battle)
 
     def _pass_order(self, battle: Any) -> Any:
@@ -170,6 +170,7 @@ def main(argv: Optional[list] = None) -> int:
     rd = Path(args.run_dir).resolve()
     cfg = json.loads(Path(args.config).resolve().read_text(encoding="utf-8"))
     from gui import runstate
+    runstate.harden_stdio()   # a non-ASCII log char must never kill the bot on cp1252
 
     ckpt_path = str(cfg.get("ckpt_path", ""))
     fmt = str(cfg.get("battle_format", "gen9ou") or "gen9ou")
@@ -200,7 +201,7 @@ def main(argv: Optional[list] = None) -> int:
     runstate.write_status(rd, state="running", started=runstate.now_iso())
     runstate.write_heartbeat(rd, 0, 0, "loading checkpoint")
     _log(f"PLAY start run={rd.name} ckpt={ckpt_path} fmt={fmt} bot='{bot_user}' "
-         f"you='{you}' greedy={greedy} n={n_battles or '∞'} device={device}")
+         f"you='{you}' greedy={greedy} n={n_battles if n_battles else 'unlimited'} device={device}")
 
     # ── load the net + build the team ─────────────────────────────────────
     from net.vocab_db import build_vocabs
@@ -248,7 +249,7 @@ def main(argv: Optional[list] = None) -> int:
             if n_battles and n_done >= n_battles:
                 break
             if runstate.stop_requested(rd):
-                _log("stop requested — exiting (the fork connection tears down with the process)")
+                _log("stop requested - exiting (the fork connection tears down with the process)")
                 break
     except Exception as exc:  # noqa: BLE001
         runstate.write_status(rd, state="failed",

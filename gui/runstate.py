@@ -43,6 +43,30 @@ def now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def harden_stdio() -> None:
+    """Make this process's stdout/stderr robust to non-ASCII (Windows cp1252).
+
+    A GUI-launched subprocess inherits the console codepage (cp1252 on this box);
+    ONE non-ASCII character in a log line (an emoji, ``\u221e``, …) would otherwise
+    raise ``UnicodeEncodeError`` and KILL the run at that exact ``print`` — caught
+    by the D92.3 live smoke (a ``\u221e`` in a start-log line crashed the play bot
+    the moment the GUI spawned it). Reconfigure the text streams to UTF-8 with a
+    replacement fallback so a log character can never take a live battle down.
+
+    Safe to call anywhere (idempotent); a no-op where the stream isn't
+    reconfigurable (e.g. a test replaced ``sys.stdout``).
+    """
+    import sys
+    for s in (sys.stdout, sys.stderr):
+        reconfigure = getattr(s, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001 — never let the hardening itself crash the run
+            pass
+
+
 def _atomic_write(path: Path, text: str) -> None:
     """Write-then-rename so a reader never sees a half-written JSON file."""
     path.parent.mkdir(parents=True, exist_ok=True)
