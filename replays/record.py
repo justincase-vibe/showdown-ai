@@ -14,7 +14,13 @@ terminal ``|win|``/``|tie|`` line is present even when the protocol dropped it.
 from __future__ import annotations
 
 import datetime
+import re
 from typing import Any, List, Optional
+
+# A side token is EXACTLY p1/p2 with an optional slot letter — nothing else.
+# Real fixture logs carry ``|win|<username>`` lines (e.g. ``|win|Yeatfan777``),
+# and a username like ``p1xel`` must never be read as a side.
+_SIDE_TOKEN_RE = re.compile(r"p[12][a-d]?")
 
 
 def _canonicalize_win(log: str, battle: Any) -> str:
@@ -39,7 +45,7 @@ def _canonicalize_win(log: str, battle: Any) -> str:
             idx = i
             target = parts[2] if len(parts) >= 3 else None
             break
-    if idx is None or target is None or target.startswith(("p1", "p2")):
+    if idx is None or target is None or _SIDE_TOKEN_RE.fullmatch(target):
         return log
     role = None
     if target == getattr(battle, "player_username", None):
@@ -76,11 +82,7 @@ def _winner_side_from_log(log: str) -> Optional[str]:
         # ``|win|p2a`` splits to ['', 'win', 'p2a'] — the side token is parts[2]
         # (the D92.1 lesson: protocol lines carry an empty leading field)
         target = parts[2] if len(parts) > 2 else ""
-        for token in ("p1a", "p1b", "p1c", "p1d", "p2a", "p2b", "p2c", "p2d"):
-            if target.startswith(token):
-                side = token[:2]
-                break
-        if side is None and target.startswith(("p1", "p2")):
+        if _SIDE_TOKEN_RE.fullmatch(target):
             side = target[:2]
         break                      # only the LAST win line counts
     return side

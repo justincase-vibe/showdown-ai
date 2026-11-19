@@ -241,3 +241,54 @@ def test_stored_record_roundtrips_through_bc_walker(tmp_path):
     trace = replay_battle(out)
     assert trace.skipped is None, f"BC walker skipped the stored record: {trace.skipped}"
     assert trace.n_decisions > 0, "the stored record yielded no decisions"
+
+
+# ── bug-hunt pins (2026-11-19 small-bug hunt) ───────────────────────────────
+def test_username_with_p1_prefix_is_not_a_side_token():
+    # a real username like ``p1xel`` must NOT be read as side p1 — no identity
+    # means we do not guess (winner stays None, log stays untouched)
+    r = make_record(FakeBattle(log="|turn|1\n|win|p1xel"), "gen9ou")
+    assert r["winner_side"] is None
+    assert r["log"].splitlines()[-1] == "|win|p1xel"
+
+
+def test_username_with_p1_prefix_is_mapped_when_identity_known():
+    # ...but WITH identity the SAME username maps correctly to its real side
+    b = FakeNamedBattle(role="p2", me="p1xel", opp="Bob", won=True,
+                        log="|turn|1\n|win|p1xel")
+    r = make_record(b, "gen9ou")
+    assert r["log"].splitlines()[-1] == "|win|p2a"
+    assert r["winner_side"] == "p2"
+
+
+def test_scan_survives_partial_final_line(tmp_path):
+    # a crash mid-save leaves a partial last line — cold start must skip it,
+    # not crash, and the good record must still be reachable at its offset
+    lib = ReplayLibrary(str(tmp_path))
+    lib.save(_rec(FakeBattle(tag="gen9ou-good")))
+    with open(lib.path("gen9ou"), "ab") as fh:
+        fh.write(b'{"id": "gen9ou-cut", "log": "|win|p1')   # no closing brace
+    lib2 = ReplayLibrary(str(tmp_path))
+    assert lib2.count() == 1
+    assert lib2.fetch_last(1)[0]["id"] == "gen9ou-good"
+
+
+def test_save_sanitizes_formatid(tmp_path):
+    # the formatid becomes a FILENAME — traversal/odd chars are neutralized
+    lib = ReplayLibrary(str(tmp_path))
+    out = lib.save(_rec(FakeBattle(), fid="../evil"))
+    import os
+    assert os.path.basename(out["path"]) == "___evil.jsonl"
+    assert lib.count() == 1
+
+
+def test_corrupt_index_reader_does_not_rewrite(tmp_path):
+    # a READER instance hitting a corrupt index must scan in memory and NOT
+    # clobber the index file (the writer process self-heals it on next save)
+    lib = ReplayLibrary(str(tmp_path))
+    lib.save(_rec(FakeBattle(tag="gen9ou-1")))
+    corrupt = b"{not json"
+    lib.index_path.write_bytes(corrupt)
+    lib2 = ReplayLibrary(str(tmp_path))
+    assert lib2.count() == 1
+    assert lib2.index_path.read_bytes() == corrupt, "reader must not rewrite the index"

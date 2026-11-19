@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -51,7 +52,8 @@ class ReplayLibrary:
     def save(self, record: dict) -> Dict[str, Any]:
         """Append ONE record (dedup by id). Returns ``{"path", "offset",
         "size", "deduped"}`` — the offset/size of the record's line."""
-        fid = str(record.get("formatid") or "unknown")
+        # sanitize the formatid — it becomes a FILENAME (no traversal / odd chars)
+        fid = re.sub(r"[^A-Za-z0-9_-]", "_", str(record.get("formatid") or "unknown"))
         rid = str(record.get("id") or "")
         if not rid:
             raise ValueError("ReplayLibrary.save: record has no 'id'")
@@ -154,21 +156,25 @@ class ReplayLibrary:
 
     def _scan_files(self) -> List[Dict[str, Any]]:
         """The one place the JSONL files are scanned into index entries
-        (rebuild + cold start both use it — no duplicated scan logic)."""
+        (rebuild + cold start both use it — no duplicated scan logic).
+        Streams line-by-line (memory stays O(1) per line — a multi-GB library
+        file must never be ``read()`` into RAM) and SKIPS corrupt/partial lines
+        (a crash mid-save must not brick the library)."""
         entries: List[Dict[str, Any]] = []
         for fid in self.formats_on_disk():
             path = self.path(fid)
-            with open(path, "rb") as fh:
-                data = fh.read()
             offset = 0
-            for line in data.split(b"\n"):
-                if not line.strip():
-                    offset += 1
-                    continue
-                rec = json.loads(line.decode("utf-8", errors="replace"))
-                entries.append(self._index_entry(
-                    str(rec.get("id", f"{fid}-{offset}")), offset, len(line) + 1, fid, rec))
-                offset += len(line) + 1
+            with open(path, "rb") as fh:
+                for raw in fh:                      # one line incl. its trailing \n
+                    if raw.strip():
+                        try:
+                            rec = json.loads(raw.decode("utf-8", errors="replace").rstrip("\n"))
+                        except Exception:           # partial/corrupt line: skip it
+                            offset += len(raw)
+                            continue
+                        entries.append(self._index_entry(
+                            str(rec.get("id", f"{fid}-{offset}")), offset, len(raw), fid, rec))
+                    offset += len(raw)
         return entries
 
     def formats_on_disk(self) -> List[str]:
@@ -207,9 +213,10 @@ class ReplayLibrary:
                 idx = json.load(fh)
             return idx if isinstance(idx, list) else []
         except Exception:
-            # corrupt index: rebuild from the (authoritative) JSONL
-            self.rebuild_index()
-            return list(self._index)
+            # corrupt index: scan the (authoritative) JSONL into memory but do
+            # NOT write — this instance may be a READER while the writer process
+            # owns the index; the writer self-heals it on its next save.
+            return self._scan_files()
 
     def _write_index(self) -> None:
         assert self._lock.locked(), "_write_index must be called under the lock"
