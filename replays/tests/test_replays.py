@@ -316,3 +316,64 @@ def test_corrupt_index_reader_does_not_rewrite(tmp_path):
     lib2 = ReplayLibrary(str(tmp_path))
     assert lib2.count() == 1
     assert lib2.index_path.read_bytes() == corrupt, "reader must not rewrite the index"
+
+
+# ── D96: materialize_fixture + list_battles (the "one-click imitation" source) ─
+import json as _json
+
+
+def test_materialize_top_elo_selects_highest_first(tmp_path):
+    lib = ReplayLibrary(str(tmp_path))
+    lib.save(_rec(FakeBattle(tag="gen9ou-a", log="|turn|1\n|move|p1a|a\n|win|p1a"), elo=100.0))
+    lib.save(_rec(FakeBattle(tag="gen9ou-b", log="|turn|1\n|move|p1a|b\n|win|p1a"), elo=300.0))
+    lib.save(_rec(FakeBattle(tag="gen9ou-c", log="|turn|1\n|move|p1a|c\n|win|p1a"), elo=200.0))
+    out = lib.materialize_fixture(n=2, key="elo", out_path=str(tmp_path / "fix.jsonl"))
+    assert out["n"] == 2 and out["truncated"] is False and out["source"] == "top:elo:2"
+    lines = [_json.loads(l) for l in (tmp_path / "fix.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    assert [r["id"] for r in lines] == ["gen9ou-b", "gen9ou-c"]   # 300 then 200
+    assert all("log" in r and r["log"] for r in lines), "the fixture must carry the logs"
+    from corpus.trajectories import replay_battle
+    assert replay_battle(lines[0]).skipped is None, "materialized fixture is not BC-walker-compatible"
+
+
+def test_materialize_last_n_most_recent_last(tmp_path):
+    lib = ReplayLibrary(str(tmp_path))
+    for i, tag in enumerate(["gen9ou-1", "gen9ou-2", "gen9ou-3", "gen9ou-4"]):
+        lib.save(_rec(FakeBattle(tag=tag, log=f"|turn|1\n|move|p1a|m{i}\n|win|p1a")))
+    out = lib.materialize_fixture(n=3, key="last", out_path=str(tmp_path / "f.jsonl"))
+    assert out["n"] == 3 and out["source"] == "last:3" and out["truncated"] is False
+    lines = [_json.loads(l) for l in (tmp_path / "f.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    assert [r["id"] for r in lines] == ["gen9ou-2", "gen9ou-3", "gen9ou-4"]
+
+
+def test_materialize_truncated_returns_what_it_has(tmp_path):
+    lib = ReplayLibrary(str(tmp_path))
+    lib.save(_rec(FakeBattle(tag="gen9ou-a", log="|win|p1a")))
+    out = lib.materialize_fixture(n=10, key="last", out_path=str(tmp_path / "f.jsonl"))
+    assert out["n"] == 1 and out["truncated"] is True and out["requested"] == 10
+
+
+def test_materialize_empty_library_raises(tmp_path):
+    lib = ReplayLibrary(str(tmp_path))
+    with pytest.raises(ValueError):
+        lib.materialize_fixture(n=5, key="elo")
+    with pytest.raises(ValueError):
+        lib.materialize_fixture(n=0, key="last")
+
+
+def test_materialize_rejects_unknown_key(tmp_path):
+    lib = ReplayLibrary(str(tmp_path))
+    lib.save(_rec(FakeBattle(tag="gen9ou-a", log="|win|p1a")))
+    with pytest.raises(ValueError):
+        lib.materialize_fixture(n=1, key="bogus")
+
+
+def test_list_battles_is_lightweight_and_ordered(tmp_path):
+    lib = ReplayLibrary(str(tmp_path))
+    lib.save(_rec(FakeBattle(tag="gen9ou-a", log="|turn|1\n|move|p1a|a\n|win|p1a"), elo=10.0))
+    lib.save(_rec(FakeBattle(tag="gen9ou-b", log="|turn|1\n|move|p1a|b\n|win|p1a"), elo=90.0))
+    last = lib.list_battles(n=5, order="last")
+    assert [r["id"] for r in last] == ["gen9ou-a", "gen9ou-b"]
+    assert all("log" not in r for r in last), "list must NOT pull the logs"
+    top = lib.list_battles(n=5, order="top")
+    assert [r["id"] for r in top] == ["gen9ou-b", "gen9ou-a"]   # 90 before 10

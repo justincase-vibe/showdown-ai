@@ -40,6 +40,29 @@ def _log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+def _resolve_fixture(cfg: dict, run_dir: Path) -> str:
+    """D96 — resolve the BC fixture path. A raw ``fixture`` is used as-is; a
+    ``replay_source`` is MATERIALIZED from the replay library into
+    ``<run_dir>/fixture.jsonl`` (the "one-click imitation" source — the file
+    is drop-in for ``bc.run(fixture=)``). Pure (no torch / no subprocess) so
+    it is unit-testable in isolation. Raises ``ValueError`` if neither source
+    is usable (the caller turns that into a clean FAIL, not a crash)."""
+    fixture = cfg.get("fixture")
+    replay_source = cfg.get("replay_source")
+    if replay_source is not None:
+        from replays import ReplayLibrary
+        lib = ReplayLibrary(replay_source.get("library_root"))
+        info = lib.materialize_fixture(
+            int(replay_source["n"]), key=replay_source.get("key", "elo"),
+            out_path=str(run_dir / "fixture.jsonl"))
+        _log(f"materialized {info['n']} replay(s) from {info['source']} "
+             f"(truncated={info['truncated']}) -> {info['path']}")
+        return info["path"]
+    if fixture:
+        return str(fixture)
+    raise ValueError("config has no 'fixture' and no valid 'replay_source'")
+
+
 def main(argv: Optional[list] = None) -> int:
     ap = argparse.ArgumentParser(prog="gui.bc_main")
     ap.add_argument("--config", required=True, help="path to config.json (the BC config)")
@@ -91,11 +114,21 @@ def main(argv: Optional[list] = None) -> int:
         except Exception:  # noqa: BLE001 — a heartbeat write must never kill the run
             pass
 
+    # ── D96: resolve the fixture (materialize from the library if requested) ─
+    try:
+        fixture = _resolve_fixture(cfg, rd)
+    except Exception as exc:  # noqa: BLE001 — a bad source is a clean FAIL, not a crash
+        runstate.write_status(rd, state="failed",
+                              error=f"resolve fixture: {type(exc).__name__}: {exc}",
+                              exit_code=1)
+        _log(f"FATAL: could not resolve the fixture: {exc}")
+        return 1
+
     t0 = time.time()
     try:
         res = bc.run(
             n_battles=int(cfg.get("n_battles", 50)),
-            fixture=str(cfg.get("fixture", "bot/data/replays/gen9ou.jsonl")),
+            fixture=str(fixture),
             max_decisions=int(cfg.get("max_decisions", 40)),
             heldout_frac=float(cfg.get("heldout_frac", 0.2)),
             epochs=int(cfg.get("epochs", 15)),

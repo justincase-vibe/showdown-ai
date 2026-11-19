@@ -140,6 +140,107 @@ def test_bc_valid_config_passes_validation():
     assert payload["ckpt_name"] == "test_bc.pt"
 
 
+# ── D96: one-click imitation from the replay library ────────────────────
+
+def test_bc_replay_source_defaults_n_battles():
+    """replay_source (no fixture) is valid. When ``n_battles`` is UNSET it
+    defaults to the selection size (a one-click 'imitate the top-N' needs only
+    one knob); an EXPLICIT n_battles acts as a cap on the materialized set."""
+    cfg = bc_cfg(fixture=None, replay_source={"n": 7, "key": "elo"})
+    del cfg["n_battles"]   # unset -> should default to the selection size
+    payload = launcher.validate_bc_config(cfg)
+    assert payload["n_battles"] == 7
+    assert payload["replay_source"] == {"n": 7, "key": "elo"}
+    assert payload["fixture"] is None
+    # an explicit n_battles is respected (a cap on the selection)
+    cfg2 = bc_cfg(fixture=None, n_battles=3, replay_source={"n": 7, "key": "elo"})
+    assert launcher.validate_bc_config(cfg2)["n_battles"] == 3
+
+
+def test_bc_replay_source_last_key():
+    cfg = bc_cfg(fixture=None, n_battles=3, replay_source={"n": 3, "key": "last"})
+    payload = launcher.validate_bc_config(cfg)
+    assert payload["replay_source"]["key"] == "last"
+    assert payload["n_battles"] == 3
+
+
+def test_bc_fixture_and_replay_source_conflict(client):
+    r = client.post("/api/train/start", json={"config": bc_cfg(
+        replay_source={"n": 5, "key": "elo"})})
+    assert r.status_code == 400, r.text
+    assert "not both" in r.json()["detail"]
+
+
+def test_bc_replay_source_bad_values(client):
+    for bad in ({"n": 0, "key": "elo"}, {"n": 5, "key": "bogus"}, "not-a-dict"):
+        r = client.post("/api/train/start", json={"config": bc_cfg(
+            fixture=None, replay_source=bad)})
+        assert r.status_code == 400, f"bad={bad!r}: {r.text}"
+
+
+def test_bc_neither_fixture_nor_source_400(client):
+    r = client.post("/api/train/start", json={"config": bc_cfg(fixture=None)})
+    assert r.status_code == 400, r.text
+    assert "fixture" in r.json()["detail"]
+
+
+def test_api_replays_lists_library(client):
+    """GET /api/replays returns 200 + the library summary + a LIGHT metadata
+    list (never logs). Works whether the library is empty or populated."""
+    r = client.get("/api/replays", params={"order": "last", "n": 10})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["order"] == "last" and body["n"] == 10
+    assert "total" in body["summary"]
+    assert isinstance(body["battles"], list)
+    for b in body["battles"]:
+        assert "log" not in b, "list must not carry logs"
+        assert "id" in b
+
+
+def test_api_replays_rejects_bad_args(client):
+    assert client.get("/api/replays", params={"order": "bogus", "n": 5}).status_code == 422
+    assert client.get("/api/replays", params={"order": "last", "n": 0}).status_code == 422
+
+
+def test_resolve_fixture_materializes_top_elo(tmp_path):
+    """_resolve_fixture (the bc_main wiring, in isolation) materializes the
+    top-elo replay from the library into <run_dir>/fixture.jsonl."""
+    import gui.bc_main as bcm
+    from replays import ReplayLibrary, make_record
+    libroot = str(tmp_path / "lib")
+    lib = ReplayLibrary(libroot)
+
+    class _B:
+        def __init__(self, tag, move):
+            self.battle_tag = tag
+            self.rating = 1000.0
+            self._m = move
+        def _build_replay_log(self):
+            return f"|turn|1\n|move|p1a|{self._m}\n|win|p1a"
+    lib.save(make_record(_B("gen9ou-x", "a"), "gen9ou", players=["a", "b"], elo=100.0))
+    lib.save(make_record(_B("gen9ou-y", "b"), "gen9ou", players=["a", "b"], elo=500.0))
+
+    cfg = {"fixture": None, "replay_source": {"n": 1, "key": "elo", "library_root": libroot}}
+    out = Path(bcm._resolve_fixture(cfg, tmp_path / "run"))
+    assert out.name == "fixture.jsonl" and out.is_file()
+    recs = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines() if l.strip()]
+    assert [r["id"] for r in recs] == ["gen9ou-y"]   # the top-elo (500) replay
+
+
+def test_resolve_fixture_raw_path_passthrough(tmp_path):
+    import gui.bc_main as bcm
+    fx = tmp_path / "raw.jsonl"
+    fx.write_text('{"id": "x", "log": "|win|p1a"}\n', encoding="utf-8")
+    assert bcm._resolve_fixture({"fixture": str(fx), "replay_source": None}, tmp_path / "r") == str(fx)
+
+
+def test_resolve_fixture_none_source_raises(tmp_path):
+    import gui.bc_main as bcm
+    with pytest.raises(ValueError):
+        bcm._resolve_fixture({"fixture": None, "replay_source": None}, tmp_path / "r")
+
+
 # ── LIVE: BC run through the real detached subprocess ────────────────────
 
 def test_bc_live_start_and_complete(runs):

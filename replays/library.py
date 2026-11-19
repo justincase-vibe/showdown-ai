@@ -115,6 +115,69 @@ class ReplayLibrary:
         ranked += missing[: max(0, n - len(ranked))]
         return [self._read_record(e) for e in ranked]
 
+    # ── materialize (the "one-click imitation" source — D96) ───────────────
+    def materialize_fixture(self, n: int, key: str = "elo",
+                            out_path: Optional[Any] = None,
+                            formatid: Optional[str] = None) -> Dict[str, Any]:
+        """Write the selected replays to a BC-compatible JSONL fixture.
+
+        Selection: ``key == "last"`` -> the LAST ``n``; otherwise the TOP ``n``
+        by the ``key`` field (``"elo"`` default, or ``"rating"`` / ``"ts"``).
+        The records written are the FULL library records (byte-compatible with
+        the BC fixtures — D94), so the file is drop-in for ``bc.run(fixture=)``.
+        Reuses :meth:`fetch_last` / :meth:`fetch_top` (no duplicated selection).
+
+        :return: ``{path, n, requested, truncated, ids, source}`` — ``truncated``
+                 is True when the library had fewer than ``n`` (still returns
+                 what it has; a caller wanting to fail-loud checks it).
+        :raises ValueError: if ``n < 1``, an unknown ``key``, or the library is
+                 empty (an empty imitation run is a config error, not a no-op).
+        """
+        n = int(n)
+        if n < 1:
+            raise ValueError(f"materialize_fixture: n must be >= 1 (got {n})")
+        if key == "last":
+            recs = self.fetch_last(n, formatid)
+            source = f"last:{n}"
+        else:
+            if key not in ("elo", "rating", "ts"):
+                raise ValueError(f"materialize_fixture: unknown key {key!r} "
+                                 f"(use 'last', 'elo', 'rating', or 'ts')")
+            recs = self.fetch_top(n, key=key, formatid=formatid)
+            source = f"top:{key}:{n}"
+        if not recs:
+            raise ValueError("materialize_fixture: the replay library is empty "
+                             "(nothing to imitate)")
+        out = (Path(out_path) if out_path is not None
+               else self.root / f"_fixture_{key}_{n}.jsonl")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as fh:
+            for r in recs:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        return {"path": str(out), "n": len(recs), "requested": n,
+                "truncated": len(recs) < n, "ids": [r.get("id") for r in recs],
+                "source": source}
+
+    def list_battles(self, n: int = 50, order: str = "last",
+                     formatid: Optional[str] = None) -> List[dict]:
+        """A LIGHTWEIGHT metadata list for the GUI (NO ``log`` — those can be
+        ~100KB each, so a list view must not pull them): the LAST ``n`` (insertion
+        order) or the TOP ``n`` by elo (missing elo sinks). Pure read."""
+        n = max(0, int(n))
+        if n == 0:
+            return []
+        entries = self._select(formatid)
+        if order == "last":
+            picked = entries[-n:]
+        elif order == "top":
+            have = [e for e in entries if e.get("elo") is not None]
+            have.sort(key=lambda e: -float(e["elo"]))
+            picked = have[:n]
+        else:
+            raise ValueError(f"list_battles: order must be 'last' or 'top' (got {order!r})")
+        return [{k: e.get(k) for k in ("id", "formatid", "ts", "elo", "rating", "winner_side", "bots")}
+                for e in picked]
+
     def count(self, formatid: Optional[str] = None) -> int:
         return len(self._select(formatid=formatid))
 

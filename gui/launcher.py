@@ -97,7 +97,6 @@ def validate_bc_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     into the run dir (per-run separation, like the self-play entry)."""
     d = d or {}
     problems: List[str] = []
-    _pos_int(d.get("n_battles"), "n_battles", problems)
     _pos_int(d.get("max_decisions"), "max_decisions", problems)
     _pos_int(d.get("epochs"), "epochs", problems)
     _pos_int(d.get("batch_size"), "batch_size", problems)
@@ -108,12 +107,37 @@ def validate_bc_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     device = d.get("device", "cpu")
     if device not in ("cpu", "cuda"):
         problems.append(f"device must be 'cpu' or 'cuda' (got {device!r})")
+    # ── the replay source: EITHER a raw fixture path OR the library ────────
+    replay_source = d.get("replay_source")
     fixture = d.get("fixture")
-    if not isinstance(fixture, str) or not fixture.strip():
-        problems.append("fixture must be a replay JSONL path "
-                        "(e.g. 'bot/data/replays/gen9ou.jsonl')")
-    elif not Path(fixture).expanduser().is_file():
-        problems.append(f"fixture does not exist (relative to the project root): {fixture!r}")
+    rs_n = None
+    if replay_source is not None:
+        if fixture is not None:
+            problems.append("provide EITHER 'fixture' (a path) OR 'replay_source' "
+                            "(the replay library) — not both")
+        if not isinstance(replay_source, dict):
+            problems.append(f"replay_source must be an object {{n, key}} "
+                            f"(got {type(replay_source).__name__})")
+        else:
+            rs_n = replay_source.get("n")
+            if not isinstance(rs_n, int) or isinstance(rs_n, bool) or rs_n < 1:
+                problems.append(f"replay_source.n must be an int >= 1 (got {rs_n!r})")
+            rs_key = replay_source.get("key", "elo")
+            if rs_key not in ("elo", "rating", "ts", "last"):
+                problems.append(f"replay_source.key must be one of "
+                                f"'elo','rating','ts','last' (got {rs_key!r})")
+    else:
+        if not isinstance(fixture, str) or not fixture.strip():
+            problems.append("provide a 'fixture' replay JSONL path "
+                            "(e.g. 'bot/data/replays/gen9ou.jsonl') OR a "
+                            "'replay_source' {n, key} from the replay library")
+        elif not Path(fixture).expanduser().is_file():
+            problems.append(f"fixture does not exist (relative to the project root): {fixture!r}")
+
+    # n_battles: required for a raw fixture; for replay_source it defaults to
+    # the selection size (a one-click "imitate the top-N" needs only ONE knob).
+    nb = d.get("n_battles", rs_n if replay_source is not None else None)
+    _pos_int(nb, "n_battles", problems)
     ckpt = d.get("ckpt_name")  # None = auto-generate ({date}_bc_{n}b.pt)
     if ckpt is not None:
         if not isinstance(ckpt, str) or not ckpt.strip() or "/" in ckpt or "\\" in ckpt:
@@ -122,8 +146,9 @@ def validate_bc_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         raise ValueError("; ".join(problems))
     return {
         "mode": "bc",
-        "n_battles": d["n_battles"],
+        "n_battles": nb,
         "fixture": fixture,
+        "replay_source": replay_source,
         "max_decisions": d["max_decisions"],
         "heldout_frac": d["heldout_frac"],
         "epochs": d["epochs"],

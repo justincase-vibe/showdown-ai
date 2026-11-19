@@ -125,6 +125,26 @@ def create_app(runs_dir: Optional[Path] = None) -> FastAPI:
                         "error": st.get("error")})
         return {"runs": out}
 
+    # ── replay library (feature 2: fetch last / top-elo N) ───────────────
+    @app.get("/api/replays")
+    def api_replays(order: str = "last", n: int = 25) -> Dict[str, Any]:
+        """The replay LIBRARY: a lightweight summary + a bounded metadata list
+        (last or top-elo N, NO logs — those are ~100KB each and are materialized
+        on demand for imitation, not pulled for a list view)."""
+        from replays import ReplayLibrary
+        if order not in ("last", "top"):
+            raise HTTPException(status_code=422,
+                                detail=f"order must be 'last' or 'top' (got {order!r})")
+        if not isinstance(n, int) or isinstance(n, bool) or n < 1:
+            raise HTTPException(status_code=422, detail=f"n must be an int >= 1 (got {n!r})")
+        n = min(n, 500)
+        lib = ReplayLibrary()
+        try:
+            battles = lib.list_battles(n=n, order=order)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        return {"summary": lib.summary(), "order": order, "n": n, "battles": battles}
+
     # ── control ────────────────────────────────────────────────────────
     @app.post("/api/train/start")
     def api_start(body: StartRequest) -> Dict[str, Any]:
