@@ -266,6 +266,36 @@ def validate_play_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def validate_selfplay_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Validate a GUI-submitted self-play-COLLECT config (mode
+    ``selfplay-collect``) into a ``SelfPlayConfig`` dict. This mode runs the
+    ``control/`` capture engine (pool + threaded battles + replay capture into
+    the library) — the "self-play that produces fetchable replays" (the
+    self-play -> fetch -> imitate loop, features 1 -> 2). Loud contract
+    (every problem listed, not just the first). The RAM ceiling (n_servers x
+    per_server) is enforced BY THE POOL, not here — but a nonsensical config is
+    a 400 before spawn, not a crash. ``control`` is imported lazily so the
+    launcher stays importable without pulling in the pool."""
+    from control.selfplay import SelfPlayConfig
+    d = d or {}
+    problems: list = []
+    _pos_int(d.get("n_battles", 8), "n_battles", problems)
+    fmt = d.get("battle_format", "gen9ou")
+    if not isinstance(fmt, str) or not fmt.strip():
+        problems.append("battle_format must be a non-empty string (e.g. 'gen9ou')")
+    _pos_int(d.get("n_servers", 2), "n_servers", problems)
+    _pos_int(d.get("per_server", 2), "per_server", problems)
+    _pos_int(d.get("port_base", 8000), "port_base", problems)
+    _pos_int(d.get("seed", 20261119), "seed", problems)
+    _pos_int(d.get("max_steps", 200), "max_steps", problems)
+    _pos_int(d.get("max_consecutive_errors", 3), "max_consecutive_errors", problems)
+    if problems:
+        raise ValueError("; ".join(problems))
+    out = SelfPlayConfig.from_dict(d).to_dict()
+    out["mode"] = "selfplay-collect"
+    return out
+
+
 # ── process control ──────────────────────────────────────────────────────────
 
 def _popen_kwargs() -> Dict[str, Any]:
@@ -315,8 +345,16 @@ def start_trainer(cfg: Dict[str, Any], runs_dir: Optional[Path] = None
         payload = validate_train_config(cfg).to_dict()
         entry = "gui.trainer_main"
         rounds_planned = int(payload["n_rounds"])
+    elif mode == "selfplay-collect":
+        # the capture engine: plays n_battles across the pool + saves every
+        # replay into the library (feature 2's source). Spawns
+        # control.selfplay_main, which owns the pool lifecycle.
+        payload = validate_selfplay_config(cfg)
+        entry = "control.selfplay_main"
+        rounds_planned = int(payload["n_battles"])
     else:
-        raise ValueError(f"unknown mode {mode!r} (expected 'selfplay', 'bc', 'eval', or 'play')")
+        raise ValueError(f"unknown mode {mode!r} (expected 'selfplay', "
+                         f"'selfplay-collect', 'bc', 'eval', or 'play')")
     runs = Path(runs_dir) if runs_dir is not None else default_runs_dir()
     active = find_active_run(runs)
     if active is not None:
@@ -447,6 +485,70 @@ def status(runs_dir: Optional[Path] = None, metrics_tail: int = 5) -> Dict[str, 
 # ── environment ──────────────────────────────────────────────────────────────
 
 _CUDA: Optional[bool] = None
+
+
+def browse_checkpoints(root: Optional[Path] = None) -> list:
+    """List all .pt checkpoints in scratch/ and runs/*/checkpoints/.
+
+    Shared between the web dashboard (``gui/server.py::api_browse``) and the
+    native GUI (Phase 2) so both reuse the SAME D97-fixed meta-reading logic.
+    Each entry carries ``type``, ``top1``, ``verdict``, ``n_battles`` from
+    the sibling ``.meta.json`` (D97: the runs-branch was fixed to read meta
+    just like the scratch-branch).
+
+    Returns a list of dicts (possibly empty)."""
+    import time as _time
+    root = Path(root) if root is not None else ROOT
+    results: list = []
+    scratch = root / "scratch"
+    if scratch.is_dir():
+        for p in sorted(scratch.glob("*.pt")):
+            meta_path = p.with_name(p.name + ".meta.json")
+            meta = {}
+            if meta_path.is_file():
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+            st = p.stat()
+            results.append({
+                "path": str(p.relative_to(root)),
+                "name": p.name,
+                "size_mb": round(st.st_size / 1e6, 1),
+                "modified": _time.strftime("%Y-%m-%d %H:%M", _time.gmtime(st.st_mtime)),
+                "type": "bc" if "bc" in p.name else "unknown",
+                "n_battles": meta.get("n_battles"),
+                "verdict": meta.get("verdict_pass"),
+                "top1": (meta.get("final") or {}).get("top1_acc"),
+            })
+    runs_dir = root / "runs"
+    if runs_dir.is_dir():
+        for run_dir in sorted(runs_dir.iterdir(), reverse=True):
+            ckpt_dir = run_dir / "checkpoints"
+            if not ckpt_dir.is_dir():
+                continue
+            for p in sorted(ckpt_dir.glob("*.pt")):
+                st = p.stat()
+                meta_path = p.with_name(p.name + ".meta.json")
+                meta = {}
+                if meta_path.is_file():
+                    try:
+                        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
+                results.append({
+                    "path": str(p.relative_to(root)),
+                    "name": p.name,
+                    "size_mb": round(st.st_size / 1e6, 1),
+                    "modified": _time.strftime("%Y-%m-%d %H:%M", _time.gmtime(st.st_mtime)),
+                    "type": "bc" if "bc" in p.name else (
+                        "selfplay" if ("selfplay" in p.name or "round" in p.name) else "unknown"),
+                    "run_id": run_dir.name,
+                    "n_battles": meta.get("n_battles"),
+                    "verdict": meta.get("verdict_pass"),
+                    "top1": (meta.get("final") or {}).get("top1_acc"),
+                })
+    return results
 
 
 def cuda_available() -> bool:

@@ -28,15 +28,11 @@ deselected); gui alone **43/43**.
    `type=bc top1=0.308 verdict=True n_battles=50`.
 
 ### Open (not fixed — each needs a decision, see section B)
-2. **Self-play → replay-capture is NOT reachable from the GUI.** The capture
-   engine (`control/selfplay_main.py`) exists and is tested, but
-   `launcher.start_trainer` has **no mode that spawns it** (confirmed: it's
-   referenced only in `control/` + `PLAN.md`, never in `gui/`). Consequence: the
-   GUI's "Self-play" only runs the PPO trainer (`gui.trainer_main`), which does
-   **not** save replays — so the replay **library stays empty** unless you run
-   `python -m control.selfplay_main` by hand. That breaks your intended loop
-   *self-play → fetch replays → imitate*. (The one-click imitation **works**; it
-   just has nothing in the library to imitate from.) **This is the biggest gap.**
+2. ~~**Self-play → replay-capture is NOT reachable from the GUI.**~~
+   **FIXED (D98):** `launcher.start_trainer` now routes `selfplay-collect` →
+   `control.selfplay_main`; the server's `api_start` handles it (CPU-only, no
+   device check); `launcher.browse_checkpoints` is extracted as a shared function
+   (no duplication); fast test stack **119/119 green**.
 3. **Single active-run slot + long-lived "play" sessions.** `start_trainer`
    refuses any new run while one is active. A "play until stopped" session
    (`n_battles=0`) holds the slot **indefinitely** — this is exactly what blocked
@@ -68,8 +64,8 @@ revealed-flag shortcut).
 
 | # | Decision | Options | My lean |
 |---|----------|---------|---------|
-| 1 | **GUI framework** | A = extend the existing **web** GUI (current; D96/D96.1 built on it) vs B = **native** desktop | **A** (no code twice; already works) |
-| 2 | **Self-play → capture in GUI** | expose `control/selfplay_main` as a "Self-play (collect)" mode so the library fills from the GUI | **yes, minimal version** — unblocks features 1→2→3 (the biggest gap, item A2) |
+| 1 | **GUI framework** | ~~A = extend the existing **web** GUI~~ vs B = **native** desktop | **RESOLVED (2026-11-19): B — native Python GUI (tkinter).** The user explicitly requested a native Python GUI and asked to retire the browser one once it works. See D98 for Phase 1 (control-plane) and the Phase 2 (tkinter) plan. |
+| 2 | **Self-play → capture in GUI** | expose `control/selfplay_main` as a "Self-play (collect)" mode so the library fills from the GUI | **RESOLVED (2026-11-19): FIXED as D98.** `launcher.start_trainer` now routes `selfplay-collect` → `control.selfplay_main`; the server's `api_start` handles it; the fast test stack is green (119/119). The biggest gap (item A2) is closed. |
 | 3 | **Multi-bot model** | league/ELO/pairing vs independent parallel bots | **held** (per your note) — league is the bigger build |
 | 4 | **Formats per run** | one format per run vs multiple simultaneously | one for now (simpler, verified) |
 | 5 | **Replay storage** | keep all vs top-ELO only? disk budget? (library has no pruning — ready for either) | keep all for now; add pruning later |

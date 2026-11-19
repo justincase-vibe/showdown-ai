@@ -177,10 +177,16 @@ def create_app(runs_dir: Optional[Path] = None) -> FastAPI:
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
             device = tc.device
+        elif mode == "selfplay-collect":
+            try:
+                launcher.validate_selfplay_config(cfg)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            device = "cpu"  # pool-based, always CPU
         else:
             raise HTTPException(status_code=400,
                                 detail=f"unknown mode {mode!r} "
-                                       f"(expected 'selfplay', 'bc', 'eval', or 'play')")
+                                       f"(expected 'selfplay', 'selfplay-collect', 'bc', 'eval', or 'play')")
         # device=cuda without CUDA is a config error, not a trainer crash
         if device == "cuda" and not launcher.cuda_available():
             raise HTTPException(status_code=400,
@@ -208,64 +214,10 @@ def create_app(runs_dir: Optional[Path] = None) -> FastAPI:
     # ── checkpoint browser (all .pt files the user can pick) ─────────
     @app.get("/api/checkpoints/browse")
     def api_browse() -> Dict[str, Any]:
-        """List all .pt checkpoints in scratch/ and runs/*/checkpoints/."""
-        import time as _time
-        root = launcher.ROOT
-        results = []
-        scratch = root / "scratch"
-        if scratch.is_dir():
-            for p in sorted(scratch.glob("*.pt")):
-                meta_path = p.with_name(p.name + ".meta.json")
-                meta = {}
-                if meta_path.is_file():
-                    try:
-                        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                    except Exception:
-                        pass
-                st = p.stat()
-                results.append({
-                    "path": str(p.relative_to(root)),
-                    "name": p.name,
-                    "size_mb": round(st.st_size / 1e6, 1),
-                    "modified": _time.strftime("%Y-%m-%d %H:%M", _time.gmtime(st.st_mtime)),
-                    "type": "bc" if "bc" in p.name else "unknown",
-                    "n_battles": meta.get("n_battles"),
-                    "verdict": meta.get("verdict_pass"),
-                    "top1": (meta.get("final") or {}).get("top1_acc"),
-                })
-        runs_dir = root / "runs"
-        if runs_dir.is_dir():
-            for run_dir in sorted(runs_dir.iterdir(), reverse=True):
-                ckpt_dir = run_dir / "checkpoints"
-                if not ckpt_dir.is_dir():
-                    continue
-                for p in sorted(ckpt_dir.glob("*.pt")):
-                    st = p.stat()
-                    # D97: BC runs checkpoint into runs/ too — the old
-                    # type="selfplay" hardcode mislabeled BC checkpoints and hid
-                    # their top1/verdict/n_battles. Read the meta exactly like the
-                    # scratch branch (same field names) so a BC checkpoint in
-                    # runs/ is indistinguishable from one in scratch/.
-                    meta_path = p.with_name(p.name + ".meta.json")
-                    meta = {}
-                    if meta_path.is_file():
-                        try:
-                            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                        except Exception:
-                            pass
-                    results.append({
-                        "path": str(p.relative_to(root)),
-                        "name": p.name,
-                        "size_mb": round(st.st_size / 1e6, 1),
-                        "modified": _time.strftime("%Y-%m-%d %H:%M", _time.gmtime(st.st_mtime)),
-                        "type": "bc" if "bc" in p.name else (
-                            "selfplay" if ("selfplay" in p.name or "round" in p.name) else "unknown"),
-                        "run_id": run_dir.name,
-                        "n_battles": meta.get("n_battles"),
-                        "verdict": meta.get("verdict_pass"),
-                        "top1": (meta.get("final") or {}).get("top1_acc"),
-                    })
-        return {"checkpoints": results}
+        """List all .pt checkpoints in scratch/ and runs/*/checkpoints/.
+        Delegates to the shared ``launcher.browse_checkpoints`` (D98: no
+        duplication — the native GUI reuses the same function)."""
+        return {"checkpoints": launcher.browse_checkpoints()}
 
     # ── per-run data ───────────────────────────────────────────────────
     @app.get("/api/metrics")
