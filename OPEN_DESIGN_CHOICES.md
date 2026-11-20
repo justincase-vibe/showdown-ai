@@ -168,11 +168,16 @@ committed (`e9e2f5a` engine trio, `fb378cc` GUI).** Decisions I made within
 the user-approved plan — flagged here for review:
 
 1. **Buffer policy: clear-after-update for ≥2 steps; SKIP+retain for thin
-   rounds.** Mirrors `SelfPlayTrainer.train_round` (`update() if
+   rounds. USER-APPROVED (2026-11-21: "i like the buffer persistence, lets
+   add it" — the clear-after-update resolution; confirmed it "leaves the
+   least junk around").** Mirrors `SelfPlayTrainer.train_round` (`update() if
    len(buffer)>=2 else skip`) — ONE learning semantics, two entry points.
 The league SKIPS a thin round instead of raising (the solo trainer still
    raises): a league run is a long campaign — one 1-decision round must not
-   kill it. NOT explicitly picked by the user (flagged in handoff).
+   kill it. (Why it's the right junk policy: PPO is on-policy — data from an
+   OLDER net version is stale and poisons the update — so clearing after
+   each update is correctness, not just tidiness. The only lingering state is
+   the <2-step thin-round sliver, which could never train on anyway.)
 2. **GAE at FINALIZE (the battle boundary), not at update time.** A
    trajectory is only complete where it ends: a battle end IS a terminal
    state; an intermediate battle end in a multi-battle buffer is NOT, so
