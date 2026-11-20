@@ -724,6 +724,32 @@ function handleDamage(req) {
   return out;
 }
 
+// ONE shared per-request dispatcher (no duplicated calc logic): damage or speed.
+function dispatchOne(r) {
+  if (r.type === 'damage') return handleDamage(r);
+  if (r.type === 'speed') {
+    const gen = r.gen ?? 9;
+    return { base: buildPokemon(gen, r.pokemon).stats.spe, speed: effectiveSpeed(gen, r.pokemon, !!r.tailwind, r.field) };
+  }
+  throw new Error('unknown request type: ' + (r && r.type));
+}
+
+// Shared request dispatch (single object OR an array of objects), with per-item
+// isolation for arrays (one bad item -> {error} for THAT item; the rest return).
+// Contains NO calc logic — only routing + isolation — so the one-shot CLI and
+// the persistent server share it verbatim ("no code written twice"). For a bad
+// SINGLE request it THROWS; callers decide how to surface that (one-shot exits
+// 1; the server returns {error} and keeps running).
+function dispatchRequest(req) {
+  if (Array.isArray(req)) {
+    return req.map((r) => {
+      try { return dispatchOne(r); }
+      catch (e) { return { error: e.message }; }
+    });
+  }
+  return dispatchOne(req);
+}
+
 function main() {
   let raw = '';
   process.stdin.setEncoding('utf8');
@@ -737,34 +763,15 @@ function main() {
       process.exit(1);
       return;
     }
-    // ONE shared per-request dispatcher (no duplicated calc logic): damage or
-    // speed. SINGLE mode = one object in -> one object out (unchanged contract;
-    // a bad request -> {error} + exit 1, which the test suite relies on). BATCH
-    // mode = a JSON ARRAY of requests -> an array of results IN ORDER, with
-    // per-item isolation (one bad item -> {error} for that item; the rest still
-    // return). Batch is the forward-eval path (my moves x enemy mons in ONE
-    // spawn, instead of N spawns).
-    function dispatchOne(r) {
-      if (r.type === 'damage') return handleDamage(r);
-      if (r.type === 'speed') {
-        const gen = r.gen ?? 9;
-        return { base: buildPokemon(gen, r.pokemon).stats.spe, speed: effectiveSpeed(gen, r.pokemon, !!r.tailwind, r.field) };
-      }
-      throw new Error('unknown request type: ' + (r && r.type));
-    }
-
     let res;
     if (Array.isArray(req)) {
-      res = req.map((r) => {
-        try { return dispatchOne(r); }
-        catch (e) { return { error: e.message }; }
-      });
+      res = dispatchRequest(req); // per-item isolation; never throws
     } else {
       try {
-        res = dispatchOne(req);
+        res = dispatchRequest(req);
       } catch (e) {
         process.stdout.write(JSON.stringify({ error: e.message }));
-        process.exit(1);
+        process.exit(1); // unchanged one-shot contract (the test suite relies on it)
         return;
       }
     }
@@ -772,4 +779,39 @@ function main() {
   });
 }
 
-main();
+// PERSISTENT mode (C — the league crash root-cause fix): ONE long-lived process
+// handles many line-delimited JSON requests and writes ONE line of JSON per
+// response. This kills the per-request `node` SPAWN churn that hard-crashed
+// (0xC0000409) under 8 concurrent battle threads — a worker stays resident and
+// just does calcs. Shares dispatchRequest (no duplicated calc logic). A bad line
+// -> {error} for THAT line; the server keeps running (unlike one-shot exit 1).
+function serverMain() {
+  let buf = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (chunk) => {
+    buf += chunk;
+    let idx;
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (line === '') continue;
+      let res;
+      try {
+        const req = JSON.parse(line);
+        if (Array.isArray(req)) {
+          res = dispatchRequest(req); // array: per-item isolation, never throws
+        } else {
+          try { res = dispatchRequest(req); }
+          catch (e) { res = { error: e.message }; } // single: {error}, keep running
+        }
+      } catch (e) {
+        res = { error: 'invalid JSON line: ' + e.message };
+      }
+      process.stdout.write(JSON.stringify(res) + '\n');
+    }
+  });
+  process.stdin.on('end', () => process.exit(0)); // stdin closed -> clean exit
+}
+
+if (process.argv.includes('--server')) serverMain();
+else main();
