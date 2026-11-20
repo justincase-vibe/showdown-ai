@@ -267,7 +267,8 @@ class DesktopApp:
             return self._add_field(row, col, label, default, "str")
         return self._add_field(row, col, label, default, "combo", values=values)
 
-    def _ckpt_field(self, row: int, col: int, label: str = "Checkpoint:") -> Any:
+    def _ckpt_field(self, row: int, col: int, label: str = "Checkpoint:",
+                    optional: bool = False) -> Any:
         """A checkpoint dropdown fed by ``launcher.browse_checkpoints()`` — the
         SAME list the Checkpoints tab shows (``scratch/*.pt`` +
         ``runs/*/checkpoints/*.pt``). Pick one instead of typing a path by hand.
@@ -276,7 +277,12 @@ class DesktopApp:
         project root), so it resolves correctly regardless of the GUI's working
         directory — the old free-typed field broke because a relative path was
         existence-checked against the GUI's CWD, not the project root. The box
-        stays EDITABLE so a custom path is still a valid fallback."""
+        stays EDITABLE so a custom path is still a valid fallback.
+
+        ``optional=True`` (the "continue training / resume from" fields) leaves
+        the box EMPTY by default — empty means "start from scratch"; the caller
+        maps an empty value to null. Non-empty values are the listed
+        (absolute) checkpoint paths."""
         try:
             cps = launcher.browse_checkpoints()
         except Exception:
@@ -289,7 +295,7 @@ class DesktopApp:
                 continue
             ap = Path(p) if Path(p).is_absolute() else (root / p)
             values.append(str(ap))
-        default = values[0] if values else ""
+        default = ("" if optional else (values[0] if values else ""))
         var = tk.StringVar(value=default)
         w = ttk.Combobox(self._fields_frame, textvariable=var, values=values, width=56)
         w.grid(row=row, column=col + 1, sticky="we", pady=2, padx=(4, 12))
@@ -313,6 +319,8 @@ class DesktopApp:
         self._ppo_epochs = self._add_field(r, 0, "Epochs:", 1, "int"); r += 1
         self._ppo_lr = self._add_field(r, 0, "LR:", 3e-4, "float"); r += 1
         self._ppo_device = self._add_field(r, 0, "Device:", "cpu", "str"); r += 1
+        # continue training from an existing checkpoint (empty = start from scratch)
+        self._ppo_resume = self._ckpt_field(r, 0, "Resume from (optional):", optional=True); r += 1
 
     def _build_bc_fields(self) -> None:
         r = 0
@@ -323,6 +331,8 @@ class DesktopApp:
         self._bc_lr = self._add_field(r, 0, "LR:", 3e-3, "float"); r += 1
         self._bc_seed = self._add_field(r, 0, "Seed:", 42, "int"); r += 1
         self._bc_device = self._add_field(r, 0, "Device:", "cpu", "str"); r += 1
+        # continue / fine-tune from an existing checkpoint (empty = random init)
+        self._bc_resume = self._ckpt_field(r, 0, "Start from ckpt (optional):", optional=True); r += 1
 
     def _build_play_fields(self) -> None:
         r = 0
@@ -697,6 +707,8 @@ class DesktopApp:
                 "epochs": self._ppo_epochs.get(),
                 "lr": self._ppo_lr.get(),
                 "device": self._ppo_device.get(),
+                # continue training from an existing checkpoint (None = from scratch)
+                "resume_from": (self._ppo_resume.get() or None),
             }
         elif mode == "bc":
             return {
@@ -710,6 +722,8 @@ class DesktopApp:
                 "lr": self._bc_lr.get(),
                 "device": self._bc_device.get(),
                 "seed": self._bc_seed.get(),
+                # fine-tune from an existing checkpoint (None = random init)
+                "initial_ckpt": (self._bc_resume.get() or None),
             }
         elif mode == "league":
             return {

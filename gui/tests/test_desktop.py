@@ -141,6 +141,41 @@ def test_config_builder_bc(shared_root):
     # required fields that the GUI doesn't expose (use defaults)
     assert cfg["max_decisions"] == 40
     assert cfg["heldout_frac"] == 0.5
+    # D102.3 — the optional "Start from ckpt" field: empty (default) -> None
+    assert cfg["initial_ckpt"] is None
+    app.close()
+
+
+def test_config_builder_bc_resume(shared_root):
+    """D102.3 — the BC "Start from ckpt (optional)" field maps an EMPTY box to
+    ``None`` (random init) and a CHOSEN path to that path (fine-tune)."""
+    from gui.desktop.app import DesktopApp
+    app = DesktopApp(headless=True, root=shared_root)
+    app.build()
+    app._mode_var.set("Imitation (BC)")
+    app._on_mode_change(None)
+    assert app._bc_resume.get() == ""  # optional -> empty by default
+    assert app._build_config()["initial_ckpt"] is None
+
+    # choosing a checkpoint -> that exact path is carried into the config
+    app._bc_resume.set("scratch/2026-11-19_bc_50b.pt")
+    assert app._build_config()["initial_ckpt"] == "scratch/2026-11-19_bc_50b.pt"
+    app.close()
+
+
+def test_config_builder_ppo_resume(shared_root):
+    """D102.3 — the PPO "Resume from (optional)" field maps an EMPTY box to
+    ``None`` (from scratch) and a CHOSEN path to that path (resume)."""
+    from gui.desktop.app import DesktopApp
+    app = DesktopApp(headless=True, root=shared_root)
+    app.build()
+    app._mode_var.set("Self-play (PPO training)")
+    app._on_mode_change(None)
+    assert app._ppo_resume.get() == ""  # optional -> empty by default
+    assert app._build_config()["resume_from"] is None
+
+    app._ppo_resume.set("scratch/2026-11-19_bc_50b.pt")
+    assert app._build_config()["resume_from"] == "scratch/2026-11-19_bc_50b.pt"
     app.close()
 
 

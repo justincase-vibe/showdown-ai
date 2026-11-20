@@ -166,6 +166,67 @@ def test_validate_train_config_loud():
     assert tc2.battles_per_round == 1
 
 
+def test_validate_train_config_resume_from_resolves(tmp_path):
+    """D102.3 — ``resume_from`` is resolved to an ABSOLUTE path (CWD-independent)
+    and must EXIST; absent/null = start from scratch (``resume_from is None``)."""
+    good = small_cfg()
+    # absent -> None
+    assert launcher.validate_train_config(good).resume_from is None
+
+    # a valid (root-RELATIVE) path -> absolute, and it exists
+    ckpt = tmp_path / "ckpt.pt"
+    ckpt.write_bytes(b"x")
+    tc = launcher.validate_train_config({**good, "resume_from": str(ckpt)})
+    assert tc.resume_from is not None
+    assert Path(tc.resume_from).is_absolute(), f"expected absolute, got {tc.resume_from}"
+    assert Path(tc.resume_from).is_file()
+
+    # missing -> loud error
+    with pytest.raises(ValueError, match="resume_from"):
+        launcher.validate_train_config({**good, "resume_from": str(tmp_path / "nope.pt")})
+
+
+def _bc_good_cfg(fixture: str) -> dict:
+    return {"fixture": fixture, "n_battles": 1, "max_decisions": 4,
+            "heldout_frac": 0.5, "epochs": 1, "batch_size": 2, "lr": 1e-3,
+            "device": "cpu", "seed": 0}
+
+
+def test_validate_bc_config_initial_ckpt(tmp_path):
+    """D102.3 — ``validate_bc_config`` handles the optional ``initial_ckpt``
+    (continue/fine-tune) field: absent/null -> ``initial_ckpt is None``; a
+    valid path -> ABSOLUTE + must be a FILE; missing -> loud 400 (not a crash)."""
+    fixture = tmp_path / "fixture.jsonl"
+    fixture.write_text('{"x": 1}\n', encoding="utf-8")
+
+    # absent -> None (random init)
+    out = launcher.validate_bc_config(_bc_good_cfg(str(fixture)))
+    assert out["initial_ckpt"] is None
+
+    # explicit null -> None
+    out2 = launcher.validate_bc_config({**_bc_good_cfg(str(fixture)), "initial_ckpt": None})
+    assert out2["initial_ckpt"] is None
+
+    # valid path -> absolute + exists
+    ckpt = tmp_path / "start.pt"
+    ckpt.write_bytes(b"y")
+    out3 = launcher.validate_bc_config({**_bc_good_cfg(str(fixture)), "initial_ckpt": str(ckpt)})
+    assert out3["initial_ckpt"] is not None
+    assert Path(out3["initial_ckpt"]).is_absolute()
+    assert Path(out3["initial_ckpt"]).is_file()
+
+    # missing file -> loud error naming the field
+    with pytest.raises(ValueError) as ei:
+        launcher.validate_bc_config({**_bc_good_cfg(str(fixture)),
+                                     "initial_ckpt": str(tmp_path / "nope.pt")})
+    assert "initial_ckpt" in str(ei.value)
+
+    # non-path junk -> loud error naming the field
+    with pytest.raises(ValueError) as ei2:
+        launcher.validate_bc_config({**_bc_good_cfg(str(fixture)), "initial_ckpt": "   "})
+    assert "initial_ckpt" in str(ei2.value)
+
+
 def test_find_active_none_with_no_runs(runs):
     assert launcher.find_active_run(runs) is None
     st = launcher.status(runs)

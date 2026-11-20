@@ -90,7 +90,8 @@ def main(argv: Optional[list] = None) -> int:
     runstate.write_heartbeat(rd, 0, 0, "bc-start")
     _log(f"BC start run={rd.name} n_battles={cfg.get('n_battles')} "
          f"fixture={cfg.get('fixture')} device={device} epochs={cfg.get('epochs')} "
-         f"batch={cfg.get('batch_size')} lr={cfg.get('lr')}")
+         f"batch={cfg.get('batch_size')} lr={cfg.get('lr')}"
+         f"{'  initial_ckpt=' + str(cfg['initial_ckpt']) if cfg.get('initial_ckpt') else ''}")
 
     from net import bc
 
@@ -138,6 +139,7 @@ def main(argv: Optional[list] = None) -> int:
             seed=int(cfg.get("seed", 0)),
             out_dir=str(rd / "checkpoints"),
             ckpt_name=cfg.get("ckpt_name") or None,  # None -> bc.run generates {n}b_bc_{id}.pt (D99)
+            initial_ckpt=cfg.get("initial_ckpt") or None,  # D102.3: continue/fine-tune from an existing ckpt (None = random init)
             log=_log,
             stop_check=stop_check,
             heartbeat=heartbeat,

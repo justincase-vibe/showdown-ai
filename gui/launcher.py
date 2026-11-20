@@ -91,8 +91,14 @@ def validate_train_config(d: Optional[Dict[str, Any]]) -> "TrainConfig":
     if tc.resume_from is not None:
         if not isinstance(tc.resume_from, str) or not tc.resume_from.strip():
             problems.append("resume_from must be a checkpoint path (or null)")
-        elif not Path(tc.resume_from).exists():
-            problems.append(f"resume_from does not exist: {tc.resume_from!r}")
+        else:
+            # resolve a RELATIVE path against the project root (not the GUI's
+            # CWD) and carry the ABSOLUTE path into the config, so the spawned
+            # child loads it correctly regardless of its own CWD.
+            resolved = str(_resolve_ckpt_path(tc.resume_from))
+            tc.resume_from = resolved
+            if not Path(resolved).exists():
+                problems.append(f"resume_from does not exist: {tc.resume_from!r}")
     if problems:
         raise ValueError("; ".join(problems))
     return tc
@@ -154,6 +160,19 @@ def validate_bc_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if ckpt is not None:
         if not isinstance(ckpt, str) or not ckpt.strip() or "/" in ckpt or "\\" in ckpt:
             problems.append(f"ckpt_name must be a plain file name or null (got {ckpt!r})")
+    # initial_ckpt: the optional "continue training / fine-tune from" starting
+    # checkpoint (D102.3). None/empty = random init. When set it must EXIST
+    # (a 400, not a trainer crash) and is resolved to an ABSOLUTE path so the
+    # spawned child loads it regardless of its CWD.
+    init_ckpt = d.get("initial_ckpt")
+    init_ckpt_out = None
+    if init_ckpt is not None:
+        if not isinstance(init_ckpt, str) or not init_ckpt.strip():
+            problems.append("initial_ckpt must be a checkpoint path (.pt) or null")
+        else:
+            init_ckpt_out = str(_resolve_ckpt_path(init_ckpt))
+            if not Path(init_ckpt_out).is_file():
+                problems.append(f"initial_ckpt does not exist: {init_ckpt!r}")
     if problems:
         raise ValueError("; ".join(problems))
     return {
@@ -169,6 +188,7 @@ def validate_bc_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "device": device,
         "seed": d["seed"],
         "ckpt_name": ckpt,
+        "initial_ckpt": init_ckpt_out,
     }
 
 

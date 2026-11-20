@@ -543,6 +543,7 @@ def run(n_battles: int = 50, fixture: str = "bot/data/replays/gen9ou.jsonl",
         epochs: int = 15, batch_size: int = 24, lr: float = 3e-3,
         device: str = "cpu", seed: int = 0,
         out_dir: str = "scratch", ckpt_name: Optional[str] = None,
+        initial_ckpt: Optional[str] = None,
         log=print,
         stop_check: Optional[Callable[[], bool]] = None,
         heartbeat: Optional[Callable[[Dict], None]] = None) -> Dict:
@@ -565,7 +566,8 @@ def run(n_battles: int = 50, fixture: str = "bot/data/replays/gen9ou.jsonl",
     t0 = time.time()
     log(f"== S4.3 BC warm-start (increment 1) ==")
     log(f"N={n_battles} fixture={fixture} device={device} epochs={epochs} "
-        f"batch={batch_size} lr={lr} seed={seed} ckpt={ckpt_name}")
+        f"batch={batch_size} lr={lr} seed={seed} ckpt={ckpt_name}"
+        f"{'  FINE-TUNING from ' + str(initial_ckpt) if initial_ckpt else ''}")
 
     vocabs = build_vocabs()
     log(f"vocabs: {vocabs.sizes()}")
@@ -593,7 +595,17 @@ def run(n_battles: int = 50, fixture: str = "bot/data/replays/gen9ou.jsonl",
                            f"battles (replayed={split.n_replayed})")
 
     log(f"[2/4] building PokeNet ...")
-    net = PokeNet(vocabs)
+    if initial_ckpt:
+        # continue / fine-tune from an existing checkpoint (the GUI's
+        # "Start from ckpt" option). load_checkpoint verifies the vocab sizes
+        # + layout checksum match (a loud error, not silent shape drift), and
+        # — like the random-init path below — builds on CPU; train() moves it
+        # to the device.
+        net = load_checkpoint(initial_ckpt, vocabs)
+        log(f"      continuing from existing checkpoint: {initial_ckpt}")
+    else:
+        net = PokeNet(vocabs)
+        log(f"      (random init)")
     n_params = sum(p.numel() for p in net.parameters())
     log(f"      {n_params/1e6:.1f}M parameters")
 
