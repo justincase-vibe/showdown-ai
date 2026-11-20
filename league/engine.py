@@ -76,6 +76,11 @@ class LeagueConfig:
     max_norm: float = 0.5
     gamma: float = 0.99
     lam: float = 0.95
+    # ── cull + refresh (D103 step 4; the population loop, learning mode) ──
+    cull_every: int = 4          # retire+refresh every K rounds (0 = disabled)
+    cull_frac: float = 0.25      # the bottom X of the roster by ELO
+    min_roster: int = 4          # the roster never drops below this (and 2)
+    refresh_dir: Optional[str] = None  # new bots' .pt dir (default "scratch")
     # ── the pool (the RAM ceiling is enforced by the pool, not here) ───
     n_servers: int = 2
     per_server: int = 2
