@@ -22,12 +22,12 @@ sys.path.insert(0, str(ROOT))
 # ── headless construction ────────────────────────────────────────────────────
 
 
-def test_app_constructs_headlessly():
+def test_app_constructs_headlessly(shared_root):
     """The app creates a root window, builds all widgets, and destroys
     without error. Proves the widget tree is valid (no missing imports,
     no bad ttk calls)."""
     from gui.desktop.app import DesktopApp
-    app = DesktopApp(headless=True)
+    app = DesktopApp(headless=True, root=shared_root)
     app.build()
     # verify key widgets exist
     assert app.root is not None
@@ -44,13 +44,13 @@ def test_app_constructs_headlessly():
     # default mode is BC (the most common task)
     assert app._current_mode == "bc"
     # cleanup
-    app.root.destroy()
+    app.close()
 
 
-def test_mode_switching_rebuilds_fields():
+def test_mode_switching_rebuilds_fields(shared_root):
     """Switching modes rebuilds the per-mode field frame (no stale widgets)."""
     from gui.desktop.app import DesktopApp
-    app = DesktopApp(headless=True)
+    app = DesktopApp(headless=True, root=shared_root)
     app.build()
 
     # default is bc
@@ -75,16 +75,16 @@ def test_mode_switching_rebuilds_fields():
     assert app._current_mode == "bc"
     assert app._bc_fixture is not None
 
-    app.root.destroy()
+    app.close()
 
 
 # ── config builder (control-plane wiring) ────────────────────────────────────
 
 
-def test_config_builder_collect():
+def test_config_builder_collect(shared_root):
     """The collect-mode config has all SelfPlayConfig fields + mode."""
     from gui.desktop.app import DesktopApp
-    app = DesktopApp(headless=True)
+    app = DesktopApp(headless=True, root=shared_root)
     app.build()
 
     # switch to collect mode
@@ -109,13 +109,13 @@ def test_config_builder_collect():
     assert cfg["port_base"] == 50000
     assert cfg["seed"] == 99
     assert cfg["max_steps"] == 300
-    app.root.destroy()
+    app.close()
 
 
-def test_config_builder_bc():
+def test_config_builder_bc(shared_root):
     """The BC-mode config has all validate_bc_config fields + mode."""
     from gui.desktop.app import DesktopApp
-    app = DesktopApp(headless=True)
+    app = DesktopApp(headless=True, root=shared_root)
     app.build()
 
     app._mode_var.set("Imitation (BC)")
@@ -141,13 +141,13 @@ def test_config_builder_bc():
     # required fields that the GUI doesn't expose (use defaults)
     assert cfg["max_decisions"] == 40
     assert cfg["heldout_frac"] == 0.5
-    app.root.destroy()
+    app.close()
 
 
-def test_config_builder_play():
+def test_config_builder_play(shared_root):
     """The play-mode config has all validate_play_config fields + mode."""
     from gui.desktop.app import DesktopApp
-    app = DesktopApp(headless=True)
+    app = DesktopApp(headless=True, root=shared_root)
     app.build()
 
     app._mode_var.set("Play against a checkpoint")
@@ -169,13 +169,13 @@ def test_config_builder_play():
     assert cfg["device"] == "cpu"
     assert cfg["greedy"] is True
     assert cfg["n_battles"] == 0  # play until stopped
-    app.root.destroy()
+    app.close()
 
 
-def test_config_builder_eval():
+def test_config_builder_eval(shared_root):
     """The eval-mode config has all validate_eval_config fields + mode."""
     from gui.desktop.app import DesktopApp
-    app = DesktopApp(headless=True)
+    app = DesktopApp(headless=True, root=shared_root)
     app.build()
 
     app._mode_var.set("Eval vs random")
@@ -194,10 +194,10 @@ def test_config_builder_eval():
     assert cfg["battle_format"] == "gen9ou"
     assert cfg["seed"] == 123
     assert cfg["device"] == "cpu"
-    app.root.destroy()
+    app.close()
 
 
-def test_collect_defaults_avoid_port_8000():
+def test_collect_defaults_avoid_port_8000(shared_root):
     """The collect-mode defaults use port_base=49960 (not :8000 — the
     user's personal Showdown server)."""
     from gui.desktop.app import DesktopApp
@@ -206,7 +206,7 @@ def test_collect_defaults_avoid_port_8000():
     assert COLLECT_DEFAULTS["n_servers"] == 2
     assert COLLECT_DEFAULTS["per_server"] == 2
 
-    app = DesktopApp(headless=True)
+    app = DesktopApp(headless=True, root=shared_root)
     app.build()
     # switch to collect mode to access the collect fields
     app._mode_var.set("Self-play (collect replays)")
@@ -214,21 +214,21 @@ def test_collect_defaults_avoid_port_8000():
     assert app._collect_port_base.get() == 49960
     assert app._collect_n_servers.get() == 2
     assert app._collect_per_server.get() == 2
-    app.root.destroy()
+    app.close()
 
 
-def test_status_bar_poll_does_not_crash():
+def test_status_bar_poll_does_not_crash(shared_root):
     """The poll loop reads launcher.status and updates the status bar
     without crashing (even when no run is active)."""
     from gui.desktop.app import DesktopApp
-    app = DesktopApp(headless=True)
+    app = DesktopApp(headless=True, root=shared_root)
     app.build()
     # call _poll directly (it would normally be called via root.after)
     app._poll()
     # the status label should have been updated
     text = app._status_label.cget("text")
     assert "Status:" in text
-    app.root.destroy()
+    app.close()
 
 
 if __name__ == "__main__":  # pragma: no cover

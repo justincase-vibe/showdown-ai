@@ -178,6 +178,19 @@ class ReplayLibrary:
         return [{k: e.get(k) for k in ("id", "formatid", "ts", "elo", "rating", "winner_side", "bots")}
                 for e in picked]
 
+    def get_by_id(self, rid: str) -> Optional[dict]:
+        """The FULL record (with ``log``) for one battle id — or ``None``.
+        If two DIFFERENT battles share an id (D95.1), the most recently saved
+        one wins (index order = save order). Pure read."""
+        rid = str(rid)
+        entry = None
+        for e in self._index:
+            if e.get("id") == rid:
+                entry = e
+        if entry is None:
+            return None
+        return self._read_record(entry)
+
     def count(self, formatid: Optional[str] = None) -> int:
         return len(self._select(formatid=formatid))
 

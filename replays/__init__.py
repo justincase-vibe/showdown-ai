@@ -17,5 +17,11 @@ Storage: ``{root}/{formatid}.jsonl`` (append-only, the truth) + ``index.json``
 """
 from .library import ReplayLibrary, DEFAULT_ROOT
 from .record import make_record
+from .view import (  # D101 — replay viewer (browser / PS-client drag&drop)
+    build_replay_html,
+    open_replay_in_browser,
+    write_replay_file,
+)
 
-__all__ = ["ReplayLibrary", "make_record", "DEFAULT_ROOT"]
+__all__ = ["ReplayLibrary", "make_record", "DEFAULT_ROOT",
+           "build_replay_html", "write_replay_file", "open_replay_in_browser"]

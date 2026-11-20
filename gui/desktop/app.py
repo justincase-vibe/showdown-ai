@@ -19,6 +19,7 @@ widgets, and destroys — no display needed.
 from __future__ import annotations
 
 import json
+import queue
 import sys
 import threading
 import tkinter as tk
@@ -53,9 +54,13 @@ class DesktopApp:
         app.root.destroy()
     """
 
-    def __init__(self, headless: bool = False):
+    def __init__(self, headless: bool = False, root: Optional[tk.Tk] = None):
+        """If ``root`` is given, build into that existing ``tk.Tk`` (embedding);
+        otherwise :meth:`build` creates one. ``close()`` only destroys a root
+        the app OWNS."""
         self.headless = headless
-        self.root: Optional[tk.Tk] = None
+        self.root: Optional[tk.Tk] = root
+        self._owns_root = root is None
         self._poll_id: Optional[str] = None
         self._runs_dir = launcher.default_runs_dir()
 
@@ -65,6 +70,10 @@ class DesktopApp:
         # replay library cache
         self._replay_summary: Dict[str, Any] = {}
         self._replay_battles: List[Dict[str, Any]] = []
+
+        # D101 replay-export worker (main-thread queue drain — tkinter-safe)
+        self._replay_msg_q: "queue.Queue" = queue.Queue()
+        self._replay_worker: Optional[threading.Thread] = None
 
         # checkpoint cache
         self._checkpoints: List[Dict[str, Any]] = []
@@ -80,8 +89,11 @@ class DesktopApp:
     # ── build (create all widgets) ───────────────────────────────────────────
 
     def build(self) -> None:
-        """Create the root window and all widgets. Safe to call headlessly."""
-        self.root = tk.Tk()
+        """Create the root window (unless one was provided) and all widgets.
+        Safe to call headlessly."""
+        if self.root is None:
+            self.root = tk.Tk()
+            self._owns_root = True
         self.root.title("Showdown AI — Mission Control")
         self.root.geometry("900x640")
         self.root.minsize(720, 480)
@@ -110,6 +122,24 @@ class DesktopApp:
 
         # initial poll
         self._poll()
+
+    def close(self) -> None:
+        """Tear down: destroy the root if we own it, else only our widgets
+        (an embedded app must not kill the host's Tk interpreter).
+        Cancels the pending poll callback so it can't fire on dead widgets."""
+        if self.root is None:
+            return
+        if self._poll_id is not None:
+            try:
+                self.root.after_cancel(self._poll_id)
+            except tk.TclError:
+                pass
+            self._poll_id = None
+        if self._owns_root:
+            self.root.destroy()
+        else:
+            for w in self.root.winfo_children():
+                w.destroy()
 
     # ── status bar ─────────────────────────────────────────────────────────
 
@@ -292,6 +322,69 @@ class DesktopApp:
         self._replay_tree.configure(yscrollcommand=vsb.set)
         self._replay_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # D101 — open the selected replay in the browser (Chrome)
+        view_row = ttk.Frame(frame)
+        view_row.pack(fill=tk.X, pady=6)
+        self._replay_open_btn = ttk.Button(view_row, text="Open in browser (Chrome)",
+                                           command=self._open_replay_in_browser)
+        self._replay_open_btn.pack(side=tk.LEFT)
+        self._replay_status_label = ttk.Label(view_row, text="")
+        self._replay_status_label.pack(side=tk.LEFT, padx=10)
+        ttk.Label(frame, foreground="#666666",
+                  text="Files land in runs/replays_view/. "
+                      "Offline: drag the .html onto the Showdown client window.") \
+            .pack(anchor="w")
+
+    def _open_replay_in_browser(self) -> None:
+        """D101 — export the selected replay as a client-accepted .html file
+        and open it in the default browser (Chrome).
+
+        Thread model (tkinter is NOT thread-safe — widget access happens ONLY
+        in the main loop): the worker thread does the IO and puts a status
+        message on a queue; :meth:`_pump_replay_msgs` (scheduled via
+        ``root.after`` from the MAIN thread) drains it.
+        """
+        if self._replay_worker is not None and self._replay_worker.is_alive():
+            self._replay_status_label.config(text="Still preparing… (one at a time)")
+            return
+        sel = self._replay_tree.selection()
+        if not sel:
+            self._replay_status_label.config(text="Select a replay row first.")
+            return
+        row_id = str(self._replay_tree.item(sel[0], "values")[0])
+        self._replay_status_label.config(text=f"Preparing {row_id}…")
+
+        def _work() -> None:
+            try:
+                from replays import ReplayLibrary, open_replay_in_browser
+                rec = ReplayLibrary().get_by_id(row_id)
+                if rec is None:
+                    self._replay_msg_q.put(f"Replay {row_id} not found in the library.")
+                    return
+                path = open_replay_in_browser(rec)
+                self._replay_msg_q.put(f"Opened: {path}")
+            except Exception as exc:   # surface ANY failure in the status label
+                self._replay_msg_q.put(f"Error: {exc}")
+
+        self._replay_worker = threading.Thread(target=_work, daemon=True)
+        self._replay_worker.start()
+        self._pump_replay_msgs()
+
+    def _pump_replay_msgs(self) -> None:
+        """Main-loop drain of the replay worker's message queue (all tkinter
+        calls happen here, on the main thread). Reschedules until the worker
+        has delivered and the queue is empty."""
+        try:
+            while True:
+                self._replay_status_label.config(text=self._replay_msg_q.get_nowait())
+        except queue.Empty:
+            pass
+        except tk.TclError:
+            return   # window closed mid-export: stop the pump (no reschedule)
+        w = self._replay_worker
+        if w is not None and (w.is_alive() or not self._replay_msg_q.empty()):
+            self.root.after(50, self._pump_replay_msgs)
 
     def _refresh_replays(self) -> None:
         """Fetch the replay library summary + a bounded list."""
