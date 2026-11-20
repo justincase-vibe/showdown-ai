@@ -97,20 +97,15 @@ def send_challenge(player: Any, opponent: str, fmt: str, timeout: float = 25.0) 
 def _load_checkpoint(ckpt_path: str, vocabs: Any, device: str):
     """Load a PokeNet checkpoint (BOTH formats) + a ready PokeAgent.
 
-    * BC checkpoints:        ``payload = {state_dict, vocab_sizes, layout_checksum}``
-    * Self-play checkpoints: ``payload = {"net": {state_dict, ...}, "round", ...}``
-
-    Mirrors ``gui/eval_main.py`` so the load path is one, not two.
+    The format handling (BC ``{state_dict, …}`` vs self-play
+    ``{"net": {state_dict, …}, "round", …}``) lives in ``PokeNet.load_file`` —
+    THE ONE load path (D103 step 1), shared with the league engine and
+    ``gui.eval_main``.
     """
-    import torch
     from net.model import PokeNet
     from net.agent import PokeAgent
 
-    payload = torch.load(ckpt_path, map_location=device, weights_only=True)
-    if "net" in payload and isinstance(payload["net"], dict) and "state_dict" in payload["net"]:
-        net = PokeNet.load(payload["net"], vocabs, device=device)
-    else:
-        net = PokeNet.load(payload, vocabs, device=device)
+    net = PokeNet.load_file(ckpt_path, vocabs, device=device)
     net.eval()
     agent = PokeAgent(net, seed=None, device=device)
     return net, agent

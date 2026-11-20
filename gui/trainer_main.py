@@ -89,10 +89,11 @@ def main(argv: Optional[list] = None) -> int:
         vocabs = build_vocabs()
         start_round = 0
         if tc.resume_from:
-            payload = torch.load(tc.resume_from, map_location=device)
             from net.model import PokeNet
-            net = PokeNet.load(payload["net"], vocabs)  # verifies vocab + layout
-            net.to(device)
+            # THE ONE load path (D103 step 1): format sniffing lives in
+            # PokeNet.unwrap_payload; we keep the outer payload for "round".
+            payload = torch.load(tc.resume_from, map_location="cpu", weights_only=True)
+            net = PokeNet.load(PokeNet.unwrap_payload(payload), vocabs, device=device)  # verifies vocab + layout
             start_round = int(payload.get("round", 0))
             log(f"resumed from {tc.resume_from} (round {start_round})")
         else:

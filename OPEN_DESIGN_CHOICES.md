@@ -50,8 +50,43 @@ runner that plays from it):**
 The league question is **RESOLVED (D103)**: the league is **self-improving**
 (each bot = NN + rollout buffer, PPO update each round, ELO-driven cull +
 fresh-bot injection; seeding = new random net OR snapshot to continue).
-Plan is in PLAN.md D103; step 1 awaits the user's go. Also recorded: the
-checkpoint-dropdown short-name fix (D104).
+Plan is in PLAN.md D103. Also recorded: the checkpoint-dropdown short-name
+fix (D104).
+
+---
+
+## 2026-11-20 — D103 Step 1 done: the bot that learns (design decisions)
+
+**Step 1 ("Agent = checkpoint + replay buffer") is BUILT.** Three decisions
+I made within the user-approved plan — flagged here for review:
+
+1. **`LearningBot` instead of extending `registry.Bot` with torch.** The plan
+   said "extend `league/registry.py::Bot`"; the registry module's explicit
+   contract is **framework-agnostic (no torch import)** and the GUI reads the
+   roster through it. So: `Bot` stays the ROSTER RECORD (name/ckpt/ELO/W-L,
+   JSON); the new `league/learner.py::LearningBot` is the LIVE object (net +
+   `RolloutBuffer` + own save path + origin + counters). Same intent, no torch
+   in the roster layer. **If you'd rather the registry hold the nets directly,
+   say so and I'll merge them** — the cost is torch in every roster reader.
+2. **ONE checkpoint load path.** The two-format sniffing (BC vs self-play) was
+   copy-pasted in FIVE places (engine, human_play, eval_main, trainer_main,
+   bc). Now `PokeNet.load_file(path, vocabs, device)` + `PokeNet.unwrap_payload`
+   are the single source; all five call sites delegate. Verified with the real
+   checkpoints (selfplay_round1.pt / league_random_1000.pt / s43_bc_n2000.pt
+   all load, 7.2M params).
+3. **Pristine-snapshot principle.** A bot seeded from a snapshot keeps its
+   UPDATED weights in its OWN save path — it never overwrites the source
+   (or a file another bot shares). Consequence: the league contract is
+   ONE FILE PER BOT (the eval-only engine allowed shared files because it
+   never wrote).
+
+**OPEN for step 3 (not decided yet):** the buffer policy — capacity cap?
+clear-after-update vs keep-across-rounds? (Step 1 defaults: unbounded buffer,
+`clear_buffer()` available; `RolloutBuffer` semantics unchanged.)
+
+**Gate:** league+net+gui 211 passed / 1 skipped (CUDA-only) / 5 deselected
+(live); `league/tests/test_learner.py` 13/13; three real checkpoints load
+through the single path. CPU-only throughout.
 
 ---
 

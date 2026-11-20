@@ -531,10 +531,12 @@ def _save_checkpoint(net: PokeNet, path: str, extra: Optional[Dict] = None) -> N
 
 def load_checkpoint(path: str, vocabs) -> PokeNet:
     """Load a :func:`_save_checkpoint` torch payload back into a PokeNet.
-    Verifies the vocab sizes + layout checksum match (loud error on drift)."""
-    import torch as _torch
-    payload = _torch.load(path, map_location="cpu", weights_only=True)
-    return PokeNet.load(payload, vocabs)
+    Verifies the vocab sizes + layout checksum match (loud error on drift).
+
+    Delegates to ``PokeNet.load_file`` — THE ONE load path (D103 step 1),
+    which also accepts the self-play format (a superset, so BC checkpoints
+    load exactly as before)."""
+    return PokeNet.load_file(path, vocabs)
 
 
 # ── the increment-1 run ─────────────────────────────────────────────────

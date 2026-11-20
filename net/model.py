@@ -344,6 +344,42 @@ class PokeNet(nn.Module):
             net.to(torch.device(device))
         return net
 
+    @classmethod
+    def load_file(cls, path, vocabs: Vocabs,
+                  device: Optional[str] = None) -> "PokeNet":
+        """Load a checkpoint FILE (BOTH formats) into a fresh verified net.
+
+        THE ONE load path (D103 step 1): the league engine, ``net.human_play``,
+        ``gui.eval_main`` and ``gui.trainer_main`` each re-derived the same
+        two-format sniffing — they now all delegate here (no fourth copy).
+
+        * **BC format:**        payload = ``{state_dict, vocab_sizes, layout_checksum}``
+        * **Self-play format:** payload = ``{"net": {state_dict, …}, "round", …}``
+
+        Vocab-size + layout verification is ``:meth:`load`'s job (a mismatch is
+        a loud error, never silent drift). ``device``: the net is BUILT on CPU
+        (a CPU-only box can always load a checkpoint), then moved to ``device``
+        AFTER ``load_state_dict`` — the D102 silent-CPU-on-GPU fix.
+        """
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+        return cls.load(cls.unwrap_payload(payload), vocabs, device=device)
+
+    @staticmethod
+    def unwrap_payload(payload: Dict) -> Dict:
+        """The inner net payload of a checkpoint, for BOTH formats — the ONE
+        place the two-format logic lives (D103 step 1):
+
+        * self-play ``{"net": {state_dict, …}, "round": …}`` → the ``"net"`` dict
+        * BC          ``{state_dict, …}`` → itself
+
+        ``load_file`` uses this; callers that also need the OUTER payload's
+        extra fields (``gui.trainer_main`` needs ``round``) use it too — so no
+        call site re-derives the sniffing."""
+        if isinstance(payload, dict) and isinstance(payload.get("net"), dict) \
+                and "state_dict" in payload["net"]:
+            return payload["net"]
+        return payload
+
 
 def _layout_checksum() -> str:
     from .registry import checksum

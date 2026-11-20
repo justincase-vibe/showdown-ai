@@ -163,7 +163,6 @@ class LeagueRun:
         battles, which is safe: eval mode + no_grad forward, no mutation)."""
         if self._nets:
             return
-        import torch
         from net.model import PokeNet
         from net.vocab_db import build_vocabs
 
@@ -174,17 +173,9 @@ class LeagueRun:
             if ckpt not in by_path:
                 self.log(f"[league] loading checkpoint {name!r} <- {ckpt} "
                          f"(device={self.cfg.device})")
-                payload = torch.load(ckpt, map_location=self.cfg.device,
-                                     weights_only=True)
-                # BOTH checkpoint formats (mirrors net.human_play._load_checkpoint):
-                # BC: {state_dict, ...} | self-play: {"net": {state_dict, ...}, ...}
-                if "net" in payload and isinstance(payload["net"], dict) \
-                        and "state_dict" in payload["net"]:
-                    net = PokeNet.load(payload["net"], vocabs,
-                                       device=self.cfg.device)
-                else:
-                    net = PokeNet.load(payload, vocabs,
-                                       device=self.cfg.device)
+                # THE ONE load path (D103 step 1): both checkpoint formats are
+                # handled inside PokeNet.load_file (no format sniffing here).
+                net = PokeNet.load_file(ckpt, vocabs, device=self.cfg.device)
                 net.eval()
                 by_path[ckpt] = net
             self._nets[name] = by_path[ckpt]

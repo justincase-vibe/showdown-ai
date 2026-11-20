@@ -60,8 +60,7 @@ def main(argv: Optional[list] = None) -> int:
     _log(f"EVAL start run={rd.name} ckpt={ckpt_path} n={n_battles} "
          f"device={device} fmt={fmt} seed={seed}")
 
-    # ── load the checkpoint ────────────────────────────────────────────
-    import torch
+    # ── load the checkpoint (THE ONE load path, D103 step 1) ──────────
     from net.vocab_db import build_vocabs
     from net.model import PokeNet
     from net.agent import PokeAgent
@@ -69,15 +68,7 @@ def main(argv: Optional[list] = None) -> int:
     try:
         vocabs = build_vocabs()
         _log(f"vocabs: {vocabs.sizes()}")
-        payload = torch.load(ckpt_path, map_location=device, weights_only=True)
-        # BC checkpoints: payload IS the net state (state_dict + vocab_sizes)
-        # Self-play checkpoints: payload = {"net": ..., "round": ...}
-        if "net" in payload and isinstance(payload["net"], dict) and "state_dict" in payload["net"]:
-            net = PokeNet.load(payload["net"], vocabs)
-            _log(f"loaded self-play checkpoint (round {payload.get('round', '?')})")
-        else:
-            net = PokeNet.load(payload, vocabs)
-            _log("loaded BC checkpoint")
+        net = PokeNet.load_file(ckpt_path, vocabs, device=device)
         net.eval()
         agent = PokeAgent(net, seed=seed, device=device)
         _log(f"agent ready ({sum(p.numel() for p in net.parameters())/1e6:.1f}M params)")
