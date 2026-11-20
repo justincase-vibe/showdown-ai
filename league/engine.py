@@ -155,6 +155,9 @@ class LeagueRun:
         self._total_updates: Dict[str, int] = {}      # cumulative PPO updates per bot
         self._total_errors = 0
         self._last_update_metrics: Dict[str, Dict[str, float]] = {}
+        # D103 step 4: the population loop (cull + refresh) bookkeeping
+        self._vocabs: Optional[Any] = None            # set by _load_bots (reuse)
+        self._cull_events: List[Dict[str, Any]] = []  # per-cull-round record
 
     # ── roster ──────────────────────────────────────────────────────────
     def add_bot(self, name: str, ckpt_path: str,
@@ -269,6 +272,7 @@ class LeagueRun:
         vocabs = build_vocabs()
         self._bots = materialize_roster(self.registry, vocabs,
                                         device=self.cfg.device)
+        self._vocabs = vocabs   # D103 step 4: step-4 refresh reuses it
         self.log(f"[league] learning bots ready: {len(self._bots)} "
                  f"({', '.join(sorted(self._bots))})")
 
@@ -456,9 +460,13 @@ class LeagueRun:
         return self._final_summary()
 
     def _after_round(self, s: Dict[str, Any]) -> None:
-        """End of a round: the D103 step-3 PPO update over each bot's rollout."""
+        """End of a round: the D103 step-3 PPO update over each bot's
+        rollout, then the step-4 cull + refresh of the weakest bots (AFTER
+        the update — the culled bots' final weights are saved first; only
+        when a next round exists)."""
         if self.cfg.learning and self._bots:
             self._update_round()
+            self._cull_and_refresh()
 
     def request_stop(self, reason: str = "user") -> None:
         if self._sp is None:
@@ -542,6 +550,73 @@ class LeagueRun:
                      f"(loss={metrics.get('loss', float('nan')):.4f}) -> saved "
                      f"{Path(bot.ckpt_path).name}")
 
+    # ── the D103 step-4 population loop (cull + refresh) ────────────────
+    def _cull_and_refresh(self) -> None:
+        """Retire the weakest bots and mint FRESH random ones in their place
+        (diversity / local-minima escape — the user's "constantly cycle new
+        agents").
+
+        Fires at a round boundary, AFTER the PPO update (the culled bots'
+        final weights are saved first) and BEFORE the last round (a cull with
+        no next round would mint bots that never fight). Learning mode only
+        (an eval-only run must not mutate the roster).
+
+        The surgery: the culled bots' ROSTER ENTRIES are retired (their
+        ``.pt`` files stay as ARTIFACTS — deleting weights is a user action,
+        the GUI's Delete); one FRESH random bot per culled slot (roster size
+        stays constant, never below the floor); the fresh bots join the LIVE
+        bots and the pairings are re-planned (new bots must fight, culled
+        must not)."""
+        if not self.cfg.learning or not self._bots:
+            return
+        if self.cfg.cull_every <= 0:
+            return
+        if self._round_idx >= self._n_rounds:
+            return                      # no next round -> no point culling
+        if self._round_idx % self.cfg.cull_every != 0:
+            return
+        from .cull import select_cull
+        from .learner import LearningBot, fresh_bot_name
+
+        bots = self.registry.all()
+        culled = select_cull(bots, self.cfg.cull_frac, self.cfg.min_roster)
+        if not culled:
+            self.log("[league] cull round: roster at the floor — nothing "
+                     f"retired ({len(bots)} bots, floor "
+                     f"{max(2, self.cfg.min_roster)})")
+            return
+        # 1) retire the culled (roster entries only — the .pt artifacts stay)
+        for name in culled:
+            self.registry.remove(name)
+            self._bots.pop(name, None)
+        # 2) mint a FRESH random bot per culled slot (roster size constant).
+        #    seed=None = truly random (the diversity source, D103 step 4);
+        #    fresh_bot_name = a unique OWN file (the one-file-per-bot rule).
+        vocabs = self._vocabs
+        if vocabs is None:
+            from net.vocab_db import build_vocabs
+            vocabs = self._vocabs = build_vocabs()
+        out_dir = self.cfg.refresh_dir or "scratch"
+        added: List[str] = []
+        for _ in culled:
+            path = fresh_bot_name("league", out_dir)
+            name = path.stem
+            bot = LearningBot.random(
+                name=name, ckpt_path=str(path), vocabs=vocabs,
+                device=self.cfg.device)
+            bot.save()
+            self.registry.add(name, str(path))
+            self._bots[name] = bot
+            added.append(name)
+        # 3) the roster changed -> replan (new bots fight, culled don't)
+        self.plan()
+        event = {"round": self._round_idx, "culled": list(culled),
+                 "added": list(added)}
+        self._cull_events.append(event)
+        self.log(f"[league] cull round {self._round_idx}: retired {culled} "
+                 f"-> fresh random bot(s) {added} "
+                 f"(roster now {len(self.registry.all())})")
+
     # ── the final summary (cumulative across rounds) ────────────────────
     def _final_summary(self) -> Dict[str, Any]:
         s: Dict[str, Any] = {
@@ -560,6 +635,7 @@ class LeagueRun:
                                    for n in self._bots}
             s["n_saved_by_bot"] = {n: self._bots[n].n_saved for n in self._bots}
             s["last_update_metrics_by_bot"] = dict(self._last_update_metrics)
+            s["cull_events"] = list(self._cull_events)
         return s
 
     # ── introspection ───────────────────────────────────────────────────

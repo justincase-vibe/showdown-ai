@@ -454,3 +454,140 @@ def test_config_from_dict_ignores_unknown_keys():
     cfg = LeagueConfig.from_dict({"pairing": "round_robin", "bogus": 1})
     assert cfg.pairing == "round_robin"
     assert not hasattr(cfg, "bogus")
+
+
+# ── D103 step 4: cull + refresh (the population loop) ───────────────────────
+# The fake play always lets pairing[0] win, so in a 4-bot round-robin the
+# ELO order after one round is deterministic (b1 > b2 > b3 > b4) — the cull
+# target is KNOWN, not luck.
+
+def _cull_cfg(tmp_path, **kw) -> LeagueConfig:
+    base = dict(learning=True, cull_every=1, cull_frac=0.25, min_roster=2,
+                refresh_dir=str(tmp_path / "fresh"), save_replays=False,
+                n_servers=1, per_server=1, n_workers=1)
+    base.update(kw)
+    return LeagueConfig(**base)
+
+
+def test_cull_retires_weakest_and_mints_fresh(tmp_path, monkeypatch):
+    """n_rounds=2, cull_every=1: after round 1 the weakest bot (b4) is
+    retired and ONE fresh random bot takes its slot (roster size constant).
+    The culled bot's .pt stays (artifact); the fresh bot's .pt is a NEW OWN
+    file under refresh_dir; round 2 replans (b4 never fights again)."""
+    import league.driver as drv
+    monkeypatch.setattr(drv, "play_agent_battle_on",
+                        _fake_play_factory_n((True, False, 2), n_decisions=3))
+    reg = _learning_roster(tmp_path, "b1", "b2", "b3", "b4")
+    run = LeagueRun(_cull_cfg(tmp_path, n_rounds=2), registry=reg, pool=FakePool())
+    run.start()
+    s = run.wait()
+    run.shutdown()
+
+    assert s["state"] == "completed" and s["errors"] == 0
+    # exactly ONE cull (after round 1; NOT after round 2 — the last round)
+    events = s["cull_events"]
+    assert len(events) == 1 and events[0]["round"] == 1
+    assert events[0]["culled"] == ["b4"]
+    added = events[0]["added"]
+    assert len(added) == 1 and added[0].startswith("league_")
+    # roster: b4 retired, fresh bot in, size constant
+    names = reg.names()
+    assert "b4" not in names and added[0] in names and len(names) == 4
+    # the culled .pt is KEPT (artifact — deleting weights is a user action)
+    assert (tmp_path / "b4.pt").is_file()
+    # the fresh bot has its OWN file + meta sidecar under refresh_dir
+    fresh = Path(tmp_path / "fresh" / (added[0] + ".pt"))
+    assert fresh.is_file()
+    assert Path(str(fresh) + ".meta.json").is_file()
+    # live bots swapped too (the driver factory reads self._bots)
+    assert "b4" not in run._bots and added[0] in run._bots
+    # both original bots still updated in BOTH rounds (b4 only in round 1)
+    assert s["updates_by_bot"]["b1"] == 2 and s["updates_by_bot"]["b2"] == 2
+    assert s["updates_by_bot"][added[0]] == 1   # played round 2 only
+    # round 2 replanned over the NEW roster (6 pairings, 12 total played)
+    assert s["pairings_played"] == 12
+
+
+def test_cull_skipped_on_the_last_round(tmp_path, monkeypatch):
+    """n_rounds=1: the single round IS the last one -> no cull (minting bots
+    that never fight would be pointless)."""
+    import league.driver as drv
+    monkeypatch.setattr(drv, "play_agent_battle_on",
+                        _fake_play_factory_n((True, False, 2), n_decisions=3))
+    reg = _learning_roster(tmp_path, "b1", "b2", "b3", "b4")
+    run = LeagueRun(_cull_cfg(tmp_path, n_rounds=1), registry=reg, pool=FakePool())
+    run.start()
+    s = run.wait()
+    run.shutdown()
+    assert s["cull_events"] == []
+    assert len(reg.names()) == 4 and "b4" in reg.names()
+    assert not (tmp_path / "fresh").exists() or not list((tmp_path / "fresh").iterdir())
+
+
+def test_cull_disabled_by_knob(tmp_path, monkeypatch):
+    """cull_every=0: the loop is OFF — no cull even on a round boundary."""
+    import league.driver as drv
+    monkeypatch.setattr(drv, "play_agent_battle_on",
+                        _fake_play_factory_n((True, False, 2), n_decisions=3))
+    reg = _learning_roster(tmp_path, "b1", "b2", "b3", "b4")
+    run = LeagueRun(_cull_cfg(tmp_path, n_rounds=2, cull_every=0),
+                    registry=reg, pool=FakePool())
+    run.start()
+    s = run.wait()
+    run.shutdown()
+    assert s["cull_events"] == []
+    assert sorted(reg.names()) == ["b1", "b2", "b3", "b4"]
+
+
+def test_cull_floor_keeps_the_roster(tmp_path, monkeypatch):
+    """min_roster=4 with a 4-bot roster: at the floor -> nothing may be
+    retired (the floor is max(2, min_roster), the league's hard minimum)."""
+    import league.driver as drv
+    monkeypatch.setattr(drv, "play_agent_battle_on",
+                        _fake_play_factory_n((True, False, 2), n_decisions=3))
+    reg = _learning_roster(tmp_path, "b1", "b2", "b3", "b4")
+    run = LeagueRun(_cull_cfg(tmp_path, n_rounds=2, min_roster=4),
+                    registry=reg, pool=FakePool())
+    run.start()
+    s = run.wait()
+    run.shutdown()
+    assert s["cull_events"] == []
+    assert sorted(reg.names()) == ["b1", "b2", "b3", "b4"]
+
+
+def test_cull_every_k_not_every_round(tmp_path, monkeypatch):
+    """cull_every=2 over 3 rounds: cull ONLY after round 2 (not round 1,
+    not round 3 — the last round). 6 bots -> the single weakest (b6) is
+    retired once; roster size stays 6."""
+    import league.driver as drv
+    monkeypatch.setattr(drv, "play_agent_battle_on",
+                        _fake_play_factory_n((True, False, 2), n_decisions=3))
+    reg = _learning_roster(tmp_path, "b1", "b2", "b3", "b4", "b5", "b6")
+    run = LeagueRun(_cull_cfg(tmp_path, n_rounds=3, cull_every=2),
+                    registry=reg, pool=FakePool())
+    run.start()
+    s = run.wait()
+    run.shutdown()
+
+    events = s["cull_events"]
+    assert len(events) == 1 and events[0]["round"] == 2
+    assert events[0]["culled"] == ["b6"]
+    added = events[0]["added"]
+    assert len(added) == 1
+    assert "b6" not in reg.names() and added[0] in reg.names()
+    assert len(reg.names()) == 6
+
+
+def test_eval_mode_never_culls(tmp_path):
+    """learning=False (the legacy eval-only run) must NOT mutate the roster —
+    culling there would destroy the ranking artifacts."""
+    reg = _roster(tmp_path, "a", "b", "c", "d")
+    factory = make_fake_factory({i: (True, False) for i in range(6)})
+    run = LeagueRun(_cfg(learning=False, n_rounds=2, cull_every=1),
+                    registry=reg, pool=FakePool(), driver_factory=lambda: factory)
+    run.start()
+    s = run.wait()
+    run.shutdown()
+    assert s["state"] == "completed"
+    assert sorted(reg.names()) == ["a", "b", "c", "d"]
+    assert "cull_events" not in s
