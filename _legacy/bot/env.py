@@ -20,6 +20,7 @@ drives it directly.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
@@ -36,6 +37,70 @@ from state_from_log import reconstruct_current_state as _reconstruct_current
 # Unified *move-identity* action space (one policy across gens 6-9):
 #   MOVE 0..N-1 | SWITCH N..N+5 | TRANSFORM N+6..N+8 (mega/dynamax/tera) -> N_ACTIONS total.
 UNIFIED_ACTION_SIZE = get_action_space().N_ACTIONS
+
+
+# ---------------------------------------------------------------------------
+# Benign poke-env log-noise suppression (e.g. the Pursuit "chase" warning)
+# ---------------------------------------------------------------------------
+# poke-env logs a WARNING for any ``|move|...|[from] move: X`` protocol suffix it does
+# not special-case. Chase moves -- most commonly **Pursuit**, which hits the target as
+# it switches out -- are the usual trigger (e.g. ``|move|p2a: Krookodile|Pursuit|p1a:
+# Tentacruel|[from] move: Pursuit``). This is NOT a bug: the move is recorded correctly
+# both in poke-env's battle state (its overridden-move path) and in OUR observation
+# (``state_from_log._handle_move`` reveals it on the right Pokémon, independently of the
+# noisy path), and the battle proceeds normally. Verified on a 111-battle run: ~60 of
+# these warnings, yet 0 forfeits and 2 illegal picks. Pure log noise that looks alarming,
+# so we drop it surgically. Real warnings (team rejection, connection errors, "Unmanaged
+# battle initialisation", ...) are left in -- the pattern below matches ONLY the
+# chase-move suffix text.
+_BENIGN_LOG_PATTERNS: Tuple[str, ...] = (
+    "Unmanaged [from] move message received - move",
+)
+
+
+class _BenignLogFilter(logging.Filter):
+    """Drop the benign poke-env chase-move WARNINGs; keep every other record."""
+
+    def filter(self, record: "logging.LogRecord") -> bool:
+        if record.levelno < logging.WARNING:
+            return True  # never touch INFO / DEBUG / ERROR / CRITICAL
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True  # if formatting ever fails, let it through
+        for pat in _BENIGN_LOG_PATTERNS:
+            if pat in msg:
+                return False  # drop the benign noise
+        return True  # keep everything else (including real warnings)
+
+
+def _ensure_benign_filter(target: Any) -> None:
+    """Attach :class:`_BenignLogFilter` to a logger or handler if not already present."""
+    for f in getattr(target, "filters", []):
+        if isinstance(f, _BenignLogFilter):
+            return
+    target.addFilter(_BenignLogFilter())
+
+
+def install_benign_log_filter() -> None:
+    """Cover the loggers/handlers poke-env actually emits through.
+
+    poke-env logs via a per-account logger named ``ShowdownEnv <id>`` (one per env) that
+    carries its OWN stream handler, and the record also propagates to the root handler
+    (train.py's ``logging.basicConfig``) -- hence the doubled lines. Adding the filter to
+    the *per-env logger* suppresses both lines, because ``Logger.handle`` checks the
+    logger's own filters before ANY handler emits. We also cover root + its handlers.
+    Safe to call repeatedly (idempotent per target)."""
+    root = logging.getLogger()
+    _ensure_benign_filter(root)
+    for h in list(root.handlers):
+        _ensure_benign_filter(h)
+    for name in list(logging.Logger.manager.loggerDict):
+        if name.startswith("ShowdownEnv"):
+            lg = logging.getLogger(name)
+            _ensure_benign_filter(lg)
+            for h in list(lg.handlers):
+                _ensure_benign_filter(h)
 
 
 class ShowdownEnv(SinglesEnv):
@@ -61,6 +126,8 @@ class ShowdownEnv(SinglesEnv):
             log_level=log_level,
             **kwargs,
         )
+        # Silence the benign poke-env chase-move (Pursuit) WARNINGs -- see module doc.
+        install_benign_log_filter()
         # --- Fix the action space to a unified size (one policy across gens) ---
         self.action_spaces = {
             agent: spaces.Discrete(UNIFIED_ACTION_SIZE)

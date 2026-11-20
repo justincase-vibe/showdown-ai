@@ -14,6 +14,7 @@ an episode. GAE is computed per completed episode (terminal bootstrap = 0).
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -341,6 +342,11 @@ class MaskedPPO:
 
     # ------------------------------------------------------------- io
     def save(self, path: str) -> None:
+        """Write the checkpoint atomically: dump to a temp file, then rename over
+        ``path``. If the process is killed mid-write (OOM, power loss, a crash) the
+        *previous* checkpoint stays intact instead of leaving a truncated, unloadable
+        file -- critical for unattended overnight runs that resume from ``path``."""
+        tmp = path + ".tmp"
         torch.save(
             {
                 "actor": self.actor.state_dict(),
@@ -348,8 +354,9 @@ class MaskedPPO:
                 "opt": self.opt.state_dict(),
                 "n_updates": self.n_updates,
             },
-            path,
+            tmp,
         )
+        os.replace(tmp, path)  # atomic on Windows / Linux / macOS
 
     def load(self, path: str) -> None:
         ck = torch.load(path, map_location=self.device)
