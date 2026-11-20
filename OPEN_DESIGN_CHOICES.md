@@ -251,10 +251,11 @@ user-approved plan — flagged here for review:
 3. **Fresh bots are UNSEEDED random** (`LearningBot.random` seed=None) —
    the diversity source the user asked for ("constantly cycle new agents");
    seeded would make every refill identical to the first.
-4. **Fresh bot's roster NAME = its file stem** (`league_{id4}`) — unique by
-   construction (`fresh_bot_name` guarantees a unique file → unique stem →
-   unique roster name). Same naming as the GUI copy-on-add, so the two
-   minting paths can't collide.
+4. **Fresh bot's roster NAME = its file stem** (`league_{id4}`).
+   `fresh_bot_name` guarantees a unique FILE only; roster-NAME uniqueness (a
+   hand-registered bot could own a `league_*` name, and `registry.add` would
+   silently overwrite it) is enforced by the name-shadow guard (decision 11).
+   Same naming as the GUI copy-on-add, so the two minting paths can't collide.
 5. **A culled bot's ELO/W-L history disappears with its roster entry**
    (registry semantics). The names are preserved in the run summary's
    `cull_events` (`{round, culled, added}`). Optional later: an archive
@@ -276,10 +277,35 @@ user-approved plan — flagged here for review:
    round_robin, and churn is minimized); (b) re-plan every round (fresh
    elo_weighted, but pairings drift under your feet mid-campaign).
 
-**Gate:** full suite **268 passed / 1 skipped** (CPU-only; +17 tests:
-9 selection units, 6 engine integrations, 2 GUI). The engine tests are
+### Step-4 hardening (found in the final bug-check pass, commit `5a35cca`)
+
+9. **Cull only on a COMPLETED round.** The round-end PPO UPDATE runs no matter
+   how the round ended (it saves what was learned — a user stop or a failure
+   must not throw the round's learning away), but the CULL runs only when
+   `SelfPlayRun.wait()` reports `state == "completed"`. After a stop or a
+   failure the campaign is over, and minting explorers there would mutate the
+   roster for no reason. Pinned by `test_cull_skipped_when_round_stopped`
+   (stopped → no cull; completed → cull, same boundary).
+10. **Mint-first atomicity.** `_cull_and_refresh` now MINTS the fresh bots
+   (file + registry + live `_bots`) BEFORE retiring the culled. If minting
+   fails (disk, whatever), the roster is a SUPERSET of the original
+   (original + some fresh) — always legal for `plan()`. The old retire-first
+   order could SHRINK the roster below the floor, or even below 2, mid-mint,
+   and the next `plan()` would raise. Pinned by
+   `test_cull_mint_failure_keeps_roster` (a raising `LearningBot.random`
+   leaves the roster unchanged).
+11. **Name-shadow redraw guard.** `fresh_bot_name` guarantees a unique FILE
+   only; a hand-registered bot could own a `league_*` NAME, and `registry.add`
+   silently OVERWRITES an existing entry (ELO/W-L lost). The mint loop now
+   redraws `fresh_bot_name` (≤64×) while the candidate stem is in the roster's
+   taken-name set, and raises a bounded `RuntimeError` if all collide. Pinned
+   by `test_cull_name_collision_redraws` (a colliding first draw is skipped;
+   the existing `league_abcd` bot's original checkpoint survives untouched).
+
+**Gate:** full suite **271 passed / 1 skipped** (CPU-only; +20 step-4 tests:
+9 selection units, 9 engine integrations, 2 GUI). The engine tests are
 hermetic (fake pool, scripted battles, `refresh_dir` under tmp — the
-user's scratch and live roster are never touched).
+user's scratch and live roster are never touched). Hardening commit `5a35cca`.
 
 ---
 
