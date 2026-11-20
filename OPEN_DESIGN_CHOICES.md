@@ -42,14 +42,16 @@ on_battle) → league/driver → PokeAgent + BotRegistry ELO`. Fast stack green:
    `{n}b_{type}_{id}.pt` (e.g. `50b_bc_a3f2.pt`) — the 4-char uuid4 hex id makes
    collisions impossible. Existing date-named checkpoints still work; new runs
    use the unique-id format.
-5. **Checkpoint-path validation resolves against CWD, not `ROOT`.** The
-   eval/play/fixture validators use `Path(ckpt).is_file()` (CWD-relative), while
-   the spawned child runs with `cwd=ROOT`. Works when you start the GUI from the
-   project root (the documented way), but would 400 a **valid** checkpoint if the
-   GUI is ever started from elsewhere. Minor robustness.
-6. **`wait()` timeout is per-thread, not total** (`control/selfplay.py`):
-   `t.join(timeout=timeout)` inside a loop. Only matters if a timeout is passed —
-   the subprocess entry passes `None` (blocks until done), which is correct. Minor.
+5. ~~**Checkpoint-path validation resolves against CWD, not `ROOT`.**~~
+   **FIXED (2026-11-20):** the eval/play/train/initial-ckpt validators already
+   routed through `_resolve_ckpt_path` (ROOT-relative); the BC **fixture** check
+   was the last straggler and now does too (`gui/launcher.py`). Pinned by
+   `gui/tests/test_paths_resolve_root.py` (a relative fixture is accepted when
+   CWD != ROOT; a missing one still 400s).
+6. ~~**`wait()` timeout is per-thread, not total** (`control/selfplay.py`).~~
+   **FIXED (2026-11-20):** `wait(timeout)` now uses a shared deadline (a TOTAL
+   budget); the production `timeout=None` path is unchanged. Pinned by
+   `control/tests/test_selfplay.py::test_wait_finite_timeout_is_total_not_per_thread`.
 
 **Not bugs (verified OK):** replay-capture closure (`server_cfg` captured
 correctly, port-namespaced per D95.1); defensive `on_finish` (a capture error
