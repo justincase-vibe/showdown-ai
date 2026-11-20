@@ -93,6 +93,13 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 from legality import formats as _formats
 from legality import lookup as _lookup
 
+# C3: route calcs through a pool of long-lived Node workers (no per-request spawn
+# churn — the league crash root cause). The one-shot spawn below stays as the
+# FALLBACK (never a silent failure): if the pool path keeps failing (POKE_CALC_
+# ONESHOT set, or repeated worker death), we spawn node the old way. The public
+# API (calc_damage / compare_speed / calc_damage_many) is UNCHANGED.
+from damage import worker as _worker
+
 _NODE = "node"
 _SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "node_calc.js")
 
@@ -123,7 +130,21 @@ def _resolve_mon(mon: Mon, fmt: Optional[str]) -> Mon:
 
 
 def _node(request: Dict[str, Any]) -> Dict[str, Any]:
-    """Send one JSON request to the Node CLI and parse its JSON response.
+    """Send one calc request through the long-lived worker pool (C3), falling
+    back to the one-shot Node spawn (``_node_oneshot``) if the pool path is
+    disabled (POKE_CALC_ONESHOT) or keeps failing (repeated worker death). A calc
+    ERROR (e.g. an illegal species) is raised as ``RuntimeError`` either way —
+    the one-shot contract. The public API is unchanged."""
+    try:
+        return _worker.request(request)
+    except _worker.WorkerError:
+        return _node_oneshot(request)
+
+
+def _node_oneshot(request: Dict[str, Any]) -> Dict[str, Any]:
+    """Send one JSON request to the Node CLI and parse its JSON response (the
+    per-call spawn — now the FALLBACK under ``_node``, kept so we never
+    hard-fail where the pool cannot serve).
 
     Robustness (2026-11-17): a node spawn typically takes ~90ms here, but
     Windows Defender real-time scans can spike ONE spawn far beyond that
@@ -163,6 +184,16 @@ def _node(request: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _node_batch(requests: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Send a batch through the worker pool (C3), falling back to the one-shot
+    Node spawn (``_node_batch_oneshot``). Per-item failures come back as
+    ``{'error': str}`` in the list (a single bad item never sinks the batch)."""
+    try:
+        return _worker.request(list(requests))
+    except _worker.WorkerError:
+        return _node_batch_oneshot(requests)
+
+
+def _node_batch_oneshot(requests: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Send a JSON ARRAY of requests to the Node CLI in ONE spawn and parse the
     JSON ARRAY response (in order). Per-item failures come back as
     ``{'error': str}`` — a single bad item does NOT abort the batch (the forward
