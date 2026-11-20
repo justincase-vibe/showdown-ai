@@ -90,6 +90,35 @@ def test_finalize_loss_and_draw():
         assert c.steps[0].done is True
 
 
+def test_finalize_fills_gae_advantage_and_ret():
+    """D103 step 3: ``finalize`` GAEs the trajectory IN PLACE (the shared
+    ``net.ppo.fill_gae``), so buffered steps already carry ``advantage``/
+    ``ret`` by the time the round-end update reads them. Hand-checked against
+    ``gae()``: 3 steps, all old_value=0.5 (reward-space 0.0), win at terminal,
+    gamma=0.99 lam=0.95 -> adv=[0.9405^2, 0.9405, 1.0] and ret==adv (value 0)."""
+    c = TrajectoryCollector()
+    for _ in range(3):
+        c.record(_obs(), _decision(value=0.5))
+    c.finalize(+1.0, gamma=0.99, lam=0.95)
+    advs = [s.advantage for s in c.steps]
+    rets = [s.ret for s in c.steps]
+    assert advs[2] == pytest.approx(1.0)
+    assert advs[1] == pytest.approx(0.9405)
+    assert advs[0] == pytest.approx(0.9405 ** 2)
+    assert rets == pytest.approx(advs)
+
+
+def test_finalize_loss_gae_is_negative_at_terminal():
+    """A LOSS (terminal -1) gives a negative advantage at the terminal step
+    (the critic learned to expect the loss) — sanity that the reward sign flows
+    through fill_gae, not just the magnitude."""
+    c = TrajectoryCollector()
+    for _ in range(3):
+        c.record(_obs(), _decision(value=0.5))   # reward-space value 0.0
+    c.finalize(-1.0, gamma=0.99, lam=0.95)
+    assert c.steps[-1].advantage == pytest.approx(-1.0)
+
+
 def test_empty_trajectory_finalizes_to_nothing():
     """A side that never acted (e.g. fainted before its first turn)
     contributes zero steps — the engine's buffer.extend([]) is a no-op."""

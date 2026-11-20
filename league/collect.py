@@ -60,13 +60,23 @@ class TrajectoryCollector:
         ))
 
     # ── finalization (the engine's seam, at battle end) ─────────────────
-    def finalize(self, outcome: float) -> "TrajectoryCollector":
-        """Attach the decided outcome to the trajectory.
+    def finalize(self, outcome: float, gamma: float = 0.99,
+                 lam: float = 0.95) -> "TrajectoryCollector":
+        """Attach the decided outcome to the trajectory AND GAE it.
 
         ``outcome``: +1 (win) / −1 (loss) / 0 (draw) from the bot's own POV.
         Lands on the LAST step (sparse-terminal, what ``gae()`` expects) with
         ``done=True``; earlier steps keep reward 0.0. Empty trajectories
-        (a side never acted) finalize to nothing — the buffer is untouched."""
+        (a side never acted) finalize to nothing — the buffer is untouched.
+
+        GAE-at-finalize (D103 step 3): this is the ONE place a battle's
+        trajectory is known to be COMPLETE, so each step's ``advantage``/
+        ``ret`` are filled here via the shared ``net.ppo.fill_gae`` (the same
+        2V-1-mapped sparse-terminal GAE the solo trainer uses). The buffer is
+        then extended with already-GAE'd steps, and the round-end update never
+        re-GAEs across the whole buffer (which would be wrong — the
+        intermediate battle ends are not terminals). ``gamma``/``lam`` come
+        from the league config (defaults mirror ``TrainConfig``)."""
         if self._finalized is not None:
             raise RuntimeError(
                 "TrajectoryCollector.finalize called twice — the outcome was "
@@ -75,6 +85,8 @@ class TrajectoryCollector:
         if self._steps:
             self._steps[-1].reward = float(outcome)
             self._steps[-1].done = True
+            from net.ppo import fill_gae
+            fill_gae(self._steps, gamma=gamma, lam=lam)
         return self
 
     # ── introspection ───────────────────────────────────────────────────
