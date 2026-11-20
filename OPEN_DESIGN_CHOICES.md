@@ -161,6 +161,70 @@ it; fixed with a proper sentinel.
 
 ---
 
+## 2026-11-21 — D103 Step 3 done: round-end PPO update + GUI (design decisions)
+
+**Step 3 ("PPO update after each round" + the GUI chunk) is BUILT and
+committed (`e9e2f5a` engine trio, `fb378cc` GUI).** Decisions I made within
+the user-approved plan — flagged here for review:
+
+1. **Buffer policy: clear-after-update for ≥2 steps; SKIP+retain for thin
+   rounds.** Mirrors `SelfPlayTrainer.train_round` (`update() if
+   len(buffer)>=2 else skip`) — ONE learning semantics, two entry points.
+The league SKIPS a thin round instead of raising (the solo trainer still
+   raises): a league run is a long campaign — one 1-decision round must not
+   kill it. NOT explicitly picked by the user (flagged in handoff).
+2. **GAE at FINALIZE (the battle boundary), not at update time.** A
+   trajectory is only complete where it ends: a battle end IS a terminal
+   state; an intermediate battle end in a multi-battle buffer is NOT, so
+   GAE-ing the whole buffer at update time would credit the wrong
+   terminal across battle boundaries. Shared `net/ppo.py::fill_gae`
+   (pure numpy, the `2V−1` map inside it, `old_value` stays RAW) is called
+   by BOTH `TrajectoryCollector.finalize` (league) and
+   `SelfPlayTrainer.apply_gae` (solo) — one implementation, no parallel
+   GAE code (the "no code written twice" rule).
+3. **Multi-round over ONE shared `ServerPool`.** `LeagueRun` owns the pool;
+   every round reuses it (servers boot ONCE — the 90 s boot is the dominant
+   cost); `SelfPlayRun.shutdown` is NOT called per round (it would kill the
+   shared pool); `start_all` is idempotent (verified: `_ensure` reuses live
+   servers); the single teardown is `LeagueRun.shutdown()` (pool +
+   `damage.worker.shutdown_pool`).
+4. **`n_rounds` default = 1** (one play+update cycle per GUI launch — the
+   user scales); PPO knobs in `LeagueConfig` mirror
+   `net.trainer.TrainConfig` defaults (lr=3e-4, epochs=2, clip=0.2, vf=0.5,
+   ent=0.01, max_norm=0.5, gamma=0.99, lam=0.95). GUI surface stays
+   minimal: Rounds / PPO epochs / PPO lr only.
+5. **Carried-open from step 2 — RESOLVED by construction: buffer
+   persistence.** Because every round ENDS with update+save, a killed run
+   loses at most the CURRENT round's in-flight experience (option (c) from
+   the step-2 note), not many rounds. The step-2 RAM note is likewise
+   bounded: the buffer drains each round, so steady-state RAM is one
+   round's experience, not the whole campaign's.
+6. **Carried-open from step 1 — RESOLVED by the user: pristine-artifact vs
+   ONE-FILE-PER-BOT.** The GUI "Add bot" now COPIES the source snapshot
+   into a fresh league-owned file (`fresh_bot_name`) and registers the COPY
+   — the user's "make a copy, work with that, save it as new" flow. Source
+   stays pristine; one-file-per-bot is guaranteed AT ADD-TIME (the
+   validator's pre-boot check remains the last line for hand-edited
+   rosters). "Delete" removes the selected bot's entry + its OWN `.pt` +
+   `.meta.json` (confirm dialog); the source is never touched.
+7. **Fitness benchmark (vs an external strong bot) = AFTER the league loop
+   is stable.** The yardstick, not the engine — not building now. Awaiting
+   user reaction (handoff open question).
+8. **FLAGGED (found in my own review, NOT fixed — needs your call):**
+   re-adding a bot with an EXISTING name in the GUI silently OVERWRITES the
+   roster entry — ELO/W-L reset to initial (pre-existing `BotRegistry.add`
+   semantics: "or update if it already exists"). For a learning league that
+   throws away that bot's standings. Options: (a) GUI refuses duplicate
+   names (my lean — loud, one line); (b) keep the old ELO on overwrite;
+   (c) leave as-is (documented overwrite).
+
+**Gate:** full suite **251 passed / 1 skipped** (CPU-only; the 4 new GUI
+tests are hermetic vs the user's live `league/bots.json` — roster path
+monkeypatched to tmp, copies cleaned up). The known tkinter full-suite
+flake did not bite this run.
+
+---
+
 ## A. Workflow errors found
 
 ### Fixed this pass
