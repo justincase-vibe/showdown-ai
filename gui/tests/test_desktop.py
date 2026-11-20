@@ -157,9 +157,13 @@ def test_config_builder_bc_resume(shared_root):
     assert app._bc_resume.get() == ""  # optional -> empty by default
     assert app._build_config()["initial_ckpt"] is None
 
-    # choosing a checkpoint -> that exact path is carried into the config
+    # choosing a checkpoint -> the RESOLVED path (the right file, CWD-safe) is
+    # carried into the config. The box shows the short name; _resolve_ckpt maps
+    # it to the full path, so this holds whether or not the file is listed.
     app._bc_resume.set("scratch/2026-11-19_bc_50b.pt")
-    assert app._build_config()["initial_ckpt"] == "scratch/2026-11-19_bc_50b.pt"
+    from pathlib import Path
+    got = app._build_config()["initial_ckpt"]
+    assert got and Path(got).name == "2026-11-19_bc_50b.pt"
     app.close()
 
 
@@ -175,7 +179,9 @@ def test_config_builder_ppo_resume(shared_root):
     assert app._build_config()["resume_from"] is None
 
     app._ppo_resume.set("scratch/2026-11-19_bc_50b.pt")
-    assert app._build_config()["resume_from"] == "scratch/2026-11-19_bc_50b.pt"
+    from pathlib import Path
+    got = app._build_config()["resume_from"]
+    assert got and Path(got).name == "2026-11-19_bc_50b.pt"
     app.close()
 
 
@@ -237,7 +243,10 @@ def test_play_ckpt_field_is_populated_dropdown(shared_root):
     if launcher.browse_checkpoints():
         assert values, "the dropdown should list the available checkpoints"
         assert var.get() in values, "the default must be one of the listed checkpoints"
-        assert Path(var.get()).is_absolute(), "the stored path must be absolute (CWD-independent)"
+        # the box shows the SHORT (display) name; resolving it gives the full,
+        # CWD-independent path — the whole point of the fix
+        assert Path(app._resolve_ckpt(var)).is_absolute(), \
+            "the resolved path must be absolute (CWD-independent)"
     app.close()
 
 

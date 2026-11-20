@@ -78,6 +78,10 @@ class DesktopApp:
 
         # checkpoint cache
         self._checkpoints: List[Dict[str, Any]] = []
+        # checkpoint dropdowns: a list of (var, {display_name: full_path}) so the
+        # box can show a SHORT, distinguishing name (relative to the project root)
+        # while the caller resolves it back to the full path via _resolve_ckpt().
+        self._ckpt_maps: List[Any] = []
 
         # log tail
         self._log_text = ""
@@ -273,11 +277,12 @@ class DesktopApp:
         SAME list the Checkpoints tab shows (``scratch/*.pt`` +
         ``runs/*/checkpoints/*.pt``). Pick one instead of typing a path by hand.
 
-        The value is an ABSOLUTE path (each relative entry resolved against the
-        project root), so it resolves correctly regardless of the GUI's working
-        directory — the old free-typed field broke because a relative path was
-        existence-checked against the GUI's CWD, not the project root. The box
-        stays EDITABLE so a custom path is still a valid fallback.
+        The box DISPLAYS the short, distinguishing name (relative to the project
+        root) so the rows don't all read as the same truncated absolute path.
+        Callers read it through :meth:`_resolve_ckpt` to get the full absolute
+        path. The box stays EDITABLE so a custom path (relative or absolute) is
+        still a valid fallback — :meth:`_resolve_ckpt` returns custom values
+        as-is.
 
         ``optional=True`` (the "continue training / resume from" fields) leaves
         the box EMPTY by default — empty means "start from scratch"; the caller
@@ -287,19 +292,44 @@ class DesktopApp:
             cps = launcher.browse_checkpoints()
         except Exception:
             cps = []
-        root = Path(launcher.ROOT)
-        values: List[str] = []
+        root = Path(launcher.ROOT).resolve()
+        # Show the SHORT, distinguishing name (relative to the project root) so
+        # the rows don't all read as the same truncated absolute path (the old
+        # "unusable" bug). The full absolute path is stored in ``cmap`` and
+        # resolved by _resolve_ckpt() at read time.
+        entries: List[str] = []
+        cmap: Dict[str, str] = {}
         for c in cps:
             p = c.get("path")
             if not p:
                 continue
-            ap = Path(p) if Path(p).is_absolute() else (root / p)
-            values.append(str(ap))
-        default = ("" if optional else (values[0] if values else ""))
+            ap = (Path(p) if Path(p).is_absolute() else (root / p)).resolve()
+            try:
+                display = ap.relative_to(root).as_posix()
+            except ValueError:
+                display = ap.name  # outside the project root -> just the file name
+            if display in cmap:
+                continue  # de-dup (the same file listed twice)
+            entries.append(display)
+            cmap[display] = str(ap)
+        default = ("" if optional else (entries[0] if entries else ""))
         var = tk.StringVar(value=default)
-        w = ttk.Combobox(self._fields_frame, textvariable=var, values=values, width=56)
+        self._ckpt_maps.append((var, cmap))
+        w = ttk.Combobox(self._fields_frame, textvariable=var, values=entries, width=46)
         w.grid(row=row, column=col + 1, sticky="we", pady=2, padx=(4, 12))
         return var
+
+    def _resolve_ckpt(self, var: Any) -> str:
+        """Map a checkpoint dropdown's SHORT display value back to its full
+        absolute path. A custom-typed value (not in the list) is returned
+        as-is, so a hand-typed relative/absolute path still works. Empty -> ""."""
+        v = (var.get() or "").strip()
+        if not v:
+            return v
+        for (var_ref, cmap) in self._ckpt_maps:
+            if var_ref is var:
+                return cmap.get(v, v)
+        return v
 
     def _build_collect_fields(self) -> None:
         r = 0
@@ -708,7 +738,7 @@ class DesktopApp:
                 "lr": self._ppo_lr.get(),
                 "device": self._ppo_device.get(),
                 # continue training from an existing checkpoint (None = from scratch)
-                "resume_from": (self._ppo_resume.get() or None),
+                "resume_from": (self._resolve_ckpt(self._ppo_resume) or None),
             }
         elif mode == "bc":
             return {
@@ -723,7 +753,7 @@ class DesktopApp:
                 "device": self._bc_device.get(),
                 "seed": self._bc_seed.get(),
                 # fine-tune from an existing checkpoint (None = random init)
-                "initial_ckpt": (self._bc_resume.get() or None),
+                "initial_ckpt": (self._resolve_ckpt(self._bc_resume) or None),
             }
         elif mode == "league":
             return {
@@ -742,7 +772,7 @@ class DesktopApp:
         elif mode == "play":
             return {
                 "mode": mode,
-                "ckpt_path": self._play_ckpt.get(),
+                "ckpt_path": self._resolve_ckpt(self._play_ckpt),
                 "n_battles": 0,
                 "device": self._play_device.get(),
                 "greedy": self._play_greedy.get(),
