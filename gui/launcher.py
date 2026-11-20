@@ -412,6 +412,44 @@ def _popen_kwargs() -> Dict[str, Any]:
     return kw
 
 
+def _read_mode(rd: Path) -> Optional[str]:
+    """A run's mode ('selfplay','bc','eval','play','league',...), recorded at
+    start. ``None`` for runs started before that (treated as non-pre-emptible)."""
+    try:
+        m = (Path(rd) / "mode").read_text(encoding="utf-8").strip()
+        return m or None
+    except (OSError, ValueError):
+        return None
+
+
+def _assert_startable(runs_dir: Path, mode: str) -> None:
+    """A3 gate before spawning a new run: refuse if a run is already active,
+    EXCEPT that a NON-play start may pre-empt a lingering PLAY session. Play is
+    the low-priority interactive mode (``n_battles=0`` = "play until stopped"),
+    so it must not hold the single slot forever and block real work — it is
+    stopped gracefully first. Nothing else is ever pre-empted: a
+    training/eval/league/bc run is never killed to start a play session, and
+    two of the same workload still refuse. Raises RuntimeError on refusal."""
+    active = find_active_run(runs_dir)
+    if active is None:
+        return
+    rd, st = active
+    active_mode = _read_mode(rd)
+    if mode != "play" and active_mode == "play":
+        stop_trainer(runs_dir=runs_dir, timeout=30)
+        still = find_active_run(runs_dir)
+        if still is not None:
+            rd, st = still
+            raise RuntimeError(
+                f"refusing to start: could not stop the active PLAY session "
+                f"{rd.name} (state={st.get('state')}, pid={st.get('pid')}) "
+                f"— stop it manually first")
+        return  # pre-empted the idle play session; proceed
+    raise RuntimeError(
+        f"refusing to start: run {rd.name} is already active "
+        f"(state={st.get('state')}, pid={st.get('pid')}) — stop it first")
+
+
 def start_trainer(cfg: Dict[str, Any], runs_dir: Optional[Path] = None
                   ) -> Dict[str, Any]:
     """Validate the config (by mode), refuse if a run is already active, and
@@ -464,12 +502,8 @@ def start_trainer(cfg: Dict[str, Any], runs_dir: Optional[Path] = None
         raise ValueError(f"unknown mode {mode!r} (expected 'selfplay', "
                          f"'selfplay-collect', 'bc', 'eval', 'play', or 'league')")
     runs = Path(runs_dir) if runs_dir is not None else default_runs_dir()
-    active = find_active_run(runs)
-    if active is not None:
-        rd, st = active
-        raise RuntimeError(
-            f"refusing to start: run {rd.name} is already active "
-            f"(state={st.get('state')}, pid={st.get('pid')}) — stop it first")
+    _assert_startable(runs, mode)   # A3: refuse if active — except a non-play
+    # start gracefully pre-empts a lingering PLAY session (see _assert_startable).
 
     run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     rd = runs / run_id
@@ -479,6 +513,7 @@ def start_trainer(cfg: Dict[str, Any], runs_dir: Optional[Path] = None
         raise RuntimeError(f"run dir already exists: {rd}") from exc
 
     (rd / "config.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    (rd / "mode").write_text(mode, encoding="utf-8")   # A3: lets a later start pre-empt an idle PLAY session
 
     log = open(rd / "trainer.log", "ab", buffering=0)
     try:
