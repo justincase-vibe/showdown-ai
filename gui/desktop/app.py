@@ -390,7 +390,9 @@ class DesktopApp:
         """League (bot vs bot, D102): the roster lives in ``league/bots.json``
         (persistent — the config never carries a bot list). The roster panel
         below the fields shows the current bots and lets you ADD one (name +
-        checkpoint path) before starting."""
+        seed-from dropdown — the source snapshot is COPIED into a fresh
+        league-owned file) or DELETE the selected bot (its entry + its own
+        checkpoint file) before starting."""
         r = 0
         self._league_fmt = self._format_field(r, 0); r += 1
         self._league_pairing = self._add_field(
@@ -402,6 +404,11 @@ class DesktopApp:
         # uncheck for the legacy eval-only run (rank checkpoints, no capture).
         self._league_learning = self._add_field(
             r, 0, "Learning (buffer experience):", True, "bool"); r += 1
+        # D103 step 3: the PPO update knobs (defaults mirror net.trainer.TrainConfig;
+        # gamma/lam/clip stay at their defaults — the surface stays minimal).
+        self._league_n_rounds = self._add_field(r, 0, "Rounds:", 1, "int"); r += 1
+        self._league_epochs = self._add_field(r, 0, "PPO epochs:", 2, "int"); r += 1
+        self._league_lr = self._add_field(r, 0, "PPO lr:", 3e-4, "float"); r += 1
         self._league_device = self._add_field(
             r, 0, "Device:", "cpu", "combo", values=["cpu", "cuda"]); r += 1
         self._league_n_servers = self._add_field(r, 0, "Servers:", 2, "int"); r += 1
@@ -423,11 +430,38 @@ class DesktopApp:
 
         add_row = ttk.Frame(roster_frame)
         add_row.pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(add_row, text="Name:").pack(side=tk.LEFT, padx=2)
         self._league_add_name = tk.StringVar(value="")
-        self._league_add_ckpt = tk.StringVar(value="")
-        ttk.Entry(add_row, textvariable=self._league_add_name, width=14).pack(side=tk.LEFT, padx=2)
-        ttk.Entry(add_row, textvariable=self._league_add_ckpt, width=44).pack(side=tk.LEFT, padx=2)
+        ttk.Entry(add_row, textvariable=self._league_add_name, width=12).pack(side=tk.LEFT, padx=2)
+        ttk.Label(add_row, text="Seed from:").pack(side=tk.LEFT, padx=2)
+        # seed-from dropdown (the "typing by hand doesn't work" fix): shows the
+        # short name, maps to the full path. On add we COPY it (pristine
+        # snapshot + the league's ONE-FILE-PER-BOT contract, guaranteed here).
+        try:
+            _cps = launcher.browse_checkpoints()
+        except Exception:
+            _cps = []
+        _root = Path(launcher.ROOT).resolve()
+        self._league_add_ckpt_map: Dict[str, str] = {}
+        _entries: List[str] = []
+        for _c in _cps:
+            _p = _c.get("path")
+            if not _p:
+                continue
+            _ap = (Path(_p) if Path(_p).is_absolute() else (_root / _p)).resolve()
+            try:
+                _disp = _ap.relative_to(_root).as_posix()
+            except ValueError:
+                _disp = _ap.name
+            if _disp in self._league_add_ckpt_map:
+                continue
+            _entries.append(_disp)
+            self._league_add_ckpt_map[_disp] = str(_ap)
+        self._league_add_ckpt = tk.StringVar(value=_entries[0] if _entries else "")
+        ttk.Combobox(add_row, textvariable=self._league_add_ckpt,
+                     values=_entries, width=40).pack(side=tk.LEFT, padx=2)
         ttk.Button(add_row, text="Add bot", command=self._league_add_bot).pack(side=tk.LEFT, padx=4)
+        ttk.Button(add_row, text="Delete", command=self._league_delete_bot).pack(side=tk.LEFT, padx=2)
         ttk.Button(add_row, text="Refresh", command=self._league_refresh_roster).pack(side=tk.LEFT)
         self._league_roster_msg = ttk.Label(roster_frame, text="", foreground="red")
         self._league_roster_msg.pack(fill=tk.X, pady=(2, 0))
@@ -453,32 +487,103 @@ class DesktopApp:
             tree.insert("", tk.END, values=(
                 b.name, b.elo, f"{b.wins}W/{b.losses}L/{b.draws}D", b.ckpt_path))
 
+    def _league_add_ckpt_path(self) -> str:
+        """Map the seed-from dropdown's short display value to its full path
+        (a typed custom path is returned as-is, resolved against the root)."""
+        v = (self._league_add_ckpt.get() or "").strip()
+        m = getattr(self, "_league_add_ckpt_map", {})
+        if v in m:
+            return m[v]
+        p = Path(v).expanduser()
+        return str(p if p.is_absolute() else (Path(launcher.ROOT) / p))
+
     def _league_add_bot(self) -> None:
-        """Add name + checkpoint to the roster (the persistent league state).
-        The path is normalized relative to the project root — the league
-        child runs with cwd=ROOT, so a relative path is the portable form."""
+        """Add a bot by COPYING a source snapshot into a fresh league-owned file
+        (``fresh_bot_name``) and registering the COPY in the roster.
+
+        The user's "make a copy, work with that, save it as new" flow: the
+        source stays PRISTINE, and each bot gets its OWN file (the league's
+        ONE-FILE-PER-BOT contract — the GUI validator enforces it pre-boot, and
+        copy-on-add guarantees it). Relative to the project root (the league
+        child runs with cwd=ROOT)."""
         name = self._league_add_name.get().strip()
-        ckpt = self._league_add_ckpt.get().strip()
-        if not name or not ckpt:
-            self._league_roster_msg.config(text="both name and checkpoint are required")
+        if not name:
+            self._league_roster_msg.config(text="a bot name is required")
+            return
+        src = self._league_add_ckpt_path()
+        if not src:
+            self._league_roster_msg.config(text="pick a source checkpoint to seed from")
             return
         try:
+            import shutil
+            from league.learner import fresh_bot_name
             from league.registry import BotRegistry
-            rel = ckpt
+            src_path = Path(src).expanduser().resolve()
+            if not src_path.is_file():
+                raise FileNotFoundError(f"source checkpoint not found: {src_path}")
+            # COPY to a fresh league-owned file (never reuse the source file).
+            out_path = fresh_bot_name("league", str(Path(launcher.ROOT) / "scratch"))
+            shutil.copy2(str(src_path), str(out_path))
             try:
-                rel = os.path.relpath(Path(ckpt).resolve(), launcher.ROOT)
+                rel = os.path.relpath(out_path, launcher.ROOT)
             except Exception:
-                pass  # keep as typed
+                rel = str(out_path)
             reg = BotRegistry(self._league_roster_path())
             reg.add(name, rel)
             reg.save()
             self._league_add_name.set("")
-            self._league_add_ckpt.set("")
-            self._league_roster_msg.config(text="", foreground="red")
+            self._league_roster_msg.config(
+                text=f"added {name!r} (seed copy -> {rel})", foreground="green")
             self._league_refresh_roster()
         except Exception as exc:
             self._league_roster_msg.config(
                 text=f"add failed: {type(exc).__name__}: {exc}", foreground="red")
+
+    def _league_delete_bot(self) -> None:
+        """Delete the SELECTED bot: remove its roster entry AND delete its
+        checkpoint file (+ meta sidecar), with a confirmation dialog.
+
+        The user's "delete snapshots in the GUI" request. Only the bot's OWN
+        file is removed (copy-on-add guarantees it is not shared with another
+        bot); the source snapshot it was seeded from is never touched."""
+        tree = getattr(self, "_league_tree", None)
+        if tree is None:
+            return
+        sel = tree.selection()
+        if not sel:
+            self._league_roster_msg.config(
+                text="select a bot in the roster to delete", foreground="red")
+            return
+        values = tree.item(sel[0])["values"]
+        name = values[0]
+        ckpt = values[3]
+        if not messagebox.askyesno(
+                "Delete bot",
+                f"Delete bot {name!r} and its checkpoint file?\n"
+                f"This removes its league weights (not the source snapshot). "
+                f"This cannot be undone."):
+            return
+        try:
+            from league.registry import BotRegistry
+            reg = BotRegistry(self._league_roster_path())
+            reg.remove(name)
+            reg.save()
+            ckpt_path = Path(ckpt)
+            if not ckpt_path.is_absolute():
+                ckpt_path = Path(launcher.ROOT) / ckpt_path
+            deleted: List[str] = []
+            if ckpt_path.is_file():
+                ckpt_path.unlink(); deleted.append(ckpt_path.name)
+            meta = Path(str(ckpt_path) + ".meta.json")
+            if meta.is_file():
+                meta.unlink(); deleted.append(meta.name)
+            self._league_roster_msg.config(
+                text=f"deleted {name!r}" + (f" ({', '.join(deleted)})" if deleted else ""),
+                foreground="green")
+            self._league_refresh_roster()
+        except Exception as exc:
+            self._league_roster_msg.config(
+                text=f"delete failed: {type(exc).__name__}: {exc}", foreground="red")
 
     # ── replays tab ────────────────────────────────────────────────────────
 
@@ -772,6 +877,11 @@ class DesktopApp:
                 "best_of": self._league_best_of.get(),
                 "greedy": self._league_greedy.get(),
                 "learning": self._league_learning.get(),
+                # D103 step 3: the round-end PPO knobs (fields added in
+                # _build_league_fields; LeagueConfig carries the same names).
+                "n_rounds": self._league_n_rounds.get(),
+                "epochs": self._league_epochs.get(),
+                "lr": self._league_lr.get(),
                 "device": self._league_device.get(),
                 "n_servers": self._league_n_servers.get(),
                 "per_server": self._league_per_server.get(),

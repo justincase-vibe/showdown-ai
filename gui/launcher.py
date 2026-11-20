@@ -364,6 +364,10 @@ def validate_league_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if cfg.pairing not in ("round_robin", "elo_weighted"):
         problems.append(f"pairing must be 'round_robin' or 'elo_weighted' (got {cfg.pairing!r})")
     _pos_int(cfg.best_of, "best_of", problems)
+    # D103 step 3: the PPO update knobs (GUI "Rounds / PPO epochs / PPO lr").
+    _pos_int(cfg.n_rounds, "n_rounds", problems)
+    _pos_int(cfg.epochs, "epochs", problems)
+    _finite_float(cfg.lr, "lr", problems, lo=0.0)
     _pos_int(cfg.max_steps, "max_steps", problems)
     _pos_int(cfg.n_servers, "n_servers", problems)
     _pos_int(cfg.per_server, "per_server", problems)

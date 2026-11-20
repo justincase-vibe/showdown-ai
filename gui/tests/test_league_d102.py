@@ -204,3 +204,147 @@ def test_start_trainer_rejects_unknown_mode_including_league_wording():
     with pytest.raises(ValueError) as exc:
         launcher.start_trainer({"mode": "nope"})
     assert "'league'" in str(exc.value)  # the error lists league as a valid mode
+
+
+# ── 4. D103 step 3 (GUI): PPO knobs + copy-on-add + delete ─────────────────
+
+def test_gui_league_ppo_fields_in_config(shared_root):
+    """D103 step 3: the Rounds / PPO epochs / PPO lr fields exist with
+    TrainConfig-mirroring defaults and flow through ``_build_config`` into
+    the league payload (LeagueConfig carries the same key names)."""
+    from gui.desktop.app import DesktopApp
+    app = DesktopApp(headless=True, root=shared_root)
+    app.build()
+    app._mode_var.set("League (bot vs bot)")
+    app._on_mode_change(None)
+    assert app._league_n_rounds.get() == 1        # mirrors net.trainer defaults
+    assert app._league_epochs.get() == 2
+    assert app._league_lr.get() == pytest.approx(3e-4)
+    cfg = app._build_config()
+    assert cfg["n_rounds"] == 1
+    assert cfg["epochs"] == 2
+    assert cfg["lr"] == pytest.approx(3e-4)
+    app.close()
+
+
+def test_validate_league_config_checks_ppo_knobs(tmp_path):
+    """The launcher contract: bad n_rounds / epochs / lr are loud config
+    errors before spawn (same style as best_of / seed)."""
+    from gui import launcher
+    # roster of two bots with present files (so ONLY the knob problems fire)
+    from league.registry import BotRegistry
+    regp = tmp_path / "bots.json"
+    ck_a = tmp_path / "a.pt"; ck_a.write_bytes(b"fake")
+    ck_b = tmp_path / "b.pt"; ck_b.write_bytes(b"fake")
+    reg = BotRegistry(regp)
+    reg.add("alpha", str(ck_a)); reg.add("beta", str(ck_b)); reg.save()
+    bad = {"registry_path": str(regp), "n_rounds": 0, "epochs": -1, "lr": 0.0}
+    with pytest.raises(ValueError) as exc:
+        launcher.validate_league_config(bad)
+    for needle in ("n_rounds", "epochs", "lr"):
+        assert needle in str(exc.value), f"expected {needle!r} in {exc.value}"
+    # and a good payload carries them through (LeagueConfig round-trip)
+    good = launcher.validate_league_config(
+        {"registry_path": str(regp), "n_rounds": 3, "epochs": 1, "lr": 1e-3})
+    from league.engine import LeagueConfig
+    lc = LeagueConfig.from_dict(good)
+    assert (lc.n_rounds, lc.epochs) == (3, 1) and lc.lr == pytest.approx(1e-3)
+
+
+def test_gui_league_add_copies_source_checkpoint(shared_root, tmp_path, monkeypatch):
+    """D103 step 3 (GUI): \"Add bot\" COPIES the source snapshot into a fresh
+    league-owned file and registers the COPY (the user's \"make a copy, work
+    with that, save it as new\" flow). The source stays PRISTINE, the roster
+    never points at the source, and the user's live roster is untouched."""
+    from gui import launcher
+    from gui.desktop.app import DesktopApp
+    from league.registry import BotRegistry
+
+    app = DesktopApp(headless=True, root=shared_root)
+    app.build()
+    app._mode_var.set("League (bot vs bot)")
+    app._on_mode_change(None)
+
+    # hermetic roster (NEVER the user's live league/bots.json)
+    regp = tmp_path / "bots.json"
+    app._league_roster_path = lambda: regp
+    app._league_refresh_roster()
+    assert BotRegistry(regp).all() == []
+
+    # the source snapshot (absolute path: the dropdown map falls back to raw)
+    src = tmp_path / "src.pt"
+    src.write_bytes(b"pristine-weights")
+
+    # copy destination inside the project scratch (clean relpath); clean up
+    made: list = []
+    def fake_fresh(kind: str = "league", out_dir: str = "scratch"):
+        import uuid
+        p = Path(launcher.ROOT) / "scratch" / f"league_test_{uuid.uuid4().hex[:4]}.pt"
+        made.append(p)
+        return p
+    monkeypatch.setattr("league.learner.fresh_bot_name", fake_fresh)
+
+    app._league_add_name.set("testbot")
+    app._league_add_ckpt.set(str(src))
+    app._league_add_bot()
+
+    try:
+        bot = BotRegistry(regp).get("testbot")
+        copy = Path(bot.ckpt_path)
+        if not copy.is_absolute():
+            copy = Path(launcher.ROOT) / copy
+        assert copy.resolve() != src.resolve(), "roster must point at the COPY"
+        assert copy.is_file()
+        assert copy.read_bytes() == b"pristine-weights"   # a real copy
+        assert src.read_bytes() == b"pristine-weights"    # source untouched
+        assert app._league_add_name.get() == ""           # input cleared
+        rows = app._league_tree.get_children()
+        assert len(rows) == 1
+        assert app._league_tree.item(rows[0])["values"][3] == bot.ckpt_path
+    finally:
+        for p in made:
+            p.unlink(missing_ok=True)
+    app.close()
+
+
+def test_gui_league_delete_removes_entry_and_files(shared_root, tmp_path, monkeypatch):
+    """D103 step 3 (GUI): \"Delete\" removes the SELECTED bot's roster entry
+    AND its checkpoint file (+ meta sidecar), after a confirm dialog.
+    Without a selection it refuses (message, no crash)."""
+    from gui.desktop import app as app_mod
+    from gui.desktop.app import DesktopApp
+    from league.registry import BotRegistry
+
+    app = DesktopApp(headless=True, root=shared_root)
+    app.build()
+    app._mode_var.set("League (bot vs bot)")
+    app._on_mode_change(None)
+
+    regp = tmp_path / "bots.json"
+    ck = tmp_path / "botfile.pt"
+    ck.write_bytes(b"weights")
+    meta = Path(str(ck) + ".meta.json")
+    meta.write_text("{}", encoding="utf-8")
+    reg = BotRegistry(regp)
+    reg.add("delme", str(ck))
+    reg.save()
+
+    app._league_roster_path = lambda: regp
+    app._league_refresh_roster()
+    children = app._league_tree.get_children()
+    assert len(children) == 1
+
+    # no selection -> refused, nothing deleted
+    app._league_tree.selection_remove(children[0])
+    app._league_delete_bot()
+    assert len(BotRegistry(regp).all()) == 1 and ck.exists()
+
+    # select + confirm -> entry AND files gone
+    app._league_tree.selection_set(children[0])
+    monkeypatch.setattr(app_mod.messagebox, "askyesno", lambda *a, **k: True)
+    app._league_delete_bot()
+
+    assert BotRegistry(regp).all() == []
+    assert not ck.exists()
+    assert not meta.exists()
+    app.close()
