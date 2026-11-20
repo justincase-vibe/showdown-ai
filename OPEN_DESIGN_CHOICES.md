@@ -16,6 +16,42 @@ on_battle) → league/driver → PokeAgent + BotRegistry ELO`. Fast stack green:
 
 ---
 
+## 2026-11-20 — ONE workflow (legacy `bot/` PPO generation quarantined)
+
+**Decision (user: “i do not want two separate workflows, that just makes work
+super hard”; “delete the old gui and artifact code so we dont get confused”):**
+The project now has a **single** learning workflow. The first-generation bot
+(`bot/` PPO: `policy.py`/`train.py`/`env.py`/`obs.py`/`launcher.py` + the old
+`run_gpu_watch.py` watcher + standalone scripts) was **superseded** and is
+quarantined to `_legacy/bot/` (moved, not deleted — see `_legacy/bot/README.md`).
+
+**The ONE workflow (matches the user's model — a bot = an NN checkpoint + a thin
+runner that plays from it):**
+1. **Train** a new NN → checkpoint — `net/trainer.py` (`SelfPlayTrainer`) via
+   `gui/trainer_main.py`, or imitation via `gui/bc_main.py` → `net/bc.py`.
+2. **Select** in the league — `league/` round-robin + ELO ranks the checkpoints;
+   we keep the winners, cull the weak ones.
+3. **Bot** = `net/agent.py` `PokeAgent` over `net/model.py` `PokeNet` (loads a
+   checkpoint and plays from it).
+
+**Repointed:** `Launcher.bat` now opens the native Mission Control GUI
+(`python -m gui.desktop`) instead of the retired `bot/launcher.py`.
+
+**Kept in `bot/` (load-bearing, still used by the current generation):**
+`teams.py` (format list for the GUI), `team_pools.json`, `data/`, `replays/`,
+`checkpoints/` (data), `datamine/` (HF downloader, wrapped by `corpus/pull.py`),
+`smogon_teams.py`/`teamgen.py`/`build_movesets.py` (team-pool scrapers),
+`action_space.py`/`reveal.py` (shared by `datamine/parse.py`), `requirements.txt`,
+`replay_diag.py` (replay health-check). **Verified:** kept imports work; league
+(51) + gui (87) suites pass CPU-only. Commit `6483161`.
+
+**Still open (see section B):** the browser GUI (`gui/static/` + `gui/server.py`)
+is being retired in favour of `gui.desktop` but is not yet removed; and whether
+the league should be **self-improving** (members learn by playing each other)
+or **train-then-select** (train with `net.trainer`, league only ranks + culls).
+
+---
+
 ## A. Workflow errors found
 
 ### Fixed this pass
