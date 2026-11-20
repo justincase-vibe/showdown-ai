@@ -267,6 +267,34 @@ class DesktopApp:
             return self._add_field(row, col, label, default, "str")
         return self._add_field(row, col, label, default, "combo", values=values)
 
+    def _ckpt_field(self, row: int, col: int, label: str = "Checkpoint:") -> Any:
+        """A checkpoint dropdown fed by ``launcher.browse_checkpoints()`` — the
+        SAME list the Checkpoints tab shows (``scratch/*.pt`` +
+        ``runs/*/checkpoints/*.pt``). Pick one instead of typing a path by hand.
+
+        The value is an ABSOLUTE path (each relative entry resolved against the
+        project root), so it resolves correctly regardless of the GUI's working
+        directory — the old free-typed field broke because a relative path was
+        existence-checked against the GUI's CWD, not the project root. The box
+        stays EDITABLE so a custom path is still a valid fallback."""
+        try:
+            cps = launcher.browse_checkpoints()
+        except Exception:
+            cps = []
+        root = Path(launcher.ROOT)
+        values: List[str] = []
+        for c in cps:
+            p = c.get("path")
+            if not p:
+                continue
+            ap = Path(p) if Path(p).is_absolute() else (root / p)
+            values.append(str(ap))
+        default = values[0] if values else ""
+        var = tk.StringVar(value=default)
+        w = ttk.Combobox(self._fields_frame, textvariable=var, values=values, width=56)
+        w.grid(row=row, column=col + 1, sticky="we", pady=2, padx=(4, 12))
+        return var
+
     def _build_collect_fields(self) -> None:
         r = 0
         self._collect_n_battles = self._add_field(r, 0, "Battles:", 8, "int"); r += 1
@@ -298,7 +326,7 @@ class DesktopApp:
 
     def _build_play_fields(self) -> None:
         r = 0
-        self._play_ckpt = self._add_field(r, 0, "Checkpoint:", "", "str", width=40); r += 1
+        self._play_ckpt = self._ckpt_field(r, 0); r += 1
         self._play_fmt = self._format_field(r, 0); r += 1
         self._play_bot_user = self._add_field(r, 0, "Bot user:", "checkpointbot", "str"); r += 1
         self._play_you = self._add_field(r, 0, "You:", "ttvJustinCase", "str"); r += 1
@@ -307,7 +335,7 @@ class DesktopApp:
 
     def _build_eval_fields(self) -> None:
         r = 0
-        self._eval_ckpt = self._add_field(r, 0, "Checkpoint:", "", "str", width=40); r += 1
+        self._eval_ckpt = self._ckpt_field(r, 0); r += 1
         self._eval_n = self._add_field(r, 0, "N battles:", 10, "int"); r += 1
         self._eval_fmt = self._format_field(r, 0); r += 1
         self._eval_seed = self._add_field(r, 0, "Seed:", 42, "int"); r += 1

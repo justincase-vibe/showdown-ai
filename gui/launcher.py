@@ -56,6 +56,18 @@ def _finite_float(v: Any, name: str, problems: list, lo: float = 0.0,
         problems.append(f"{name} must be in ({lo}, {hi if hi is not None else 'inf'}) (got {x})")
 
 
+def _resolve_ckpt_path(ckpt: str) -> Path:
+    """Resolve a checkpoint path against the PROJECT ROOT when it is relative.
+
+    ``browse_checkpoints()`` returns root-RELATIVE paths (``scratch/...``), and
+    the GUI may be started from ANY working directory — so a bare
+    ``Path(ckpt).is_file()`` check resolved against the GUI's CWD and wrongly
+    reported a valid checkpoint as missing (the "typing the path by hand
+    doesn't work" bug). Absolute paths are used as-is (``~`` expanded)."""
+    p = Path(ckpt).expanduser()
+    return p if p.is_absolute() else (ROOT / p)
+
+
 def validate_train_config(d: Optional[Dict[str, Any]]) -> "TrainConfig":
     """Validate a GUI-submitted config into a ``TrainConfig`` (mode
     ``selfplay``, the default). Raises ``ValueError`` with every problem
@@ -175,15 +187,18 @@ def validate_eval_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(fmt, str) or not fmt.strip():
         problems.append("battle_format must be a non-empty string")
     ckpt = d.get("ckpt_path")
+    ckpt_out = ckpt
     if not isinstance(ckpt, str) or not ckpt.strip():
         problems.append("ckpt_path must be a checkpoint file path (.pt)")
-    elif not Path(ckpt).expanduser().is_file():
-        problems.append(f"ckpt_path does not exist: {ckpt!r}")
+    else:
+        ckpt_out = str(_resolve_ckpt_path(ckpt))
+        if not Path(ckpt_out).is_file():
+            problems.append(f"ckpt_path does not exist: {ckpt!r}")
     if problems:
         raise ValueError("; ".join(problems))
     return {
         "mode": "eval",
-        "ckpt_path": ckpt,
+        "ckpt_path": ckpt_out,
         "n_battles": d["n_battles"],
         "device": device,
         "seed": d["seed"],
@@ -241,10 +256,16 @@ def validate_play_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
                         f"(got {you!r})")
 
     ckpt = d.get("ckpt_path")
+    ckpt_out = ckpt
     if not isinstance(ckpt, str) or not ckpt.strip():
         problems.append("ckpt_path must be a checkpoint file path (.pt)")
-    elif not Path(ckpt).expanduser().is_file():
-        problems.append(f"ckpt_path does not exist: {ckpt!r}")
+    else:
+        # resolve a RELATIVE path against the project root (not the GUI's CWD)
+        # and carry the ABSOLUTE path into the config, so the spawned child
+        # loads it correctly no matter what CWD it runs from.
+        ckpt_out = str(_resolve_ckpt_path(ckpt))
+        if not Path(ckpt_out).is_file():
+            problems.append(f"ckpt_path does not exist: {ckpt!r}")
 
     team_seed = d.get("team_seed")
     if team_seed is not None and (
@@ -255,7 +276,7 @@ def validate_play_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         raise ValueError("; ".join(problems))
     return {
         "mode": "play",
-        "ckpt_path": ckpt,
+        "ckpt_path": ckpt_out,
         "n_battles": n_battles,
         "device": device,
         "greedy": greedy,

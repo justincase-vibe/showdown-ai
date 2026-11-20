@@ -172,6 +172,40 @@ def test_config_builder_play(shared_root):
     app.close()
 
 
+def test_play_ckpt_field_is_populated_dropdown(shared_root):
+    """The play-mode checkpoint field is a DROPDOWN (``ttk.Combobox``) fed by
+    ``browse_checkpoints()`` — pick, don't type (the "typing by hand doesn't
+    work" fix). When checkpoints exist, the default is one of the listed
+    ABSOLUTE paths, so it resolves regardless of the GUI's working directory."""
+    from pathlib import Path
+    from tkinter import ttk
+    from gui import launcher
+    from gui.desktop.app import DesktopApp
+    app = DesktopApp(headless=True, root=shared_root)
+    app.build()
+    app._mode_var.set("Play against a checkpoint")
+    app._on_mode_change(None)
+    var = app._play_ckpt
+    # find the widget in the fields frame bound to this var
+    widget = None
+    for w in app._fields_frame.winfo_children():
+        try:
+            if w is not None and str(w.cget("textvariable")) == str(var):
+                widget = w
+                break
+        except Exception:
+            continue
+    assert widget is not None, "the play checkpoint field must be a widget"
+    assert isinstance(widget, ttk.Combobox), \
+        "the play checkpoint field must be a dropdown (Combobox), not a bare Entry"
+    values = [v for v in (widget["values"] or [])]
+    if launcher.browse_checkpoints():
+        assert values, "the dropdown should list the available checkpoints"
+        assert var.get() in values, "the default must be one of the listed checkpoints"
+        assert Path(var.get()).is_absolute(), "the stored path must be absolute (CWD-independent)"
+    app.close()
+
+
 def test_config_builder_eval(shared_root):
     """The eval-mode config has all validate_eval_config fields + mode."""
     from gui.desktop.app import DesktopApp
