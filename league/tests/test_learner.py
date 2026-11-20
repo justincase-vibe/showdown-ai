@@ -182,6 +182,22 @@ def test_fresh_bot_names_are_unique_and_wellformed():
     assert len(a.stem.split("_")[-1]) == 4
 
 
+def test_fresh_bot_name_skips_existing_files(tmp_path, monkeypatch):
+    """A 4-hex id is only 16 bits: over time (Step 4's refill loop) an unlucky
+    draw CAN land on an existing bot's file. fresh_bot_name must redraw until
+    the path is free — a silent overwrite of another bot's weights is the
+    footgun this pins. Deterministic: the first draw collides, the second
+    does not."""
+    import league.learner as learner
+    draws = iter([type("U", (), {"hex": "a1b2"})(),
+                  type("U", (), {"hex": "c3d4"})()])
+    monkeypatch.setattr(learner.uuid, "uuid4", lambda: next(draws))
+    (tmp_path / "league_a1b2.pt").touch()
+    got = fresh_bot_name(out_dir=str(tmp_path))
+    assert got == tmp_path / "league_c3d4.pt"   # redrew past the collision
+    assert (tmp_path / "league_a1b2.pt").is_file()   # existing file untouched
+
+
 def test_materialize_roster_maps_every_bot(tmp_path):
     from league.registry import BotRegistry
     v = _vocabs()
@@ -200,6 +216,28 @@ def test_materialize_roster_maps_every_bot(tmp_path):
         src = PokeNet.load_file(tmp_path / f"{name}.pt", v)
         assert _param_sum(bot.net) == _param_sum(src), name
         assert bot.ckpt_path == Path(str(tmp_path / f"{name}.pt"))
+
+
+def test_materialize_roster_rejects_shared_checkpoint_file(tmp_path):
+    """Two roster bots on ONE file = silent clobber (first bot to save
+    overwrites the other's weights; the other plays stale in-memory weights).
+    Must be a LOUD error naming both bots, before any battle."""
+    from league.registry import BotRegistry
+    v = _vocabs()
+    shared = tmp_path / "shared.pt"
+    net = PokeNet(v)
+    torch.save(net.state_for_save(), str(shared))
+
+    reg = BotRegistry(path=tmp_path / "bots.json")
+    reg.add("alpha", str(shared))
+    reg.add("beta", str(shared))
+
+    try:
+        materialize_roster(reg, v)
+        raise AssertionError("expected ValueError for a shared checkpoint file")
+    except ValueError as exc:
+        assert "alpha" in str(exc) and "beta" in str(exc)
+        assert "ONE FILE PER BOT" in str(exc)
 
 
 def test_materialize_roster_missing_checkpoint_names_the_bot(tmp_path):

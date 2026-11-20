@@ -84,8 +84,30 @@ I made within the user-approved plan — flagged here for review:
 clear-after-update vs keep-across-rounds? (Step 1 defaults: unbounded buffer,
 `clear_buffer()` available; `RolloutBuffer` semantics unchanged.)
 
+**Post-commit audit (unintended/unoptimal behavior hunt) — 2 fixed, 1 flagged:**
+
+* **FIXED — `fresh_bot_name` collision footgun.** The 4-hex id is only 16
+  bits; Step 4's cull+refill can mint hundreds of bots, so an unlucky draw
+  could hit an EXISTING bot's file, whose weights the new bot would then
+  silently clobber on first save. Now redraws until the path is free
+  (bounded at 64 draws) + deterministic regression test.
+* **FIXED — shared roster file.** `materialize_roster` silently accepted two
+  roster bots on ONE checkpoint file → first bot to save clobbers the
+  other's weights while the other plays stale in-memory weights. Now a loud
+  `ValueError` naming both bots, before any battle + regression test.
+* **FLAGGED — pristine artifacts vs the ONE-FILE-PER-BOT contract (your
+  call).** `from_roster_entry` uses the roster file as BOTH source and save
+  path (the league contract). Consequence: adding a precious artifact —
+  e.g. `scratch/s43_bc_n2000.pt` — to the roster and then training DESTROYS
+  the original (violates the "do not delete old data" rule). Options:
+  **(a)** keep the contract; the GUI "add bot" flow should COPY the snapshot
+  into a fresh league-owned file first (pristine by default) — my lean;
+  **(b)** add a "pristine" flag per roster entry; **(c)** document only and
+  rely on the user copying manually.
+
 **Gate:** league+net+gui 211 passed / 1 skipped (CUDA-only) / 5 deselected
-(live); `league/tests/test_learner.py` 13/13; three real checkpoints load
+(live); `league/tests/test_learner.py` 15/15 (13 + 2 audit regressions);
+three real checkpoints load
 through the single path. CPU-only throughout.
 
 ---

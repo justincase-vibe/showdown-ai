@@ -45,8 +45,21 @@ def fresh_bot_name(kind: str = "league", out_dir: str = "scratch") -> Path:
 
     No date (same-day collisions were the D99 problem); a 4-char uuid4 hex id
     makes same-league additions unique and league-friendly. Used by Step 4's
-    cull+refresh (injecting fresh random bots) and by GUI "add random bot"."""
-    return Path(out_dir) / f"{kind}_{uuid.uuid4().hex[:4]}.pt"
+    cull+refresh (injecting fresh random bots) and by GUI "add random bot".
+
+    **Never returns a path that already exists** — Step 4's refill loop can
+    mint hundreds of bots over time, and a 4-hex id is only 16 bits: an
+    unlucky draw could land on an existing bot's file, whose weights a new
+    bot would then clobber on its first save. We redraw until the path is
+    free (bounded — a full 65k-slot space never fills up in practice)."""
+    out = Path(out_dir)
+    for _ in range(64):
+        candidate = out / f"{kind}_{uuid.uuid4().hex[:4]}.pt"
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(
+        f"fresh_bot_name: {64} draws all collided under {out} for kind "
+        f"{kind!r} — the space is unexpectedly full")
 
 
 class LearningBot:
@@ -179,7 +192,24 @@ def materialize_roster(registry: Any, vocabs: Any, device: str = "cpu",
 
     ``{name: LearningBot}`` — the Step-2 entry point (the engine will drive
     these instead of its own net cache). Raises on the FIRST missing
-    checkpoint with the bot name named (loud, before any battle)."""
-    return {bot.name: LearningBot.from_roster_entry(bot, vocabs, device=device,
-                                                     buffer_capacity=buffer_capacity)
-            for bot in registry.all()}
+    checkpoint with the bot name named (loud, before any battle).
+
+    **ONE FILE PER BOT is enforced here, loudly:** two roster entries
+    pointing at the same checkpoint would let the first bot to save
+    clobber the other's weights (while the other keeps playing stale
+    in-memory weights) — a silent data-loss footgun, so it's a hard
+    error instead."""
+    bots: Dict[str, LearningBot] = {}
+    owner_by_file: Dict[str, str] = {}
+    for bot in registry.all():
+        resolved = str(Path(bot.ckpt_path).resolve())
+        if resolved in owner_by_file:
+            raise ValueError(
+                f"roster error: {owner_by_file[resolved]!r} and {bot.name!r} "
+                f"both point at {resolved} — the league contract is ONE FILE "
+                f"PER BOT (the first bot to save would clobber the other's "
+                f"weights). Give each bot its own checkpoint file.")
+        owner_by_file[resolved] = bot.name
+        bots[bot.name] = LearningBot.from_roster_entry(
+            bot, vocabs, device=device, buffer_capacity=buffer_capacity)
+    return bots

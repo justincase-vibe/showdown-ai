@@ -351,7 +351,8 @@ class PokeNet(nn.Module):
 
         THE ONE load path (D103 step 1): the league engine, ``net.human_play``,
         ``gui.eval_main`` and ``gui.trainer_main`` each re-derived the same
-        two-format sniffing — they now all delegate here (no fourth copy).
+        two-format sniffing — all five call sites now delegate here, so this
+        is the only place the logic lives.
 
         * **BC format:**        payload = ``{state_dict, vocab_sizes, layout_checksum}``
         * **Self-play format:** payload = ``{"net": {state_dict, …}, "round", …}``
