@@ -25,19 +25,71 @@ from typing import Any, Callable, Dict, Optional, Tuple
 #: (``None`` = pass/wait, no legal action this moment — the loop sends -2).
 DecideFn = Callable[..., Any]
 
-__all__ = ["play_agent_battle_on", "policy_action", "DecideFn"]
+__all__ = ["play_agent_battle_on", "policy_action", "DecisionGuard", "DecideFn"]
+
+
+class DecisionGuard:
+    """Counts CONSECUTIVE decision exceptions within ONE battle (D102 guard).
+
+    A single decision failure (a malformed log line, a momentary stale state)
+    still degrades to a passed turn — a live battle must never crash on one
+    observation hiccup. But ``max_consecutive`` in a row is a SYSTEMATIC
+    failure: the D102 device-mismatch bug made 100% of decisions raise, and
+    the old ``policy_action`` swallowed every one of them, so a broken net
+    silently pass-fested all 3200 battles instead of failing loud. A guard
+    with ``max_consecutive=5`` raises on the 5th back-to-back error, the battle
+    then FAILS (``control/selfplay`` increments its consecutive-error counter),
+    and after ``max_consecutive_errors`` such battles the run is marked
+    ``failed`` — a few battles lost, not thousands.
+
+    One guard is shared by BOTH sides of a battle (one battle, one decision
+    pipeline). ``on_success`` (a successful ``act``, even a legit pass) resets
+    the streak, so a rare glitch on turn 3 does NOT combine with one on turn
+    9 — only back-to-back errors count.
+    """
+
+    def __init__(self, max_consecutive: int,
+                 log: Optional[Callable[[str], None]] = None) -> None:
+        self.max_consecutive = max(1, int(max_consecutive))
+        self.consecutive = 0
+        self._log = log
+
+    def on_success(self) -> None:
+        """A decision that did NOT raise (a real action or a legit wait)."""
+        self.consecutive = 0
+
+    def on_error(self, exc: BaseException) -> Optional[Dict]:
+        """A decision that raised. Degrades to ``None`` (pass this turn) for a
+        transient glitch, or RAISES once the streak reaches the threshold."""
+        self.consecutive += 1
+        if self._log is not None:
+            self._log(f"[driver] decision error ({type(exc).__name__}: {exc}) "
+                      f"(consecutive={self.consecutive}/{self.max_consecutive})")
+        if self.consecutive >= self.max_consecutive:
+            raise RuntimeError(
+                f"{self.consecutive} consecutive decision errors (last: "
+                f"{type(exc).__name__}: {exc}) — the decision path is broken "
+                f"(e.g. a net/agent device mismatch); failing the battle loud "
+                f"instead of pass-festing") from exc
+        return None
 
 
 def policy_action(agent: Any, battle: Any, fmt: str, vocabs: Any,
                   greedy: bool = True,
-                  log: Optional[Callable[[str], None]] = None) -> Optional[Dict]:
+                  log: Optional[Callable[[str], None]] = None,
+                  guard: Optional["DecisionGuard"] = None) -> Optional[Dict]:
     """The current legal action for ``agent`` from ``battle``'s POV.
 
-    ``None`` = pass/wait (no legal action this moment). Defensive by design:
-    a decision failure (malformed log, belief-pipeline hiccup, a momentary
+    ``None`` = pass/wait (no legal action this moment). Defensive by default:
+    a single decision failure (malformed log, belief-pipeline hiccup, a momentary
     stale state) degrades to a PASSED turn with a warning — a live league
     battle must never crash on an observation glitch (the same discipline as
     ``net.human_play.CheckpointPlayer.choose_move``).
+
+    If a ``guard`` (:class:`DecisionGuard`) is supplied it replaces the bare
+    log-and-pass: a transient glitch still degrades to a pass, but a SYSTEMATIC
+    failure (N back-to-back errors) raises so the run fails loud rather than
+    silently pass-festing (the D102 device bug).
     """
     from net.env import build_action_list, build_obs, my_side
     try:
@@ -46,11 +98,15 @@ def policy_action(agent: Any, battle: Any, fmt: str, vocabs: Any,
         obs = build_obs(battle, fmt, vocabs, side)
         acts = build_action_list(battle)
         d = agent.act(obs, acts, deterministic=greedy)
-        return d.action
     except Exception as exc:  # noqa: BLE001 — see docstring
+        if guard is not None:
+            return guard.on_error(exc)
         if log is not None:
             log(f"[driver] decision error ({type(exc).__name__}: {exc}) - passing the turn")
         return None
+    if guard is not None:
+        guard.on_success()
+    return d.action
 
 
 def _step_loop(env: Any, decide_a: Callable[[Any], Any],
@@ -90,7 +146,8 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
                          decide: Optional[DecideFn] = None,
                          log: Optional[Callable[[str], None]] = None,
                          on_finish: Optional[Callable[[Any], None]] = None,
-                         env_factory: Optional[Callable[[], Any]] = None
+                         env_factory: Optional[Callable[[], Any]] = None,
+                         max_decision_errors: Optional[int] = None
                          ) -> Tuple[bool, bool, int]:
     """Play ONE full battle with ``agent_a`` on p1 and ``agent_b`` on p2.
 
@@ -108,6 +165,14 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
                       the capture hook (``replays.make_record``).
     :param env_factory: OPTIONAL ``() -> env`` override (tests inject a
                         scripted fake env; production builds a ``ShowdownEnv``).
+    :param max_decision_errors: OPTIONAL (D102 guard) — the number of
+                   CONSECUTIVE decision exceptions tolerated before the battle
+                   FAILS LOUD. ``None`` = legacy behaviour (every decision
+                   error degrades to a passed turn). When set, a single glitch
+                   still degrades to a pass, but ``N`` back-to-back errors
+                   raise, so a systematically-broken decision path (e.g. the
+                   D102 net/agent device mismatch) fails the run instead of
+                   silently pass-festing all ``n_battles``.
     :return: ``(a1_won, a2_won, n_steps)``.
     """
     import logging
@@ -116,6 +181,9 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
     make_env = env_factory or (lambda: ShowdownEnv(
         battle_format=fmt, team=StrongTeamBuilder(fmt, seed=seed),
         server_configuration=server_cfg, vocabs=vocabs, log_level=logging.ERROR))
+    # ONE guard shared by both sides of THIS battle (one decision pipeline).
+    guard = (DecisionGuard(max_decision_errors, log)
+             if max_decision_errors is not None else None)
     env = make_env()
     try:
         _obs, _info = env.reset()
@@ -123,12 +191,12 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
         def da(battle: Any) -> Any:
             if decide is not None:
                 return decide(agent_a, battle, fmt, vocabs, greedy)
-            return policy_action(agent_a, battle, fmt, vocabs, greedy, log)
+            return policy_action(agent_a, battle, fmt, vocabs, greedy, log, guard)
 
         def db(battle: Any) -> Any:
             if decide is not None:
                 return decide(agent_b, battle, fmt, vocabs, greedy)
-            return policy_action(agent_b, battle, fmt, vocabs, greedy, log)
+            return policy_action(agent_b, battle, fmt, vocabs, greedy, log, guard)
 
         n_steps = _step_loop(env, da, db, max_steps)
         if on_finish is not None:

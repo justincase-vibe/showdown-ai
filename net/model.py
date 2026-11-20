@@ -313,10 +313,19 @@ class PokeNet(nn.Module):
         }
 
     @classmethod
-    def load(cls, payload: Dict, vocabs: Vocabs) -> "PokeNet":
+    def load(cls, payload: Dict, vocabs: Vocabs,
+             device: Optional[str] = None) -> "PokeNet":
         """Load a :meth:`state_for_save` payload into a fresh net built on
         ``vocabs``. Verifies the vocab sizes + layout checksum match — a
-        mismatch raises (no silent shape drift)."""
+        mismatch raises (no silent shape drift).
+
+        ``device`` is optional: a fresh net is always BUILT on CPU (so a CPU-only
+        machine can still load a checkpoint), but if a ``device`` (e.g.
+        ``"cuda"``) is given the net is moved there AFTER ``load_state_dict``.
+        Without this, ``torch.load(map_location="cuda")`` moves only the
+        state_dict into GPU memory and then ``load_state_dict`` copies it back
+        into the fresh CPU params — so the net SILENTLY stays on CPU while a
+        CUDA agent feeds it CUDA tensors (the D102 league pass-fest bug)."""
         net = cls(vocabs)
         saved_sizes = payload.get("vocab_sizes", {})
         live = {
@@ -331,6 +340,8 @@ class PokeNet(nn.Module):
             raise ValueError("layout checksum mismatch on load "
                              f"({saved_ck} != {_layout_checksum()})")
         net.load_state_dict(payload["state_dict"])
+        if device is not None:
+            net.to(torch.device(device))
         return net
 
 

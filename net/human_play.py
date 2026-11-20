@@ -68,9 +68,9 @@ def _load_checkpoint(ckpt_path: str, vocabs: Any, device: str):
 
     payload = torch.load(ckpt_path, map_location=device, weights_only=True)
     if "net" in payload and isinstance(payload["net"], dict) and "state_dict" in payload["net"]:
-        net = PokeNet.load(payload["net"], vocabs)
+        net = PokeNet.load(payload["net"], vocabs, device=device)
     else:
-        net = PokeNet.load(payload, vocabs)
+        net = PokeNet.load(payload, vocabs, device=device)
     net.eval()
     agent = PokeAgent(net, seed=None, device=device)
     return net, agent

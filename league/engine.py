@@ -180,9 +180,11 @@ class LeagueRun:
                 # BC: {state_dict, ...} | self-play: {"net": {state_dict, ...}, ...}
                 if "net" in payload and isinstance(payload["net"], dict) \
                         and "state_dict" in payload["net"]:
-                    net = PokeNet.load(payload["net"], vocabs)
+                    net = PokeNet.load(payload["net"], vocabs,
+                                       device=self.cfg.device)
                 else:
-                    net = PokeNet.load(payload, vocabs)
+                    net = PokeNet.load(payload, vocabs,
+                                       device=self.cfg.device)
                 net.eval()
                 by_path[ckpt] = net
             self._nets[name] = by_path[ckpt]
@@ -215,7 +217,11 @@ class LeagueRun:
                 return play_agent_battle_on(
                     server_cfg, agent_a=agent_a, agent_b=agent_b,
                     fmt=fmt, seed=seed, vocabs=vocabs, max_steps=max_steps,
-                    greedy=self.cfg.greedy, log=self.log, on_finish=on_finish)
+                    greedy=self.cfg.greedy, log=self.log, on_finish=on_finish,
+                    # D102 guard: N back-to-back decision errors -> the battle
+                    # FAILS LOUD (trips the run's max_consecutive_errors) instead
+                    # of silently pass-festing all n_battles (the device bug).
+                    max_decision_errors=self.cfg.max_consecutive_errors)
             return driver
         return factory
 

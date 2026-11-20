@@ -25,7 +25,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from league.driver import _step_loop, play_agent_battle_on, policy_action
+from league.driver import (
+    DecisionGuard,
+    _step_loop,
+    play_agent_battle_on,
+    policy_action,
+)
 
 
 # ── fake battle / fake env ──────────────────────────────────────────────────
@@ -201,3 +206,84 @@ def test_policy_action_never_raises_on_broken_battle():
                         log=warnings.append)
     assert got is None                              # degraded to a pass turn
     assert any("decision error" in w for w in warnings)
+
+
+# ── DecisionGuard (the D102 pass-fest guard) ────────────────────────────────
+# The D102 device-mismatch bug made EVERY decision raise; the old policy_action
+# swallowed each one and degraded to a pass, so a broken net silently pass-fested
+# all 3200 battles. The guard still tolerates a SINGLE glitch (a live battle must
+# not crash on one observation hiccup) but fails LOUD after N back-to-back errors.
+
+def test_decision_guard_degrades_a_single_glitch_to_pass():
+    g = DecisionGuard(max_consecutive=3)
+    assert g.on_error(RuntimeError("glitch")) is None   # 1st -> pass this turn
+    assert g.consecutive == 1
+
+
+def test_decision_guard_resets_on_success():
+    g = DecisionGuard(max_consecutive=2)
+    g.on_error(RuntimeError("1"))                       # consecutive = 1
+    g.on_success()                                       # a good decision
+    assert g.consecutive == 0                            # streak reset
+    g.on_error(RuntimeError("2"))                       # a NEW streak starts
+    assert g.consecutive == 1
+
+
+def test_decision_guard_raises_after_consecutive_threshold():
+    g = DecisionGuard(max_consecutive=3)
+    g.on_error(RuntimeError("a"))                       # 1 (pass)
+    g.on_error(RuntimeError("b"))                       # 2 (pass)
+    with pytest.raises(RuntimeError, match="consecutive decision errors"):
+        g.on_error(RuntimeError("c"))                   # 3 -> fail loud
+
+
+def test_policy_action_with_guard_degrades_then_raises():
+    from net.tests.test_env_obs import _FakeBattle
+    v = _vocabs()
+    b = _FakeBattle(log=RuntimeError("boom"))           # every decision raises
+    g = DecisionGuard(max_consecutive=3)
+    assert policy_action(_agent(v), b, "gen9ou", v, greedy=True,
+                         guard=g) is None               # 1st glitch -> pass
+    assert policy_action(_agent(v), b, "gen9ou", v, greedy=True,
+                         guard=g) is None               # 2nd glitch -> pass
+    with pytest.raises(RuntimeError, match="consecutive decision errors"):
+        policy_action(_agent(v), b, "gen9ou", v, greedy=True, guard=g)
+
+
+def test_play_agent_battle_on_fails_loud_on_systematic_decision_error():
+    """The end-to-end guard: a decision path that raises on EVERY turn must
+    FAIL the battle (propagate) when max_decision_errors is set — not pass-fest
+    to the turn cap. (The D102 device bug, which the old code pass-fested.)
+
+    The fake env's battles have no ``_build_replay_log``, so every real
+    ``policy_action`` call raises (AttributeError) — a systematic failure, the
+    same shape as "100% of decisions raise". The guard must fail the battle
+    loud after the threshold instead of running to the turn cap.
+    """
+    env = _FakeEnv(turns=50, finish_after=9999)         # would run to the cap
+    env.agent1_to_move = True
+    env.agent2_to_move = True
+    agent = _agent(_vocabs())
+
+    with pytest.raises(RuntimeError, match="consecutive decision errors"):
+        play_agent_battle_on(
+            "cfg", agent_a=agent, agent_b=agent,
+            env_factory=lambda: env, max_decision_errors=3,
+        )
+    assert env.closed == 1                              # teardown still happened
+
+
+def test_play_agent_battle_on_legacy_passfest_without_guard():
+    """Contrast: with NO guard (max_decision_errors=None, the legacy behaviour)
+    the SAME broken decision path degrades every turn to a pass and runs all
+    the way to the turn cap — exactly what silently wasted the D102 run.
+    (Pinned so the guard's presence is what changes the outcome.)"""
+    env = _FakeEnv(turns=50, finish_after=9999)
+    env.agent1_to_move = True
+    env.agent2_to_move = True
+    agent = _agent(_vocabs())
+    a1, a2, n = play_agent_battle_on(
+        "cfg", agent_a=agent, agent_b=agent,
+        env_factory=lambda: env, max_decision_errors=None)
+    assert n == 50                                      # ran to the cap, no raise
+    assert not a1 and not a2                            # nobody ever acted -> nobody won

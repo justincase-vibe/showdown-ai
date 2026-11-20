@@ -216,6 +216,42 @@ def test_load_with_wrong_vocab_raises():
         PokeNet.load(payload, v_bad)
 
 
+# ── D102 device regression: load() must honour the device arg ─────────────
+# The league pass-fest bug: torch.load(map_location="cuda") + load_state_dict
+# into a fresh CPU net SILENTLY left the net on CPU while a CUDA agent fed it
+# CUDA tensors. A fresh net is always built on CPU, so this test proves the
+# device is applied AFTER load_state_dict — and that omitting it stays CPU.
+def test_load_default_device_is_cpu():
+    v = make_vocabs(make_ctx())
+    torch.manual_seed(0)
+    net = PokeNet(v)
+    path = Path(__file__).with_name("_devload_test.pt")
+    torch.save(net.state_for_save(), path)
+    try:
+        reloaded = PokeNet.load(torch.load(path, weights_only=True),
+                                make_vocabs(make_ctx()))
+        assert all(p.device.type == "cpu" for p in reloaded.parameters())
+    finally:
+        path.unlink(missing_ok=True)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(),
+                    reason="no CUDA device (CPU-only box)")
+def test_load_with_device_moves_to_cuda():
+    v = make_vocabs(make_ctx())
+    torch.manual_seed(0)
+    net = PokeNet(v)
+    path = Path(__file__).with_name("_devload_test.pt")
+    torch.save(net.state_for_save(), path)
+    try:
+        payload = torch.load(path, map_location="cuda", weights_only=True)
+        reloaded = PokeNet.load(payload, make_vocabs(make_ctx()),
+                                device="cuda")
+        assert all(p.device.type == "cuda" for p in reloaded.parameters())
+    finally:
+        path.unlink(missing_ok=True)
+
+
 # ── synthetic edge: an all-illegal action row must not produce NaN ────────
 def test_all_masked_state_fallback_finite():
     v = make_vocabs(make_ctx())
