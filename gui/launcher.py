@@ -149,7 +149,7 @@ def validate_bc_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             problems.append("provide a 'fixture' replay JSONL path "
                             "(e.g. 'bot/data/replays/gen9ou.jsonl') OR a "
                             "'replay_source' {n, key} from the replay library")
-        elif not Path(fixture).expanduser().is_file():
+        elif not _resolve_ckpt_path(fixture).is_file():
             problems.append(f"fixture does not exist (relative to the project root): {fixture!r}")
 
     # n_battles: required for a raw fixture; for replay_source it defaults to
