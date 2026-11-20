@@ -372,6 +372,11 @@ class DesktopApp:
         self._play_you = self._add_field(r, 0, "You:", "ttvJustinCase", "str"); r += 1
         self._play_device = self._add_field(r, 0, "Device:", "cpu", "str"); r += 1
         self._play_greedy = self._add_field(r, 0, "Greedy:", True, "bool"); r += 1
+        ttk.Label(self._fields_frame, justify=tk.LEFT, wraplength=440,
+                  text="On Start: the local server opens in your browser and the bot "
+                       "challenges you there — just click accept. "
+                       "(Fallback: log in and type  /challenge <Bot user>.)").grid(
+                      row=r, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
     def _build_eval_fields(self) -> None:
         r = 0

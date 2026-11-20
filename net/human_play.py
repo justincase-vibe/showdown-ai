@@ -20,6 +20,12 @@ dashboard's status / heartbeat / stop / history all work unchanged. The GUI
 
     python -m net.human_play --config <run-dir>/config.json --run-dir <run-dir>
 
+Convenience flow (2026-11-20): once connected, it OPENS the fork in the
+default browser (``http://localhost:8000``) and, when a username was given,
+SENDS THE CHALLENGE TO YOU — so the only thing left to do is click "accept"
+in the browser. Both are best-effort: if either fails, the manual path is
+printed (log in as <you> and type ``/challenge <bot user>``).
+
 Config (a FLAT dict): ``ckpt_path``, ``battle_format``, ``bot_user``, ``you``,
 ``team_seed``, ``device`` (cpu/cuda), ``greedy`` (default True), ``n_battles``
 (0 = play until you stop it).
@@ -31,6 +37,7 @@ Nothing here touches the training code — this only READS a checkpoint and REUS
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import socket
 import time
@@ -52,6 +59,39 @@ def _fork_reachable(host: str = "127.0.0.1", port: int = 8000, timeout: float = 
             return True
     except OSError:
         return False
+
+
+FORK_URL = "http://localhost:8000"
+
+
+def _open_in_browser(url: str = FORK_URL) -> bool:
+    """Best-effort: open the local fork in the default browser (Chrome).
+    Never raises — a headless / no-browser environment returns False and the
+    caller falls back to printing the URL."""
+    try:
+        import webbrowser
+        return bool(webbrowser.open(url))
+    except Exception:
+        return False
+
+
+def send_challenge(player: Any, opponent: str, fmt: str, timeout: float = 25.0) -> None:
+    """Send ONE challenge to ``opponent`` — fire-and-forget on the client's
+    event loop, so the main poll loop stays free to honor stop.flag.
+
+    Waits (up to ``timeout`` seconds) for the bot to be logged in, then sends
+    the challenge with the bot's next team — the same call the library's own
+    ``send_challenges`` makes, minus the battle-blocking tail. Raises if the
+    bot is not logged in in time or the send fails; the caller falls back to
+    the manual ``/challenge`` path."""
+    client = player.ps_client
+
+    async def _once() -> None:
+        await asyncio.wait_for(client.logged_in.wait(), timeout=timeout)
+        await client.challenge(opponent, fmt, player.next_team)
+
+    fut = asyncio.run_coroutine_threadsafe(_once(), client.loop)
+    fut.result(timeout=timeout + 5.0)
 
 
 def _load_checkpoint(ckpt_path: str, vocabs: Any, device: str):
@@ -219,11 +259,24 @@ def main(argv: Optional[list] = None) -> int:
         return 1
 
     _log(f"connected as '{bot_user}'")
-    if you:
-        _log(f"in your browser, log in as '{you}' and type:   /challenge {bot_user}")
-    else:
-        _log(f"in your browser, log in and type:              /challenge {bot_user}")
     runstate.write_heartbeat(rd, 0, 0, f"connected as {bot_user} — waiting for a challenge")
+    # Convenience (2026-11-20): open the fork in the default browser and, when
+    # a username was given, send the challenge to YOU — so the only thing left
+    # to do is click "accept" in the browser. Both are best-effort.
+    if _open_in_browser():
+        _log(f"opened the local fork in your browser ({FORK_URL})")
+    else:
+        _log(f"could not open the browser automatically — open {FORK_URL} yourself")
+    if you:
+        try:
+            send_challenge(player, you, fmt)
+            _log(f"challenge sent to '{you}' — accept it in your browser")
+            runstate.write_heartbeat(rd, 0, 0, f"challenge sent to {you} — waiting for accept")
+        except Exception as exc:  # noqa: BLE001 — auto-challenge is best-effort; the manual path always works
+            _log(f"auto-challenge failed ({type(exc).__name__}: {exc}) — log in as "
+                 f"'{you}' and type: /challenge {bot_user}")
+    else:
+        _log(f"log in and type: /challenge {bot_user}")
 
     # ── poll loop: log each finished battle, honor stop.flag, exit on n ───
     done_before = int(player.n_finished_battles)

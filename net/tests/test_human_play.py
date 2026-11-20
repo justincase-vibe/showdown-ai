@@ -9,6 +9,9 @@ NOT unit-tested here.
 """
 from __future__ import annotations
 
+import asyncio
+import threading
+import types
 from pathlib import Path
 
 import pytest
@@ -25,7 +28,10 @@ def _vocabs():
 
 
 def _agent():
-    return PokeAgent(make_random_net(_vocabs()), seed=1234)
+    # seed=1234 pins the WEIGHTS: an unseeded random net depends on the global
+    # torch RNG state left by earlier code, so unseeded assertions on concrete
+    # decisions are order-dependent flakes.
+    return PokeAgent(make_random_net(_vocabs(), seed=1234), seed=1234)
 
 
 def test_decide_order_returns_legal_move_pe():
@@ -39,8 +45,11 @@ def test_decide_order_returns_legal_move_pe():
         tera=True,
     )
     pe = hp.decide_order(_agent(), b, "gen9ou", v, greedy=True)
-    # 0 = the one bench switch; 6/7 = the two moves; 22/23 = tera on those moves.
-    assert pe in (0, 6, 7, 22, 23), pe
+    # 1 = the one bench switch (p1b — poke-env indexes switches into the WHOLE
+    # team array, where the active p1a is 0); 6/7 = the two moves; 22/23 = tera
+    # on those moves. (The old expectation of 0 was stale — a switch to p1b is
+    # team index 1, not 0.)
+    assert pe in (1, 6, 7, 22, 23), pe
 
 
 def test_decide_order_is_deterministic_when_greedy():
@@ -82,3 +91,66 @@ def test_fork_reachable_returns_bool():
     # a closed port reports False (does not raise); 8000 reflects the fork's state.
     assert hp._fork_reachable(port=1) is False
     assert isinstance(hp._fork_reachable(port=8000), bool)
+
+
+# ── convenience flow (2026-11-20): open the browser + auto-challenge YOU ────
+
+def test_open_in_browser_returns_bool(monkeypatch):
+    import webbrowser
+    monkeypatch.setattr(webbrowser, "open", lambda url: True)
+    assert hp._open_in_browser() is True
+    monkeypatch.setattr(webbrowser, "open", lambda url: False)
+    assert hp._open_in_browser() is False
+    # a crashing browser (headless edge) must not raise — best-effort contract
+    def _boom(url):
+        raise RuntimeError("no display")
+    monkeypatch.setattr(webbrowser, "open", _boom)
+    assert hp._open_in_browser() is False
+
+
+class _FakeClient:
+    """Just enough of poke_env's PSClient: a real event loop (run in its own
+    thread) + the logged_in Event + challenge(). Mirrors the contract
+    ``send_challenge`` uses — nothing more."""
+
+    def __init__(self, logged_in: bool = True):
+        self.loop = asyncio.new_event_loop()
+        self.logged_in = asyncio.Event()
+        if logged_in:
+            self.logged_in.set()
+        self.challenges = []
+
+    async def challenge(self, username, format_, packed_team):
+        self.challenges.append((username, format_, packed_team))
+
+
+def _client_with_running_loop(logged_in: bool = True):
+    client = _FakeClient(logged_in=logged_in)
+
+    def _run():
+        asyncio.set_event_loop(client.loop)
+        client.loop.run_forever()
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    return client, t
+
+
+def test_send_challenge_sends_exactly_one_challenge():
+    client, _t = _client_with_running_loop()
+    player = types.SimpleNamespace(ps_client=client, next_team="PACKED_TEAM")
+    hp.send_challenge(player, "ttvJustinCase", "gen9ou")
+    # the exact contract: ONE challenge, to you, in the configured format, with
+    # the bot's next team
+    assert client.challenges == [("ttvJustinCase", "gen9ou", "PACKED_TEAM")]
+    client.loop.call_soon_threadsafe(client.loop.stop)
+
+
+def test_send_challenge_raises_when_bot_not_logged_in():
+    # no hang, no silent drop — the caller falls back to the manual /challenge
+    client, _t = _client_with_running_loop(logged_in=False)
+    player = types.SimpleNamespace(ps_client=client, next_team="PACKED_TEAM")
+    with pytest.raises(Exception):
+        hp.send_challenge(player, "ttvJustinCase", "gen9ou", timeout=0.3)
+    assert client.challenges == []
+    client.loop.call_soon_threadsafe(client.loop.stop)

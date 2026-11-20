@@ -151,10 +151,20 @@ class PokeAgent:
         return self.act(obs, action_list, deterministic=True)
 
 
-def make_random_net(vocabs, device: str = "cpu") -> PokeNet:
+def make_random_net(vocabs, device: str = "cpu", seed: Optional[int] = None) -> PokeNet:
     """A fresh random-init :class:`PokeNet` (the D73-locked default start) on
     ``device``, in eval mode. DRY helper shared by the unit tests and the P2 gate
-    so "random-init net" is one code path, not two."""
+    so "random-init net" is one code path, not two.
+
+    ``seed=None`` (the default) = truly random: consecutive calls give DIFFERENT
+    nets — the trainer and the league rely on that for diversity. ``seed=int``
+    = deterministic weights — for tests that assert concrete decisions: a
+    seedless net depends on whatever global torch RNG state earlier code left
+    behind, so unseeded tests are order-dependent flakes (caught 2026-11-20:
+    ``test_decide_order_returns_legal_move_pe`` flipped with the RNG state).
+    """
+    if seed is not None:
+        torch.manual_seed(seed)
     net = PokeNet(vocabs)
     net.to(device)
     net.eval()
