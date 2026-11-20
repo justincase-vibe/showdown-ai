@@ -388,6 +388,22 @@ def validate_league_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             ck = ROOT / ck   # the child runs with cwd=ROOT
         if not ck.exists():
             problems.append(f"checkpoint for bot {b.name!r} does not exist: {b.ckpt_path}")
+    # D103: a LEARNING league mutates bots (step 3 saves their weights) ->
+    # ONE FILE PER BOT is a hard contract; fail HERE (before the pool boots),
+    # not in the engine after 90 s of booting. (Eval-only runs may share a
+    # file — they never write.)
+    if cfg.learning:
+        owner: Dict[str, str] = {}
+        for b in bots:
+            key = str(Path(b.ckpt_path).resolve())
+            if key in owner:
+                problems.append(
+                    f"learning league: {owner[key]!r} and {b.name!r} share "
+                    f"checkpoint {key} — the league contract is ONE FILE PER "
+                    f"BOT (the first bot to save would clobber the other's "
+                    f"weights); give each bot its own file")
+            else:
+                owner[key] = b.name
     if problems:
         raise ValueError("; ".join(problems))
     payload = cfg.to_dict()

@@ -398,6 +398,10 @@ class DesktopApp:
             "combo", values=["round_robin", "elo_weighted"]); r += 1
         self._league_best_of = self._add_field(r, 0, "Best of:", 1, "int"); r += 1
         self._league_greedy = self._add_field(r, 0, "Greedy:", True, "bool"); r += 1
+        # D103: the league IS the self-improving loop (bots buffer experience);
+        # uncheck for the legacy eval-only run (rank checkpoints, no capture).
+        self._league_learning = self._add_field(
+            r, 0, "Learning (buffer experience):", True, "bool"); r += 1
         self._league_device = self._add_field(
             r, 0, "Device:", "cpu", "combo", values=["cpu", "cuda"]); r += 1
         self._league_n_servers = self._add_field(r, 0, "Servers:", 2, "int"); r += 1
@@ -767,6 +771,7 @@ class DesktopApp:
                 "pairing": self._league_pairing.get(),
                 "best_of": self._league_best_of.get(),
                 "greedy": self._league_greedy.get(),
+                "learning": self._league_learning.get(),
                 "device": self._league_device.get(),
                 "n_servers": self._league_n_servers.get(),
                 "per_server": self._league_per_server.get(),

@@ -112,6 +112,55 @@ through the single path. CPU-only throughout.
 
 ---
 
+## 2026-11-20 — D103 Step 2 done: experience collection (design decisions)
+
+**Step 2 ("collect experience into each bot's buffer") is BUILT.** Decisions
+I made within the user-approved plan — flagged here for review:
+
+1. **`league/collect.py::TrajectoryCollector` (new module) instead of logic
+   in the driver.** Keeps the driver's torch-free-at-import discipline; the
+   collector owns the step-shape semantics. Same shape as
+   `net.trainer.play_and_collect` — the league feeds the IDENTICAL `net.ppo`
+   machinery (no parallel semantics):
+   * only REAL actions stored (pass/wait ≠ transition — skipped defensively);
+   * `old_value` RAW (0,1): the 2V-1 reward-space map stays in the GAE step
+     (step 3), exactly as `apply_gae` does today;
+   * terminal reward (+1/−1/0) on the LAST step only — `gae()`'s
+     sparse-terminal model.
+2. **Capture seam = production path only.** `policy_action(capture=)` /
+   `play_agent_battle_on(capture_a/capture_b=)`. The `decide=` override (the
+   test-injection seam) bypasses capture BY DESIGN — a fake decision is not
+   real experience.
+3. **Errored battles DISCARD their partial trajectories** (no buffer, no ELO).
+   No decided outcome → no terminal reward → a half-trajectory is poison for
+   PPO. Pinned by `test_learning_run_discards_partial_trajectory_on_error`.
+4. **`LeagueConfig.learning: bool = True` (default).** The league IS the
+   self-improving loop (your call: "the league is our form of self play
+   learning"). `learning=False` = the legacy eval-only rank run, unchanged
+   (existing tests + pure checkpoint ranking). The GUI exposes the flag
+   ("Learning (buffer experience):" checkbox) so you can run either.
+5. **ONE-FILE-PER-BOT enforced in the GUI validator for learning leagues** —
+   fail BEFORE the pool boots (90 s), not in the engine after (the engine's
+   `materialize_roster` still enforces it as the last line). Eval-only runs
+   may still share a file (they never write).
+
+**OPEN (carried into step 3):** buffer policy (capacity cap? clear-after-
+update vs keep-across-rounds?) + **buffer persistence** — the buffer lives in
+RAM for the run; step 3's update consumes it in-process. A killed run loses
+the un-updated experience. Options for step 3: (a) save buffers to the run
+dir at the end of each pairing round (my lean — cheap, crash-safe); (b)
+disk-backed buffer; (c) accept the loss (a round is only a few minutes).
+**RAM note:** a long run (3200 battles × ~50 steps × 2 sides) can reach a few
+hundred MB of buffered obs — fine now, relevant if we scale battles/round.
+
+**Gate:** league+net+gui 226 passed / 1 skipped (CUDA-only) / 5 deselected
+(live); 15 new tests (collect 7, driver capture 2, engine learning 4,
+validator/GUI 2). CPU-only throughout. During the audit I caught my own
+test-helper bug (`action=None` double as "unset" sentinel) — the test caught
+it; fixed with a proper sentinel.
+
+---
+
 ## A. Workflow errors found
 
 ### Fixed this pass

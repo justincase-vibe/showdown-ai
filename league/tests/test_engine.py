@@ -192,11 +192,160 @@ def test_wait_before_start_raises(tmp_path):
         LeagueRun(_cfg(), registry=_roster(tmp_path, "a", "b")).wait()
 
 
+# ── learning mode (D103 step 2: experience collection into bot buffers) ──
+# The engine's OWN driver factory is exercised (the learning path); the
+# battle layer (``league.driver.play_agent_battle_on``) is monkeypatched to a
+# scripted fake that drives the REAL capture seam with REAL obs + decisions
+# (a real net over the D92 fake battle) — no server, no pool, no GPU.
+
+def _learning_roster(tmp_path, *names, seed: int = 11):
+    """A roster of two+ bots on real (random-init) checkpoints, BC format.
+
+    Production vocabs (``build_vocabs``) — the SAME the engine's
+    ``_load_bots`` uses: a checkpoint must load through the ONE load path
+    with the production vocab, or the size check rightly fails loud."""
+    import torch
+    from net.agent import make_random_net
+    from net.vocab_db import build_vocabs
+    v = build_vocabs()
+    reg = BotRegistry(path=tmp_path / "bots.json")
+    for i, name in enumerate(names):
+        p = tmp_path / f"{name}.pt"
+        net = make_random_net(v, device="cpu", seed=seed + i)
+        torch.save(net.state_for_save(), str(p))
+        reg.add(name, str(p))
+    return reg
+
+
+def _fake_play_factory(result, partial_before_error: bool = False):
+    """A stand-in for ``play_agent_battle_on`` that fires the REAL capture
+    seam: one real decision per side (real net, real build_obs, D92 battle),
+    then the scripted result (or a scripted infra error).
+
+    Production vocabs too — the obs must match the bot's net (built with the
+    production vocab), exactly as the live path does."""
+    from net.env import build_action_list, build_obs, my_side
+    from net.tests.test_env_obs import _FakeBattle, _FakeMon
+    from net.vocab_db import build_vocabs
+
+    def fake_play(server_cfg, **kw):
+        v = build_vocabs()
+        b = _FakeBattle(
+            active=_FakeMon("garchomp", moves=["outrage", "earthquake"]),
+            avail_moves=["outrage", "earthquake"], tera=True)
+        lines = [ln for ln in b._build_replay_log().split("\n") if ln.strip()]
+        side = my_side(b, lines)
+        obs = build_obs(b, "gen9ou", v, side)
+        acts = build_action_list(b)
+        for cap, ag in ((kw["capture_a"], kw["agent_a"]),
+                        (kw["capture_b"], kw["agent_b"])):
+            if cap is not None:
+                cap(obs, ag.act(obs, acts, deterministic=True))
+        if partial_before_error:
+            raise RuntimeError("pool exploded")
+        return result
+    return fake_play
+
+
+def test_learning_run_buffers_experience_with_terminal_rewards(tmp_path,
+                                                                monkeypatch):
+    import league.driver as drv
+    monkeypatch.setattr(drv, "play_agent_battle_on",
+                        _fake_play_factory((True, False, 2)))   # alpha wins
+    reg = _learning_roster(tmp_path, "alpha", "beta")
+    run = LeagueRun(_cfg(learning=True), registry=reg, pool=FakePool())
+    run.start()          # the engine's OWN factory (learning path) runs now
+    s = run.wait()
+    run.shutdown()
+
+    assert s["state"] == "completed"
+    assert s["errors"] == 0
+    # ELO still wired (the learning mode does not change the standings math)
+    assert reg.get("alpha").wins == 1 and reg.get("beta").losses == 1
+
+    # BOTH bots buffered real decisions
+    bots = run._bots
+    a_steps = list(bots["alpha"].buffer.steps)
+    b_steps = list(bots["beta"].buffer.steps)
+    assert a_steps and b_steps
+    # sparse-terminal reward, each from its OWN POV
+    assert a_steps[-1].reward == 1.0 and a_steps[-1].done is True
+    assert all(st.reward == 0.0 and st.done is False for st in a_steps[:-1])
+    assert b_steps[-1].reward == -1.0 and b_steps[-1].done is True
+    assert all(st.reward == 0.0 for st in b_steps[:-1])
+    # the decision numbers are the REAL policy's (finite, sane ranges)
+    for st in a_steps:
+        assert st.old_logprob <= 0.0
+        assert 0.0 <= st.old_value <= 1.0
+        assert st.action_index >= 0
+        assert len(st.obs) > 0
+    # the summary reports what was collected (the GUI's checkpoint signal)
+    assert s["steps_collected_by_bot"] == {
+        "alpha": len(a_steps), "beta": len(b_steps)}
+
+
+def test_learning_run_draw_buffers_zero_terminal(tmp_path, monkeypatch):
+    import league.driver as drv
+    monkeypatch.setattr(drv, "play_agent_battle_on",
+                        _fake_play_factory((False, False, 2)))   # draw
+    reg = _learning_roster(tmp_path, "a", "b")
+    run = LeagueRun(_cfg(learning=True), registry=reg, pool=FakePool())
+    run.start()
+    s = run.wait()
+    run.shutdown()
+    assert s["errors"] == 0
+    assert reg.get("a").draws == 1
+    for name in ("a", "b"):
+        steps = list(run._bots[name].buffer.steps)
+        assert steps and steps[-1].reward == 0.0 and steps[-1].done is True
+
+
+def test_learning_run_discards_partial_trajectory_on_error(tmp_path,
+                                                            monkeypatch):
+    """An errored battle has no decided outcome -> its PARTIAL trajectory is
+    poison for PPO: it must be DISCARDED (no buffer, no ELO)."""
+    import league.driver as drv
+    monkeypatch.setattr(drv, "play_agent_battle_on",
+                        _fake_play_factory((True, False, 2),
+                                           partial_before_error=True))
+    reg = _learning_roster(tmp_path, "alpha", "beta")
+    run = LeagueRun(_cfg(learning=True), registry=reg, pool=FakePool())
+    run.start()
+    s = run.wait()
+    run.shutdown()
+
+    assert s["state"] == "completed" and s["errors"] == 1
+    # NO ELO update (the errored pairing rule)
+    assert reg.get("alpha").elo == ELO_INITIAL and reg.get("beta").elo == ELO_INITIAL
+    # NO buffered steps (the partial trajectory was discarded, not finalized)
+    assert len(run._bots["alpha"].buffer) == 0
+    assert len(run._bots["beta"].buffer) == 0
+
+
+def test_eval_mode_run_has_no_learning_side_effects(tmp_path):
+    """learning=False (the legacy eval-only run): an injected factory, no
+    capture, no bot materialization, no summary key — the path that existed
+    before step 2, unchanged."""
+    reg = _roster(tmp_path, "a", "b")
+    factory = make_fake_factory({0: (True, False)})
+    run = LeagueRun(_cfg(learning=False), registry=reg, pool=FakePool(),
+                    driver_factory=lambda: factory)
+    run.start()
+    s = run.wait()
+    run.shutdown()
+    assert s["state"] == "completed"
+    assert reg.get("a").wins == 1
+    assert run._bots == {}
+    assert "steps_collected_by_bot" not in s
+
+
 def test_config_roundtrip():
     cfg = LeagueConfig(pairing="elo_weighted", best_of=2, greedy=False,
-                       device="cuda", n_workers=4, max_consecutive_errors=7)
+                       device="cuda", n_workers=4, max_consecutive_errors=7,
+                       learning=False)
     same = LeagueConfig.from_dict(cfg.to_dict())
     assert same == cfg
+    assert LeagueConfig().learning is True      # the league IS the learning loop
 
 
 def test_config_from_dict_ignores_unknown_keys():

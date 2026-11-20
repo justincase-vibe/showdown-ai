@@ -102,6 +102,44 @@ def test_league_missing_checkpoint_is_a_config_error(tmp_path):
     assert "checkpoint" in msg and "'b'" in msg
 
 
+def test_league_learning_mode_rejects_shared_checkpoint(tmp_path):
+    """D103: a learning league mutates bots -> ONE FILE PER BOT is a hard
+    contract. Two roster bots on one checkpoint must be a config error
+    BEFORE the pool boots (the first bot to save would clobber the
+    other's weights)."""
+    from league.registry import BotRegistry
+    from gui import launcher
+    regp = tmp_path / "bots.json"
+    shared = tmp_path / "shared.pt"; shared.write_bytes(b"fake")
+    reg = BotRegistry(regp)
+    reg.add("alpha", str(shared))
+    reg.add("beta", str(shared))
+    reg.save()
+    with pytest.raises(ValueError) as exc:
+        launcher.validate_league_config({"registry_path": str(regp),
+                                         "learning": True})
+    msg = str(exc.value)
+    assert "ONE FILE PER BOT" in msg
+    assert "'alpha'" in msg and "'beta'" in msg
+
+
+def test_league_eval_mode_allows_shared_checkpoint(tmp_path):
+    """learning=False (the legacy eval-only run) never writes -> a shared
+    checkpoint file is still legal there (the pre-D103 contract)."""
+    from league.registry import BotRegistry
+    from gui import launcher
+    regp = tmp_path / "bots.json"
+    shared = tmp_path / "shared.pt"; shared.write_bytes(b"fake")
+    reg = BotRegistry(regp)
+    reg.add("alpha", str(shared))
+    reg.add("beta", str(shared))
+    reg.save()
+    cfg = launcher.validate_league_config({"registry_path": str(regp),
+                                           "learning": False})
+    assert cfg["learning"] is False
+    assert cfg["_rounds_planned"] == 1
+
+
 def test_league_lists_every_problem(roster):
     from gui import launcher
     bad = {"registry_path": str(roster), "pairing": "swiss", "device": "gpu",
@@ -123,8 +161,8 @@ def test_gui_league_fields_build_and_config(shared_root):
     assert app._current_mode == "league"
     # every field exists
     for attr in ("_league_fmt", "_league_pairing", "_league_best_of",
-                 "_league_greedy", "_league_device", "_league_n_servers",
-                 "_league_per_server", "_league_port_base",
+                 "_league_greedy", "_league_learning", "_league_device",
+                 "_league_n_servers", "_league_per_server", "_league_port_base",
                  "_league_max_steps", "_league_seed", "_league_tree"):
         assert getattr(app, attr) is not None, attr
     # the config builder reads them into the right shape
@@ -132,6 +170,7 @@ def test_gui_league_fields_build_and_config(shared_root):
     assert cfg["mode"] == "league"
     assert cfg["battle_format"] == "gen9ou"      # pool default
     assert cfg["pairing"] in ("round_robin", "elo_weighted")
+    assert cfg["learning"] is True               # D103: league learns by default
     app.close()
 
 

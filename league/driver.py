@@ -77,7 +77,8 @@ class DecisionGuard:
 def policy_action(agent: Any, battle: Any, fmt: str, vocabs: Any,
                   greedy: bool = True,
                   log: Optional[Callable[[str], None]] = None,
-                  guard: Optional["DecisionGuard"] = None) -> Optional[Dict]:
+                  guard: Optional["DecisionGuard"] = None,
+                  capture: Optional[Callable[[Any, Any], None]] = None) -> Optional[Dict]:
     """The current legal action for ``agent`` from ``battle``'s POV.
 
     ``None`` = pass/wait (no legal action this moment). Defensive by default:
@@ -90,7 +91,12 @@ def policy_action(agent: Any, battle: Any, fmt: str, vocabs: Any,
     log-and-pass: a transient glitch still degrades to a pass, but a SYSTEMATIC
     failure (N back-to-back errors) raises so the run fails loud rather than
     silently pass-festing (the D102 device bug).
-    """
+
+    ``capture`` (D103 step 2): optional ``(obs, decision) -> None`` called
+    with the EXACT encoded observation + full ``Decision`` (action_index /
+    logprob / value) right after a SUCCESSFUL decision with a real action —
+    the league's experience-collection seam (a pass/wait is not captured: no
+    action taken, no transition to learn from)."""
     from net.env import build_action_list, build_obs, my_side
     try:
         lines = [ln for ln in battle._build_replay_log().split("\n") if ln.strip()]
@@ -106,6 +112,8 @@ def policy_action(agent: Any, battle: Any, fmt: str, vocabs: Any,
         return None
     if guard is not None:
         guard.on_success()
+    if capture is not None and d.action is not None:
+        capture(obs, d)
     return d.action
 
 
@@ -147,7 +155,9 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
                          log: Optional[Callable[[str], None]] = None,
                          on_finish: Optional[Callable[[Any], None]] = None,
                          env_factory: Optional[Callable[[], Any]] = None,
-                         max_decision_errors: Optional[int] = None
+                         max_decision_errors: Optional[int] = None,
+                         capture_a: Optional[Callable[[Any, Any], None]] = None,
+                         capture_b: Optional[Callable[[Any, Any], None]] = None
                          ) -> Tuple[bool, bool, int]:
     """Play ONE full battle with ``agent_a`` on p1 and ``agent_b`` on p2.
 
@@ -173,6 +183,12 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
                    raise, so a systematically-broken decision path (e.g. the
                    D102 net/agent device mismatch) fails the run instead of
                    silently pass-festing all ``n_battles``.
+    :param capture_a / capture_b: OPTIONAL (D103 step 2) — ``(
+                   obs, decision) -> None`` called per real decision of each
+                   side: the league's experience-collection seam (the engine
+                   wires each side to its bot's :class:`TrajectoryCollector`).
+                   Only the PRODUCTION path captures: a ``decide=`` override
+                   (test injection) bypasses capture by design.
     :return: ``(a1_won, a2_won, n_steps)``.
     """
     import logging
@@ -191,12 +207,14 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
         def da(battle: Any) -> Any:
             if decide is not None:
                 return decide(agent_a, battle, fmt, vocabs, greedy)
-            return policy_action(agent_a, battle, fmt, vocabs, greedy, log, guard)
+            return policy_action(agent_a, battle, fmt, vocabs, greedy, log, guard,
+                                 capture=capture_a)
 
         def db(battle: Any) -> Any:
             if decide is not None:
                 return decide(agent_b, battle, fmt, vocabs, greedy)
-            return policy_action(agent_b, battle, fmt, vocabs, greedy, log, guard)
+            return policy_action(agent_b, battle, fmt, vocabs, greedy, log, guard,
+                                 capture=capture_b)
 
         n_steps = _step_loop(env, da, db, max_steps)
         if on_finish is not None:

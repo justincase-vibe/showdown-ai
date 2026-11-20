@@ -61,6 +61,11 @@ class LeagueConfig:
     max_steps: int = 200
     greedy: bool = True                   # argmax policy (deterministic ELO)
     device: str = "cpu"                   # agent inference device (cpu|cuda)
+    # ── the learning loop (D103) ───────────────────────────────────────
+    learning: bool = True                 # True: bots buffer experience (the league
+                                         # IS the self-improving loop); False: the
+                                         # legacy eval-only run (rank checkpoints,
+                                         # no capture) — one engine, a mode flag
     # ── the pool (the RAM ceiling is enforced by the pool, not here) ───
     n_servers: int = 2
     per_server: int = 2
@@ -117,6 +122,8 @@ class LeagueRun:
         self._driver_factory_fn = driver_factory or self._driver_factory
         # state
         self._nets: Dict[str, Any] = {}
+        self._bots: Dict[str, Any] = {}  # learning mode: name -> LearningBot
+        self._collectors: Dict[int, Tuple[Any, Any]] = {}  # pairing idx -> (coll_a, coll_b)
         self._sp: Optional[Any] = None    # the SelfPlayRun (the run mechanics)
         self._pairings: List[Tuple[str, str]] = []
         self._results: List[Dict[str, Any]] = []
@@ -187,7 +194,14 @@ class LeagueRun:
         """``idx -> battle_driver``: the pairing at idx decides whose
         checkpoints fight. The driver ONLY plays — bookkeeping lives in
         :meth:`_on_battle` (the engine-level hook), so no driver can bypass
-        the registry."""
+        the registry.
+
+        Learning mode (D103 step 2): each side is a LIVE ``LearningBot``'s
+        per-battle agent, and every real decision is captured into that bot's
+        per-battle :class:`TrajectoryCollector` (finalized in ``_on_battle``).
+        Eval mode: the legacy checkpoint-cache path, unchanged."""
+        if self.cfg.learning:
+            return self._learning_driver_factory()
         self._load_nets()
         from net.agent import PokeAgent
         from .driver import play_agent_battle_on
@@ -216,19 +230,103 @@ class LeagueRun:
             return driver
         return factory
 
+    # ── learning mode (D103 step 2) ─────────────────────────────────────
+    def _load_bots(self) -> None:
+        """Materialize the live bots ONCE (``materialize_roster``: the ONE
+        load path + the ONE-FILE-PER-BOT enforcement + loud errors before
+        any battle)."""
+        if self._bots:
+            return
+        from net.vocab_db import build_vocabs
+        from .learner import materialize_roster
+
+        vocabs = build_vocabs()
+        self._bots = materialize_roster(self.registry, vocabs,
+                                        device=self.cfg.device)
+        self.log(f"[league] learning bots ready: {len(self._bots)} "
+                 f"({', '.join(sorted(self._bots))})")
+
+    def _learning_driver_factory(self):
+        """The learning-mode factory: LIVE bots, fresh per-battle agents,
+        per-battle trajectory collectors (one per side)."""
+        self._load_bots()
+        from .collect import TrajectoryCollector
+        from .driver import play_agent_battle_on
+
+        def factory(idx: int):
+            a_name, b_name = self._pairings[idx]
+            bot_a, bot_b = self._bots[a_name], self._bots[b_name]
+            # ONE collector per (battle, side): owned by this battle's worker
+            # thread until _on_battle finalizes/discards it.
+            coll_a, coll_b = TrajectoryCollector(), TrajectoryCollector()
+            with self._lk:
+                self._collectors[idx] = (coll_a, coll_b)
+            # a FRESH PokeAgent per battle (bot.agent = the same contract as
+            # the eval path: fresh torch.Generator, shared net read-only).
+            agent_a = bot_a.agent(seed=self.cfg.seed + 2 * idx)
+            agent_b = bot_b.agent(seed=self.cfg.seed + 2 * idx + 1)
+
+            def driver(server_cfg, fmt="gen9ou", seed=0, vocabs=None,
+                       max_steps=200, on_finish=None):
+                return play_agent_battle_on(
+                    server_cfg, agent_a=agent_a, agent_b=agent_b,
+                    fmt=fmt, seed=seed, vocabs=vocabs, max_steps=max_steps,
+                    greedy=self.cfg.greedy, log=self.log, on_finish=on_finish,
+                    max_decision_errors=self.cfg.max_consecutive_errors,
+                    # the collection seam: each side's real decisions land in
+                    # its bot's collector (finalize + buffer in _on_battle).
+                    capture_a=coll_a.record, capture_b=coll_b.record)
+            return driver
+        return factory
+
+    def _finalize_experience(self, idx: int, result: Dict[str, Any]) -> None:
+        """Attach the decided outcome to the battle's trajectories and extend
+        the bots' buffers (the bot's OWN POV: a1 = pairing[0]).
+
+        Reward shape = ``gae()``'s sparse-terminal model: winner +1, loser
+        −1, draw 0 — on the LAST decision of the battle (``collect.finalize``).
+        A side that never acted contributes nothing (empty collector)."""
+        coll_a, coll_b = self._collectors.get(idx, (None, None))
+        if coll_a is None and coll_b is None:
+            return
+        a_name, b_name = self._pairings[idx]
+        if result["a1_won"] and not result["a2_won"]:
+            out_a, out_b = +1.0, -1.0
+        elif result["a2_won"] and not result["a1_won"]:
+            out_a, out_b = -1.0, +1.0
+        else:
+            out_a, out_b = 0.0, 0.0
+        n_a = len(coll_a)
+        self._bots[a_name].buffer.extend(coll_a.finalize(out_a).steps)
+        n_b = len(coll_b)
+        self._bots[b_name].buffer.extend(coll_b.finalize(out_b).steps)
+        self.log(f"[league] battle {idx}: buffered {n_a} step(s) for "
+                 f"{a_name} ({out_a:+.0f}) + {n_b} step(s) for {b_name} "
+                 f"({out_b:+.0f})")
+
     def _on_battle(self, idx: int, result: Dict[str, Any]) -> None:
         """The engine-level result hook (SelfPlayRun ``on_battle``).
 
         A pairing whose battle ERRORED (infra/pool) gets NO ELO update — it
         is already counted in the run summary; silently booking it as a draw
-        would corrupt the standings."""
+        would corrupt the standings. In learning mode an errored battle's
+        PARTIAL trajectories are DISCARDED too — no decided outcome means
+        no terminal reward, and a half-trajectory is poison for PPO.
+        """
         if result.get("error") is not None:
             self.log(f"[league] battle {idx}: ERRORED - no ELO update "
                      f"({result['error']})")
+            with self._lk:
+                coll_a, coll_b = self._collectors.pop(idx, (None, None))
+            if coll_a is not None or coll_b is not None:
+                self.log(f"[league] battle {idx}: DISCARDED partial "
+                         f"trajectories ({len(coll_a)}/{len(coll_b)} decisions) "
+                         f"- an errored battle has no decided outcome")
             return
         a_name, b_name = self._pairings[idx]
         self._record(idx, a_name, b_name, result["a1_won"], result["a2_won"],
                      result["steps"])
+        self._finalize_experience(idx, result)
 
     # ── ELO bookkeeping ─────────────────────────────────────────────────
     def _record(self, idx: int, a_name: str, b_name: str,
@@ -285,6 +383,9 @@ class LeagueRun:
         s["pairings_played"] = len(self._results)
         s["pairings_errored"] = int(s.get("errors", 0))
         s["standings"] = self.registry.standings()
+        if self._bots:
+            s["steps_collected_by_bot"] = {
+                name: len(b.buffer) for name, b in sorted(self._bots.items())}
         return s
 
     def request_stop(self, reason: str = "user") -> None:
@@ -308,7 +409,7 @@ class LeagueRun:
         """A small dict for the GUI (safe to call before ``wait()``)."""
         with self._lk:
             rs = list(self._results)
-        return {
+        s = {
             "state": self.state,
             "pairings_planned": len(self._pairings),
             "pairings_played": len(rs),
@@ -316,3 +417,7 @@ class LeagueRun:
                             for b in self.registry.names()},
             "standings": self.registry.standings(),
         }
+        if self._bots:
+            s["steps_collected_by_bot"] = {
+                name: len(b.buffer) for name, b in sorted(self._bots.items())}
+        return s

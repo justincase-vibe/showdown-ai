@@ -197,6 +197,43 @@ def test_policy_action_pass_on_wait_turn():
     assert policy_action(_agent(v), b, "gen9ou", v, greedy=True) is None
 
 
+# ── the capture seam (D103 step 2: experience collection) ─────────────────
+def test_policy_action_capture_fires_with_the_exact_decision():
+    """The capture hook must receive the EXACT obs + full Decision (index /
+    logprob / value) of the action the loop will play — that is what the
+    bot's buffer will learn from."""
+    from net.tests.test_env_obs import _FakeBattle, _FakeMon
+    from net.env import build_action_list
+    v = _vocabs()
+    b = _FakeBattle(active=_FakeMon("garchomp", moves=["outrage", "earthquake"]),
+                    avail_moves=["outrage", "earthquake"], tera=True)
+    acts = build_action_list(b)
+    assert acts, "the fake battle must offer legal actions"
+    caps = []
+    got = policy_action(_agent(v), b, "gen9ou", v, greedy=True,
+                        capture=lambda obs, d: caps.append((obs, d)))
+    assert got is not None                     # legal actions -> a real action
+    assert len(caps) == 1
+    obs, d = caps[0]
+    assert d.action is got                     # the SAME decision the loop plays
+    assert d.action in acts                    # legal
+    assert d.action_index >= 0
+    assert d.logprob <= 0.0                    # a log-probability
+    assert 0.0 <= d.value <= 1.0               # the value head's P(win) range
+    assert isinstance(obs, dict) and len(obs) > 0
+
+
+def test_policy_action_capture_not_fired_on_wait_turn():
+    """A pass/wait is not a transition: no capture, nothing to learn from."""
+    from net.tests.test_env_obs import _FakeBattle
+    v = _vocabs()
+    b = _FakeBattle(active=None, avail_moves=[], switches=(), wait=True)
+    caps = []
+    assert policy_action(_agent(v), b, "gen9ou", v, greedy=True,
+                         capture=lambda obs, d: caps.append(1)) is None
+    assert caps == []
+
+
 def test_policy_action_never_raises_on_broken_battle():
     from net.tests.test_env_obs import _FakeBattle
     v = _vocabs()
