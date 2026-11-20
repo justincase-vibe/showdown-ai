@@ -230,6 +230,59 @@ flake did not bite this run.
 
 ---
 
+## 2026-11-21 — D103 Step 4 done: cull + refresh (design decisions)
+
+**Step 4 ("cull + refresh — every K rounds, drop the bottom X% by ELO and
+inject fresh random bots") is BUILT and committed (`26c3214` selection +
+config, `e3330d3` engine, `877e7fe` GUI).** Decisions I made within the
+user-approved plan — flagged here for review:
+
+1. **Cull fires AFTER the round-end PPO update, and NOT after the last
+   round.** The culled bots' final weights are saved by the update that
+   precedes the cull (their last state is a real artifact); minting bots
+   after the final round would produce bots that never fight.
+2. **Culled `.pt` files are KEPT (artifacts).** Only the ROSTER ENTRY is
+   retired — deleting weights stays a USER action (the GUI's Delete, with
+   its confirm dialog). This honors the "don't delete old data" instinct
+   and keeps culling reversible (the weights are still loadable). CONSEQUENCE
+   (flagged): long campaigns accumulate culled `.pt`s in `scratch/` (~a few
+   MB each). The GUI Delete is the cleanup path; a batch-delete of
+   `league_*` files could be a later GUI nicety.
+3. **Fresh bots are UNSEEDED random** (`LearningBot.random` seed=None) —
+   the diversity source the user asked for ("constantly cycle new agents");
+   seeded would make every refill identical to the first.
+4. **Fresh bot's roster NAME = its file stem** (`league_{id4}`) — unique by
+   construction (`fresh_bot_name` guarantees a unique file → unique stem →
+   unique roster name). Same naming as the GUI copy-on-add, so the two
+   minting paths can't collide.
+5. **A culled bot's ELO/W-L history disappears with its roster entry**
+   (registry semantics). The names are preserved in the run summary's
+   `cull_events` (`{round, culled, added}`). Optional later: an archive
+   table in the registry for retired bots. NOT built (no request).
+6. **Learning mode ONLY.** An eval-only run (``learning=False``) never
+   mutates the roster — culling there would destroy the ranking artifacts.
+7. **Defaults:** `cull_every=4`, `cull_frac=25%`, `min_roster=4` (GUI:
+   "Cull every (rounds)" / "Cull bottom (%)" / "Min roster"). `0` disables
+   the loop (both `cull_every=0` and `cull_frac=0.0` are LEGAL — the
+   validator was written to allow the disable values, which the strict
+   `_finite_float` lower bound would otherwise reject). `min_roster` floor
+   is hard-clamped to ≥2 (the league minimum).
+8. **Re-plan on cull, not every round (flagged — your call).** The
+   pairings are re-planned when a cull changes the roster (required: new
+   bots must fight, culled must not). WITHOUT a cull, all rounds reuse the
+   start-time pairings — which is correct for `round_robin` but means
+   `elo_weighted` pairings go STALE after round 1 (ELO moves, pairings
+   don't). Options: (a) status quo (my lean — the default pairing is
+   round_robin, and churn is minimized); (b) re-plan every round (fresh
+   elo_weighted, but pairings drift under your feet mid-campaign).
+
+**Gate:** full suite **268 passed / 1 skipped** (CPU-only; +17 tests:
+9 selection units, 6 engine integrations, 2 GUI). The engine tests are
+hermetic (fake pool, scripted battles, `refresh_dir` under tmp — the
+user's scratch and live roster are never touched).
+
+---
+
 ## A. Workflow errors found
 
 ### Fixed this pass
