@@ -141,39 +141,52 @@ def _node(request: Dict[str, Any]) -> Dict[str, Any]:
         return _node_oneshot(request)
 
 
+def _spawn_node(payload: str, timeout: float):
+    """One ``node node_calc.js`` spawn (shared by the single + batch fallbacks).
+
+    Returns the ``CompletedProcess``; raises ``subprocess.TimeoutExpired`` on a
+    wedged spawn. Kept tiny and separate so the retry loop in the callers is
+    trivial to test (``damage.calc.subprocess`` is the only thing it touches)."""
+    return subprocess.run(
+        [_NODE, _SCRIPT],
+        input=payload,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
 def _node_oneshot(request: Dict[str, Any]) -> Dict[str, Any]:
     """Send one JSON request to the Node CLI and parse its JSON response (the
     per-call spawn — now the FALLBACK under ``_node``, kept so we never
     hard-fail where the pool cannot serve).
 
-    Robustness (2026-11-17): a node spawn typically takes ~90ms here, but
-    Windows Defender real-time scans can spike ONE spawn far beyond that
-    (observed >30s during corpus replay, which used to hit the old 30s
-    timeout and FALSE-SKIP the whole battle — a silent corpus drop). The
-    timeout is raised to 120s (a hard cap, so a genuinely wedged spawn still
-    fails loudly) and a timeout retries ONCE: the second spawn after a scan
-    spike is fast. A failed calc is still a loud error — never swallowed."""
-    try:
-        proc = subprocess.run(
-            [_NODE, _SCRIPT],
-            input=json.dumps(request),
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-    except subprocess.TimeoutExpired:
-        # one retry: the scan spike is transient, the second spawn is fast.
-        # A second timeout raises (loud failure, never a silent skip).
-        proc = subprocess.run(
-            [_NODE, _SCRIPT],
-            input=json.dumps(request),
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+    Robustness: a node spawn is TRANSIENT — a Windows Defender real-time scan
+    can spike ONE spawn far beyond the cap, and a spawn can CRASH (non-zero
+    exit, the ``0xC0000409`` family) without it being a real calc error. Damage
+    calc is a pure function, so a failed attempt (a timeout OR a crash) is
+    retried ONCE: the second spawn is fast and the crash is usually gone. A
+    genuine calc ERROR (e.g. an illegal species) comes back as exit-0 JSON with
+    an ``error`` field — it is NOT retried and raises exactly once (the
+    one-shot contract, unchanged). A persistent failure is still a loud error,
+    never swallowed."""
+    payload = json.dumps(request)
+    proc = None
+    last_err: Optional[BaseException] = None
+    for _ in range(2):  # one attempt + one retry
+        try:
+            proc = _spawn_node(payload, 120)
+        except subprocess.TimeoutExpired as e:
+            last_err = e  # transient scan spike -> retry once
+            continue
+        if proc.returncode == 0:
+            break
+        last_err = RuntimeError(  # a CRASH, not a calc error -> retry once
+            f"node_calc.js failed (exit {proc.returncode}): "
+            f"{proc.stdout.strip() or proc.stderr.strip()}")
+    if proc is None or proc.returncode != 0:
+        raise last_err
     out = proc.stdout.strip()
-    if proc.returncode != 0:
-        raise RuntimeError(f"node_calc.js failed (exit {proc.returncode}): {out or proc.stderr.strip()}")
     try:
         data = json.loads(out)
     except json.JSONDecodeError as e:  # pragma: no cover - defensive
@@ -198,18 +211,27 @@ def _node_batch_oneshot(requests: Sequence[Dict[str, Any]]) -> List[Dict[str, An
     JSON ARRAY response (in order). Per-item failures come back as
     ``{'error': str}`` — a single bad item does NOT abort the batch (the forward
     eval keeps the good results). The single-request ``_node`` contract is
-    unchanged (one object in -> one object out)."""
-    proc = subprocess.run(
-        [_NODE, _SCRIPT],
-        input=json.dumps(list(requests)),
-        capture_output=True,
-        text=True,
-        timeout=60,  # one shared startup + N calcs; generous for large batches
-    )
+    unchanged (one object in -> one object out).
+
+    Like ``_node_oneshot``, a TRANSIENT spawn failure (a timeout OR a non-zero
+    crash) is retried ONCE; the batch is a pure function, so the retry is safe."""
+    payload = json.dumps(list(requests))
+    proc = None
+    last_err: Optional[BaseException] = None
+    for _ in range(2):  # one attempt + one retry (one shared startup + N calcs)
+        try:
+            proc = _spawn_node(payload, 60)
+        except subprocess.TimeoutExpired as e:
+            last_err = e
+            continue
+        if proc.returncode == 0:
+            break
+        last_err = RuntimeError(
+            f"node_calc.js (batch) failed (exit {proc.returncode}): "
+            f"{proc.stdout.strip() or proc.stderr.strip()}")
+    if proc is None or proc.returncode != 0:
+        raise last_err
     out = proc.stdout.strip()
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"node_calc.js (batch) failed (exit {proc.returncode}): {out or proc.stderr.strip()}")
     try:
         data = json.loads(out)
     except json.JSONDecodeError as e:  # pragma: no cover - defensive
