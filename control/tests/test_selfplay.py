@@ -10,6 +10,7 @@ Run:  python -m pytest control/tests/test_selfplay.py -q
 from __future__ import annotations
 
 import threading
+import time
 from contextlib import contextmanager
 
 from control.selfplay import SelfPlayConfig, SelfPlayRun
@@ -297,3 +298,43 @@ def test_driver_factory_used_per_battle(tmp_path):
     run.shutdown()
     assert s["state"] == "completed" and s["done"] == 6
     assert sorted(seen["idxs"]) == [0, 1, 2, 3, 4, 5]   # each battle, exactly once
+
+
+# ── A6: wait(timeout) is a TOTAL budget, not per-thread ──────────────────────
+def test_wait_finite_timeout_is_total_not_per_thread(tmp_path):
+    """A6 — a FINITE ``wait(timeout)`` bounds the WHOLE wait, not each thread.
+    With 2 workers both stuck, a 0.5s budget must NOT stretch to ~1.0s
+    (2 x 0.5) the way the old per-thread ``t.join(timeout)`` did."""
+    release = threading.Event()
+
+    def stuck_driver(server_cfg, fmt, seed, vocabs, max_steps, on_finish):
+        release.wait(timeout=3)  # block well past the 0.5s test budget
+        return True, False, 3
+
+    holder: dict = {}
+    # exactly 2 worker threads, both grabbing a (stuck) battle
+    run = SelfPlayRun(_cfg(tmp_path, n_battles=2, per_server=2, n_workers=2,
+                           save_replays=False),
+                      battle_driver=stuck_driver, pool=FakePool(slots=2))
+    holder["run"] = run
+    run.start()
+    t0 = time.monotonic()
+    s = run.wait(timeout=0.5)
+    elapsed = time.monotonic() - t0
+    release.set()          # let the daemon threads finish (cleanup)
+    run.shutdown()
+    assert s["state"] == "failed"          # timed out: workers still alive
+    assert elapsed < 0.85, f"wait() took {elapsed:.2f}s — looks per-thread, not total"
+
+
+def test_wait_none_still_blocks_until_done(tmp_path):
+    """A6 guard — the production path (``timeout=None``) is UNCHANGED: it blocks
+    until every battle completes and reports ``completed``."""
+    holder: dict = {}
+    run = SelfPlayRun(_cfg(tmp_path, n_battles=4, save_replays=False),
+                      battle_driver=make_driver(holder), pool=FakePool(slots=2))
+    holder["run"] = run
+    run.start()
+    s = run.wait()   # None timeout -> blocks until all 4 done
+    run.shutdown()
+    assert s["state"] == "completed" and s["done"] == 4

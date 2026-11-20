@@ -191,10 +191,22 @@ class SelfPlayRun:
             self._threads.append(t)
 
     def wait(self, timeout: Optional[float] = None) -> Dict[str, Any]:
-        """Block until every worker exits (or ``timeout`` s) and finalize the
-        run state. Returns the summary."""
+        """Block until every worker exits (or ``timeout`` s TOTAL across all
+        threads) and finalize the run state. Returns the summary.
+
+        ``timeout=None`` (the normal entry point: ``selfplay_main`` /
+        ``league_main``) blocks until EVERY thread finishes — unchanged. A
+        FINITE ``timeout`` now bounds the WHOLE wait via a shared deadline, so
+        N threads no longer stretch the cap to N x timeout (A6)."""
+        deadline = None if timeout is None else time.monotonic() + timeout
         for t in self._threads:
-            t.join(timeout=timeout)
+            if deadline is None:
+                t.join()
+            else:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break  # total budget exhausted; the alive-check finalizes it
+                t.join(remaining)
         alive = [t for t in self._threads if t.is_alive()]
         user_stop = (self._stop_event.is_set() and self._stop_reason == "user"
                      or (self.run_dir is not None and self._flag_stop_requested()
