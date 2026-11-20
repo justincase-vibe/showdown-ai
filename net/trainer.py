@@ -38,7 +38,8 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from .agent import PokeAgent
-from .ppo import PPOTrainer, RolloutBuffer, RolloutStep, gae, steps_to_batch, chosen_logprobs
+from .ppo import (PPOTrainer, RolloutBuffer, RolloutStep, fill_gae,
+                 steps_to_batch, chosen_logprobs)
 from .env import ShowdownEnv, StrongTeamBuilder, build_action_list, action_to_pe, random_action
 
 
@@ -200,16 +201,11 @@ class SelfPlayTrainer:
     def apply_gae(self, traj: List[RolloutStep]) -> None:
         """Fill ``advantage``/``ret`` on each step from the sparse terminal reward.
 
-        The value head is a Sigmoid = P(win) in (0,1); map to reward space
-        (2V-1) before GAE so the critic can represent losses (see net/ppo.py)."""
-        if not traj:
-            return
-        rewards = [s.reward for s in traj]
-        values = [2.0 * float(s.old_value) - 1.0 for s in traj]
-        adv, ret = gae(rewards, values, gamma=self.cfg.gamma, lam=self.cfg.lam)
-        for s, a, r in zip(traj, adv, ret):
-            s.advantage = float(a)
-            s.ret = float(r)
+        Delegates to the shared ``net.ppo.fill_gae`` (D103 step 3 — ONE GAE
+        implementation for the solo trainer AND the league). The value head is
+        a Sigmoid = P(win) in (0,1); the 2V-1 reward-space map lives inside
+        ``fill_gae`` (see net/ppo.py)."""
+        fill_gae(traj, gamma=self.cfg.gamma, lam=self.cfg.lam)
 
     # ── rollout ─────────────────────────────────────────────────────────
     def rollout(self, n_battles: Optional[int] = None,

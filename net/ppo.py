@@ -153,6 +153,38 @@ class RolloutBuffer:
         self._steps.clear()
 
 
+def fill_gae(steps: List[RolloutStep], gamma: float = 0.99,
+             lam: float = 0.95) -> List[RolloutStep]:
+    """Fill ``advantage`` / ``ret`` on ONE completed battle trajectory in place.
+
+    THE shared GAE fill (D103 step 3): both the solo trainer
+    (``SelfPlayTrainer.apply_gae``) and the league collector
+    (``league.collect.TrajectoryCollector.finalize``) delegate here, so the
+    2V-1 value mapping + the sparse-terminal GAE are computed EXACTLY once
+    (no code written twice).
+
+    ``steps`` is one battle's decisions in play order — the LAST step carries
+    the terminal reward and ``done=True`` (``gae``'s terminal model). The
+    value head is a Sigmoid = P(win) in (0,1); map to reward space (2V-1)
+    BEFORE GAE so the critic can represent losses (see module doc).
+
+    Pure numpy — no torch — so the torch-free ``league.collect`` can call it
+    at the battle boundary (the ONE place the trajectory is known to be
+    complete). GAE across a whole multi-battle buffer at update time would be
+    WRONG (the intermediate battle ends are not terminals), so it happens HERE,
+    per battle, exactly as ``SelfPlayTrainer.rollout`` does it.
+    """
+    if not steps:
+        return steps
+    rewards = [s.reward for s in steps]
+    values = [2.0 * float(s.old_value) - 1.0 for s in steps]
+    adv, ret = gae(rewards, values, gamma=gamma, lam=lam)
+    for s, a, r in zip(steps, adv, ret):
+        s.advantage = float(a)
+        s.ret = float(r)
+    return steps
+
+
 def steps_to_batch(steps: Sequence[RolloutStep],
                    device: str = "cpu") -> Dict[str, object]:
     """Stack a list of transitions into one net batch (each a T=1 sample).
