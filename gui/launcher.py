@@ -368,6 +368,20 @@ def validate_league_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     _pos_int(cfg.n_rounds, "n_rounds", problems)
     _pos_int(cfg.epochs, "epochs", problems)
     _finite_float(cfg.lr, "lr", problems, lo=0.0)
+    # D103 step 4: the population loop knobs (0 = the cull is disabled, so
+    # cull_every allows 0 and cull_frac allows exactly 0.0 — the strict
+    # _finite_float lower bound would reject the disable value).
+    if (not isinstance(cfg.cull_every, int) or isinstance(cfg.cull_every, bool)
+            or cfg.cull_every < 0):
+        problems.append(f"cull_every must be an int >= 0 (0 = disabled; got {cfg.cull_every!r})")
+    import math
+    try:
+        _cf = float(cfg.cull_frac)
+    except (TypeError, ValueError):
+        _cf = None
+    if _cf is None or not math.isfinite(_cf) or _cf < 0.0 or _cf > 1.0:
+        problems.append(f"cull_frac must be a finite number in [0, 1] (0 = disabled; got {cfg.cull_frac!r})")
+    _pos_int(cfg.min_roster, "min_roster", problems, minimum=2)
     _pos_int(cfg.max_steps, "max_steps", problems)
     _pos_int(cfg.n_servers, "n_servers", problems)
     _pos_int(cfg.per_server, "per_server", problems)

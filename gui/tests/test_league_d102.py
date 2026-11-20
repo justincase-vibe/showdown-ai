@@ -251,6 +251,50 @@ def test_validate_league_config_checks_ppo_knobs(tmp_path):
     assert (lc.n_rounds, lc.epochs) == (3, 1) and lc.lr == pytest.approx(1e-3)
 
 
+def test_gui_league_cull_fields_in_config(shared_root):
+    """D103 step 4: the cull knobs exist (defaults 4 / 25% / 4) and flow
+    through ``_build_config`` — the % field becomes the 0-1 fraction."""
+    from gui.desktop.app import DesktopApp
+    app = DesktopApp(headless=True, root=shared_root)
+    app.build()
+    app._mode_var.set("League (bot vs bot)")
+    app._on_mode_change(None)
+    assert app._league_cull_every.get() == 4
+    assert app._league_cull_pct.get() == pytest.approx(25.0)
+    assert app._league_min_roster.get() == 4
+    cfg = app._build_config()
+    assert cfg["cull_every"] == 4
+    assert cfg["cull_frac"] == pytest.approx(0.25)   # percent -> fraction
+    assert cfg["min_roster"] == 4
+    app.close()
+
+
+def test_validate_league_config_checks_cull_knobs(tmp_path):
+    """The launcher contract for the population loop: bad cull_every /
+    cull_frac / min_roster are loud config errors; the disable values
+    (0 / 0.0) are LEGAL (the strict _finite_float bound would reject them)."""
+    from gui import launcher
+    from league.registry import BotRegistry
+    regp = tmp_path / "bots.json"
+    ck_a = tmp_path / "a.pt"; ck_a.write_bytes(b"fake")
+    ck_b = tmp_path / "b.pt"; ck_b.write_bytes(b"fake")
+    reg = BotRegistry(regp)
+    reg.add("alpha", str(ck_a)); reg.add("beta", str(ck_b)); reg.save()
+    bad = {"registry_path": str(regp), "cull_every": -1,
+           "cull_frac": 1.5, "min_roster": 1}
+    with pytest.raises(ValueError) as exc:
+        launcher.validate_league_config(bad)
+    for needle in ("cull_every", "cull_frac", "min_roster"):
+        assert needle in str(exc.value), f"expected {needle!r} in {exc.value}"
+    # the disable values are legal
+    good = launcher.validate_league_config(
+        {"registry_path": str(regp), "cull_every": 0, "cull_frac": 0.0,
+         "min_roster": 2})
+    from league.engine import LeagueConfig
+    lc = LeagueConfig.from_dict(good)
+    assert lc.cull_every == 0 and lc.cull_frac == 0.0 and lc.min_roster == 2
+
+
 def test_gui_league_add_copies_source_checkpoint(shared_root, tmp_path, monkeypatch):
     """D103 step 3 (GUI): \"Add bot\" COPIES the source snapshot into a fresh
     league-owned file and registers the COPY (the user's \"make a copy, work

@@ -409,6 +409,11 @@ class DesktopApp:
         self._league_n_rounds = self._add_field(r, 0, "Rounds:", 1, "int"); r += 1
         self._league_epochs = self._add_field(r, 0, "PPO epochs:", 2, "int"); r += 1
         self._league_lr = self._add_field(r, 0, "PPO lr:", 3e-4, "float"); r += 1
+        # D103 step 4: the population loop (cull the weakest + mint fresh
+        # random bots, learning mode only; 0 = disabled).
+        self._league_cull_every = self._add_field(r, 0, "Cull every (rounds):", 4, "int"); r += 1
+        self._league_cull_pct = self._add_field(r, 0, "Cull bottom (%):", 25, "float"); r += 1
+        self._league_min_roster = self._add_field(r, 0, "Min roster:", 4, "int"); r += 1
         self._league_device = self._add_field(
             r, 0, "Device:", "cpu", "combo", values=["cpu", "cuda"]); r += 1
         self._league_n_servers = self._add_field(r, 0, "Servers:", 2, "int"); r += 1
@@ -882,6 +887,11 @@ class DesktopApp:
                 "n_rounds": self._league_n_rounds.get(),
                 "epochs": self._league_epochs.get(),
                 "lr": self._league_lr.get(),
+                # D103 step 4: the population loop (the % field is a percent;
+                # LeagueConfig carries the 0-1 fraction).
+                "cull_every": self._league_cull_every.get(),
+                "cull_frac": self._league_cull_pct.get() / 100.0,
+                "min_roster": self._league_min_roster.get(),
                 "device": self._league_device.get(),
                 "n_servers": self._league_n_servers.get(),
                 "per_server": self._league_per_server.get(),
