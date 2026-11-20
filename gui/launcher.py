@@ -296,6 +296,67 @@ def validate_selfplay_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return out
 
 
+def validate_league_config(d: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Validate a GUI-submitted LEAGUE config (mode ``league``) into a
+    ``LeagueConfig`` dict. Same loud contract as the other validators (every
+    problem listed). The ROSTER is part of the contract: a league with fewer
+    than 2 bots, or a bot whose checkpoint file is missing, is a config error
+    (400 before spawn) — not a league_main crash after the pool booted.
+
+    The roster file (``league/bots.json`` next to the project root by default)
+    is the persistent league state; the config carries no bot list, so the same
+    config re-fights the current roster (D100). The child runs with cwd=ROOT,
+    so the default registry path is resolved HERE against ROOT — where the GUI
+    may have been started from anywhere.
+
+    The payload carries ``_rounds_planned`` (pairings x best_of) for the
+    runstate protocol; :func:`start_trainer` pops it before writing config.json.
+    ``league`` is imported lazily (no torch) to keep the launcher light."""
+    from league.engine import LeagueConfig
+    from league import pairing
+    from league.registry import BotRegistry
+    d = d or {}
+    problems: list = []
+    cfg = LeagueConfig.from_dict(d)
+    if not isinstance(cfg.battle_format, str) or not cfg.battle_format.strip():
+        problems.append("battle_format must be a non-empty string (e.g. 'gen9ou')")
+    if cfg.pairing not in ("round_robin", "elo_weighted"):
+        problems.append(f"pairing must be 'round_robin' or 'elo_weighted' (got {cfg.pairing!r})")
+    _pos_int(cfg.best_of, "best_of", problems)
+    _pos_int(cfg.max_steps, "max_steps", problems)
+    _pos_int(cfg.n_servers, "n_servers", problems)
+    _pos_int(cfg.per_server, "per_server", problems)
+    _pos_int(cfg.port_base, "port_base", problems)
+    if cfg.device not in ("cpu", "cuda"):
+        problems.append(f"device must be 'cpu' or 'cuda' (got {cfg.device!r})")
+    if not isinstance(cfg.seed, int) or isinstance(cfg.seed, bool) or cfg.seed < 0:
+        problems.append(f"seed must be an int >= 0 (got {cfg.seed!r})")
+    _pos_int(cfg.max_consecutive_errors, "max_consecutive_errors", problems)
+    # ── the roster (the league's persistent state) ────────────────────────
+    reg_path = (Path(cfg.registry_path) if cfg.registry_path
+                else ROOT / "league" / "bots.json")
+    reg = BotRegistry(reg_path)
+    bots = reg.all()
+    if len(bots) < 2:
+        problems.append(
+            f"league needs >= 2 bots in the roster (have {len(bots)}: "
+            f"{[b.name for b in bots] or 'none'}; registry: {reg_path})")
+    for b in bots:
+        ck = Path(b.ckpt_path)
+        if not ck.is_absolute():
+            ck = ROOT / ck   # the child runs with cwd=ROOT
+        if not ck.exists():
+            problems.append(f"checkpoint for bot {b.name!r} does not exist: {b.ckpt_path}")
+    if problems:
+        raise ValueError("; ".join(problems))
+    payload = cfg.to_dict()
+    payload["registry_path"] = str(reg_path)
+    base = (pairing.round_robin(bots) if cfg.pairing == "round_robin"
+            else pairing.elo_weighted(bots))
+    payload["_rounds_planned"] = max(1, int(cfg.best_of)) * len(base)
+    return payload
+
+
 # ── process control ──────────────────────────────────────────────────────────
 
 def _popen_kwargs() -> Dict[str, Any]:
@@ -352,9 +413,15 @@ def start_trainer(cfg: Dict[str, Any], runs_dir: Optional[Path] = None
         payload = validate_selfplay_config(cfg)
         entry = "control.selfplay_main"
         rounds_planned = int(payload["n_battles"])
+    elif mode == "league":
+        # D102: the league engine (checkpoint-vs-checkpoint over the roster).
+        # league.league_main owns the pool lifecycle + the runstate protocol.
+        payload = validate_league_config(cfg)
+        entry = "league.league_main"
+        rounds_planned = int(payload.pop("_rounds_planned", 1))
     else:
         raise ValueError(f"unknown mode {mode!r} (expected 'selfplay', "
-                         f"'selfplay-collect', 'bc', 'eval', or 'play')")
+                         f"'selfplay-collect', 'bc', 'eval', 'play', or 'league')")
     runs = Path(runs_dir) if runs_dir is not None else default_runs_dir()
     active = find_active_run(runs)
     if active is not None:

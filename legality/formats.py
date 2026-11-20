@@ -137,6 +137,19 @@ TABLE_ORDER: List[str] = [
 ]
 
 
+#: pkmn.github.io Smogon sets-data slug for formats where the URL key differs
+#: from the format id (Champions is served under its mod name — verified 2026-11-20:
+#: ``sets/championsou.json`` = 200, ``sets/gen9championsou.json`` = 404).
+SET_SLUG: Dict[str, str] = {
+    "gen9championsou": "championsou",
+}
+
+
+def set_slug(fmt: str) -> str:
+    """pkmn.github.io Smogon sets-data slug for a format id (identity by default)."""
+    return SET_SLUG.get(fmt, fmt)
+
+
 def format_ids() -> List[str]:
     return [f["id"] for f in TARGET_FORMATS]
 

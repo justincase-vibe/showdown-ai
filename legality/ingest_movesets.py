@@ -53,12 +53,29 @@ def to_id(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
 
 
-def evs_to_str(evs: Optional[Dict[str, int]]) -> Optional[str]:
-    """{'spa': 252, 'def': 4, 'spe': 252} -> '252 SpA / 4 Def / 252 Spe'."""
-    if not evs:
+def evs_to_str(evs: object) -> Optional[str]:
+    """{'spa': 252, 'def': 4, 'spe': 252} -> '252 SpA / 4 Def / 252 Spe'.
+
+    Accepts a dict, or a raw-Smogon LIST of alternate spreads (primary = first).
+    """
+    if isinstance(evs, (list, tuple)):
+        evs = evs[0] if evs else None
+    if not isinstance(evs, dict) or not evs:
         return None
     parts = [f"{evs[s]} {STAT_NAME[s]}" for s in STAT_ORDER if evs.get(s)]
     return " / ".join(parts) if parts else None
+
+
+def _primary(value: object) -> Optional[str]:
+    """Flatten a raw-Smogon value that may be a list of ALTERNATES.
+
+    Unvalidated files (e.g. champions) keep alternates as lists
+    (``item: ['Leftovers', 'Rocky Helmet']``); the FIRST entry is the set's
+    primary pick — which is what a belief prior wants (one value per slot).
+    """
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    return value if isinstance(value, str) else None
 
 
 def _id_table(conn, table: str) -> Set[str]:
@@ -79,6 +96,15 @@ class Resolver:
 
     def form_legal_in(self, fmt: str, form_id: str) -> bool:
         return form_id in self.legal.get(fmt, set())
+
+    def fmt_has_legality(self, fmt: str) -> bool:
+        """True when the DB carries any format_form rows for this format.
+
+        A format with ZERO rows (e.g. gen9championsou before its legality
+        ingest) cannot be gated on — ``form_legal_in`` would reject every
+        species. Callers disable the gate and trust the Smogon source instead.
+        """
+        return bool(self.legal.get(fmt))
 
     def move(self, name: str) -> Optional[str]:
         mid = to_id(name)
@@ -116,22 +142,39 @@ def build_payload(fmt: str, species_map: Dict[str, Dict], source_url: str,
         # format_form). The Smogon set files are tier-independent and can list
         # species this server bans in the tier (e.g. Deoxys in gen9ou) — those
         # sets are unusable for team gen / belief, so skip them.
-        if not res.form_legal_in(fmt, form_id):
+        # EXCEPTION: formats with no format_form rows at all (e.g. champions)
+        # can't be gated — there, the Smogon file IS the legality source.
+        if res.fmt_has_legality(fmt) and not res.form_legal_in(fmt, form_id):
             skipped.append(f"{sp_name}: {len(sets)} set(s) skipped — form not legal in {fmt}")
             continue
         for n, (title, s) in enumerate(sets.items(), start=1):
-            move_ids = [res.move(m) for m in s.get("moves") or []]
+            # Raw Smogon files may carry ALTERNATES as lists (moves, item,
+            # ability) when the file was kept unvalidated. A prior needs ONE
+            # value per slot: take the primary (first) alternate.
+            flat_moves: List[str] = []
+            for m in s.get("moves") or []:
+                p = _primary(m)
+                if p is not None:
+                    flat_moves.append(p)
+            if not flat_moves:
+                skipped.append(f"{sp_name} / {title}: no usable moves after flattening")
+                continue
+            move_ids = [res.move(m) for m in flat_moves]
             if any(m is None for m in move_ids):
-                bad = [m for m in s.get("moves") or [] if res.move(m) is None]
+                bad = [m for m in flat_moves if res.move(m) is None]
                 skipped.append(f"{sp_name} / {title}: unresolvable move(s) {bad}")
                 continue
-            item_id = res.item(s["item"]) if s.get("item") else None
-            if s.get("item") and item_id is None:
-                skipped.append(f"{sp_name} / {title}: unknown item '{s['item']}'")
+            item = _primary(s.get("item"))
+            if item is not None and to_id(item) == "noitem":
+                item = None  # 'No Item' is a legitimate hold, not an unknown id
+            item_id = res.item(item) if item else None
+            if item and item_id is None:
+                skipped.append(f"{sp_name} / {title}: unknown item '{item}'")
                 continue
-            ability_id = res.ability(s["ability"]) if s.get("ability") else None
-            if s.get("ability") and ability_id is None:
-                skipped.append(f"{sp_name} / {title}: unknown ability '{s['ability']}'")
+            ability = _primary(s.get("ability"))
+            ability_id = res.ability(ability) if ability else None
+            if ability and ability_id is None:
+                skipped.append(f"{sp_name} / {title}: unknown ability '{ability}'")
                 continue
             tera = s.get("teratypes")
             tera_type = to_id(tera[0]) if isinstance(tera, list) and tera else (
@@ -142,7 +185,7 @@ def build_payload(fmt: str, species_map: Dict[str, Dict], source_url: str,
                 "title": title, "source": "smogon", "source_url": source_url,
                 "scraped_at": scraped_at,
                 "item_id": item_id, "ability_id": ability_id,
-                "nature": s.get("nature"),
+                "nature": _primary(s.get("nature")),
                 "evs": evs_to_str(s.get("evs")), "ivs": evs_to_str(s.get("ivs")),
                 "tera_type": tera_type,
             }})
@@ -175,9 +218,13 @@ def ingest_movesets(data_path: str, fmts: Optional[List[str]] = None) -> int:
     total_sets = 0
     failures = 0
     for fmt in fmts:
+        if not res.fmt_has_legality(fmt):
+            print(f"  note {fmt}: no format_form rows in DB — legality gate "
+                  f"disabled (trusting the Smogon source file)")
         payload = build_payload(
             fmt, ms[fmt],
-            source_url=f"https://pkmn.github.io/smogon/data/sets/{fmt}.json",
+            source_url=f"https://pkmn.github.io/smogon/data/sets/"
+                       f"{formats.set_slug(fmt)}.json",
             scraped_at=scraped_at, res=res)
         skipped = payload.pop("_skipped")
         for msg in skipped:

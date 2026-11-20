@@ -19,6 +19,7 @@ widgets, and destroys — no display needed.
 from __future__ import annotations
 
 import json
+import os
 import queue
 import sys
 import threading
@@ -169,6 +170,7 @@ class DesktopApp:
             ("selfplay-collect", "Self-play (collect replays)"),
             ("selfplay", "Self-play (PPO training)"),
             ("bc", "Imitation (BC)"),
+            ("league", "League (bot vs bot)"),
             ("play", "Play against a checkpoint"),
             ("eval", "Eval vs random"),
         ]
@@ -219,6 +221,8 @@ class DesktopApp:
             self._build_play_fields()
         elif mode == "eval":
             self._build_eval_fields()
+        elif mode == "league":
+            self._build_league_fields()
 
     def _add_field(self, row: int, col: int, label: str, default: Any,
                    widget_type: str = "int", **kw) -> Any:
@@ -236,15 +240,37 @@ class DesktopApp:
         elif widget_type == "bool":
             var = tk.BooleanVar(value=default)
             w = ttk.Checkbutton(self._fields_frame, textvariable=var)
+        elif widget_type == "combo":
+            # dropdown with a fixed value list (format / pairing / device)
+            var = tk.StringVar(value=str(default))
+            w = ttk.Combobox(
+                self._fields_frame, textvariable=var,
+                values=list(kw.get("values") or []),
+                state="readonly", width=kw.get("width", 20),
+            )
         else:
             raise ValueError(f"unknown widget_type {widget_type!r}")
         w.grid(row=row, column=col + 1, sticky="w", pady=2, padx=(4, 12))
         return var
 
+    def _format_field(self, row: int, col: int, label: str = "Format:") -> Any:
+        """A format dropdown fed by ``bot.teams.available_formats()`` — the
+        single source of truth (D102): only formats with a usable team pool
+        are selectable. Falls back to free text when no pool file exists yet."""
+        from bot import teams
+        try:
+            values = teams.available_formats()
+        except Exception:
+            values = []
+        default = "gen9ou" if "gen9ou" in values else (values[0] if values else "gen9ou")
+        if not values:
+            return self._add_field(row, col, label, default, "str")
+        return self._add_field(row, col, label, default, "combo", values=values)
+
     def _build_collect_fields(self) -> None:
         r = 0
         self._collect_n_battles = self._add_field(r, 0, "Battles:", 8, "int"); r += 1
-        self._collect_fmt = self._add_field(r, 0, "Format:", "gen9ou", "str"); r += 1
+        self._collect_fmt = self._format_field(r, 0); r += 1
         self._collect_n_servers = self._add_field(r, 0, "Servers:", COLLECT_DEFAULTS["n_servers"], "int"); r += 1
         self._collect_per_server = self._add_field(r, 0, "Per server:", COLLECT_DEFAULTS["per_server"], "int"); r += 1
         self._collect_port_base = self._add_field(r, 0, "Port base:", COLLECT_DEFAULTS["port_base"], "int"); r += 1
@@ -253,7 +279,7 @@ class DesktopApp:
 
     def _build_ppo_fields(self) -> None:
         r = 0
-        self._ppo_fmt = self._add_field(r, 0, "Format:", "gen9ou", "str"); r += 1
+        self._ppo_fmt = self._format_field(r, 0); r += 1
         self._ppo_battles = self._add_field(r, 0, "Battles/round:", 1, "int"); r += 1
         self._ppo_rounds = self._add_field(r, 0, "Rounds:", 1, "int"); r += 1
         self._ppo_epochs = self._add_field(r, 0, "Epochs:", 1, "int"); r += 1
@@ -273,7 +299,7 @@ class DesktopApp:
     def _build_play_fields(self) -> None:
         r = 0
         self._play_ckpt = self._add_field(r, 0, "Checkpoint:", "", "str", width=40); r += 1
-        self._play_fmt = self._add_field(r, 0, "Format:", "gen9ou", "str"); r += 1
+        self._play_fmt = self._format_field(r, 0); r += 1
         self._play_bot_user = self._add_field(r, 0, "Bot user:", "checkpointbot", "str"); r += 1
         self._play_you = self._add_field(r, 0, "You:", "ttvJustinCase", "str"); r += 1
         self._play_device = self._add_field(r, 0, "Device:", "cpu", "str"); r += 1
@@ -283,9 +309,99 @@ class DesktopApp:
         r = 0
         self._eval_ckpt = self._add_field(r, 0, "Checkpoint:", "", "str", width=40); r += 1
         self._eval_n = self._add_field(r, 0, "N battles:", 10, "int"); r += 1
-        self._eval_fmt = self._add_field(r, 0, "Format:", "gen9ou", "str"); r += 1
+        self._eval_fmt = self._format_field(r, 0); r += 1
         self._eval_seed = self._add_field(r, 0, "Seed:", 42, "int"); r += 1
         self._eval_device = self._add_field(r, 0, "Device:", "cpu", "str"); r += 1
+
+    def _build_league_fields(self) -> None:
+        """League (bot vs bot, D102): the roster lives in ``league/bots.json``
+        (persistent — the config never carries a bot list). The roster panel
+        below the fields shows the current bots and lets you ADD one (name +
+        checkpoint path) before starting."""
+        r = 0
+        self._league_fmt = self._format_field(r, 0); r += 1
+        self._league_pairing = self._add_field(
+            r, 0, "Pairing:", "round_robin",
+            "combo", values=["round_robin", "elo_weighted"]); r += 1
+        self._league_best_of = self._add_field(r, 0, "Best of:", 1, "int"); r += 1
+        self._league_greedy = self._add_field(r, 0, "Greedy:", True, "bool"); r += 1
+        self._league_device = self._add_field(
+            r, 0, "Device:", "cpu", "combo", values=["cpu", "cuda"]); r += 1
+        self._league_n_servers = self._add_field(r, 0, "Servers:", 2, "int"); r += 1
+        self._league_per_server = self._add_field(r, 0, "Per server:", 2, "int"); r += 1
+        self._league_port_base = self._add_field(r, 0, "Port base:", 49960, "int"); r += 1
+        self._league_max_steps = self._add_field(r, 0, "Max steps:", 200, "int"); r += 1
+        self._league_seed = self._add_field(r, 0, "Seed:", 20261119, "int"); r += 1
+
+        # ── roster panel ──────────────────────────────────────────────────
+        roster_frame = ttk.LabelFrame(self._fields_frame, text="League roster", padding=4)
+        roster_frame.grid(row=r, column=0, columnspan=2, sticky="we", pady=(8, 0))
+        cols = ("name", "elo", "record", "checkpoint")
+        self._league_tree = ttk.Treeview(
+            roster_frame, columns=cols, show="headings", height=4)
+        for c, w in (("name", 110), ("elo", 50), ("record", 70), ("checkpoint", 320)):
+            self._league_tree.heading(c, text=c)
+            self._league_tree.column(c, width=w)
+        self._league_tree.pack(fill=tk.X)
+
+        add_row = ttk.Frame(roster_frame)
+        add_row.pack(fill=tk.X, pady=(4, 0))
+        self._league_add_name = tk.StringVar(value="")
+        self._league_add_ckpt = tk.StringVar(value="")
+        ttk.Entry(add_row, textvariable=self._league_add_name, width=14).pack(side=tk.LEFT, padx=2)
+        ttk.Entry(add_row, textvariable=self._league_add_ckpt, width=44).pack(side=tk.LEFT, padx=2)
+        ttk.Button(add_row, text="Add bot", command=self._league_add_bot).pack(side=tk.LEFT, padx=4)
+        ttk.Button(add_row, text="Refresh", command=self._league_refresh_roster).pack(side=tk.LEFT)
+        self._league_roster_msg = ttk.Label(roster_frame, text="", foreground="red")
+        self._league_roster_msg.pack(fill=tk.X, pady=(2, 0))
+        self._league_refresh_roster()
+
+    def _league_roster_path(self) -> Path:
+        return launcher.ROOT / "league" / "bots.json"
+
+    def _league_refresh_roster(self) -> None:
+        """Re-read the roster JSON into the tree (read-only view)."""
+        tree = getattr(self, "_league_tree", None)
+        if tree is None:
+            return
+        tree.delete(*tree.get_children())
+        try:
+            from league.registry import BotRegistry
+            bots = BotRegistry(self._league_roster_path()).all()
+        except Exception as exc:
+            self._league_roster_msg.config(
+                text=f"roster unreadable: {type(exc).__name__}: {exc}")
+            return
+        for b in bots:
+            tree.insert("", tk.END, values=(
+                b.name, b.elo, f"{b.wins}W/{b.losses}L/{b.draws}D", b.ckpt_path))
+
+    def _league_add_bot(self) -> None:
+        """Add name + checkpoint to the roster (the persistent league state).
+        The path is normalized relative to the project root — the league
+        child runs with cwd=ROOT, so a relative path is the portable form."""
+        name = self._league_add_name.get().strip()
+        ckpt = self._league_add_ckpt.get().strip()
+        if not name or not ckpt:
+            self._league_roster_msg.config(text="both name and checkpoint are required")
+            return
+        try:
+            from league.registry import BotRegistry
+            rel = ckpt
+            try:
+                rel = os.path.relpath(Path(ckpt).resolve(), launcher.ROOT)
+            except Exception:
+                pass  # keep as typed
+            reg = BotRegistry(self._league_roster_path())
+            reg.add(name, rel)
+            reg.save()
+            self._league_add_name.set("")
+            self._league_add_ckpt.set("")
+            self._league_roster_msg.config(text="", foreground="red")
+            self._league_refresh_roster()
+        except Exception as exc:
+            self._league_roster_msg.config(
+                text=f"add failed: {type(exc).__name__}: {exc}", foreground="red")
 
     # ── replays tab ────────────────────────────────────────────────────────
 
@@ -566,6 +682,20 @@ class DesktopApp:
                 "lr": self._bc_lr.get(),
                 "device": self._bc_device.get(),
                 "seed": self._bc_seed.get(),
+            }
+        elif mode == "league":
+            return {
+                "mode": mode,
+                "battle_format": self._league_fmt.get(),
+                "pairing": self._league_pairing.get(),
+                "best_of": self._league_best_of.get(),
+                "greedy": self._league_greedy.get(),
+                "device": self._league_device.get(),
+                "n_servers": self._league_n_servers.get(),
+                "per_server": self._league_per_server.get(),
+                "port_base": self._league_port_base.get(),
+                "max_steps": self._league_max_steps.get(),
+                "seed": self._league_seed.get(),
             }
         elif mode == "play":
             return {

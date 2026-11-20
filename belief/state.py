@@ -291,8 +291,29 @@ def _tier_pool(species: str, fmt: str) -> Optional[List[Dict]]:
     return pool or None
 
 
+def _same_gen_legal_moves(species: str, fmt: str) -> List[str]:
+    """Legal moves for the species from ANY same-gen format in the DB.
+
+    Covers formats with no format-specific legality rows of their own (e.g.
+    gen9championsou before its legality ingest): a gen-9 species that has a
+    learnset somewhere in gen 9 gets a usable (approximate) candidate space.
+    """
+    fid = lookup.to_id(species)
+    gen = _fmt_gen(fmt)
+    conn = db.connect()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT m.move_id FROM format_form_move m "
+            "JOIN format f ON f.id = m.format_id "
+            "WHERE m.form_id = ? AND f.gen = ? ORDER BY m.move_id",
+            (fid, gen)).fetchall()
+        return [r["move_id"] for r in rows]
+    finally:
+        conn.close()
+
+
 def _fallback_candidates(species: str, fmt: str) -> List[Dict]:
-    legal = lookup.legal_moves(species, fmt)
+    legal = lookup.legal_moves(species, fmt) or _same_gen_legal_moves(species, fmt)
     if not legal:
         return []
     sp = lookup.get_species(species, _fmt_gen(fmt))

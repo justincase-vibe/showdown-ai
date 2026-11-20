@@ -301,6 +301,36 @@ def test_no_sets_returns_empty_list():
     assert lookup.get_common_sets("Bulbasaur", "gen9ou") == []
 
 
+# ── D102: champions slug + raw-Smogon alternates flattening ─────────────────
+
+def test_set_slug_maps_champions_identity_elsewhere():
+    from legality import formats
+    # pkmn.github.io serves champions under its mod name (verified: the
+    # gen9championsou URL is a 404, championsou a 200)
+    assert formats.set_slug("gen9championsou") == "championsou"
+    assert formats.set_slug("gen9ou") == "gen9ou"   # identity by default
+
+
+def test_primary_flattens_alternates():
+    """Raw (unvalidated) Smogon files keep alternates as lists; the ingest
+    must take the primary (first) entry — the bug that broke the champions
+    ingest 5 times in a row (moves, item, ability, nature, evs)."""
+    from legality.ingest_movesets import _primary
+    assert _primary(["Leftovers", "Rocky Helmet"]) == "Leftovers"
+    assert _primary("Jolly") == "Jolly"
+    assert _primary([]) is None
+    assert _primary(None) is None
+    assert _primary(42) is None
+
+
+def test_evs_to_str_accepts_alternate_spreads():
+    from legality.ingest_movesets import evs_to_str
+    assert evs_to_str([{"spa": 252, "spe": 252}, {"hp": 252}]) == "252 SpA / 252 Spe"
+    assert evs_to_str({"spa": 252}) == "252 SpA"
+    assert evs_to_str([]) is None
+    assert evs_to_str(None) is None
+
+
 # ── BSS target format ────────────────────────────────────────────────
 def test_bss_format_rules():
     conn = db.connect()

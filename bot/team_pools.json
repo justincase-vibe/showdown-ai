@@ -34110,5 +34110,1663 @@
    ],
    "built": "2026-10-29"
   }
+ },
+ "gen9championsou": {
+  "teams": [
+   [
+    {
+     "species": "Garchomp",
+     "item": "Sitrus Berry",
+     "ability": "Rough Skin",
+     "moves": [
+      "Dragon Tail",
+      "Earthquake",
+      "Poison Jab",
+      "Stealth Rock"
+     ],
+     "nature": "Impish",
+     "evs": [
+      28,
+      0,
+      28,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Blaziken",
+     "item": "Life Orb",
+     "ability": "Speed Boost",
+     "moves": [
+      "Close Combat",
+      "Earthquake",
+      "Flare Blitz",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      0,
+      28,
+      0,
+      0,
+      0,
+      28
+     ]
+    },
+    {
+     "species": "Corviknight",
+     "item": "Leftovers",
+     "ability": "Pressure",
+     "moves": [
+      "Brave Bird",
+      "Defog",
+      "Roost",
+      "U-turn"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      28,
+      0,
+      28,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Dragapult",
+     "item": "Choice Scarf",
+     "ability": "Clear Body",
+     "moves": [
+      "Draco Meteor",
+      "Dragon Darts",
+      "Shadow Ball",
+      "U-turn"
+     ],
+     "nature": "Rash",
+     "evs": [
+      0,
+      0,
+      0,
+      28,
+      0,
+      28
+     ]
+    },
+    {
+     "species": "Floette-Eternal",
+     "item": "Floettite",
+     "ability": "Flower Veil",
+     "moves": [
+      "Calm Mind",
+      "Draining Kiss",
+      "Moonblast",
+      "Synthesis"
+     ],
+     "nature": "Bold",
+     "evs": [
+      28,
+      0,
+      28,
+      4,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Samurott-Hisui",
+     "item": "Black Glasses",
+     "ability": "Sharpness",
+     "moves": [
+      "Ceaseless Edge",
+      "Encore",
+      "Sucker Punch",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      20,
+      28,
+      0,
+      0,
+      0,
+      4
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Golisopod",
+     "item": "Golisopite",
+     "ability": "Emergency Exit",
+     "moves": [
+      "Aqua Jet",
+      "Iron Head",
+      "Leech Life",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      20,
+      28,
+      0,
+      0,
+      0,
+      4
+     ]
+    },
+    {
+     "species": "Archaludon",
+     "item": "Shuca Berry",
+     "ability": "Stamina",
+     "moves": [
+      "Aura Sphere",
+      "Dragon Pulse",
+      "Electro Shot",
+      "Flash Cannon"
+     ],
+     "nature": "Modest",
+     "evs": [
+      20,
+      0,
+      0,
+      28,
+      0,
+      4
+     ]
+    },
+    {
+     "species": "Basculegion",
+     "item": "Life Orb",
+     "ability": "Adaptability",
+     "moves": [
+      "Aqua Jet",
+      "Flip Turn",
+      "Psychic Fangs",
+      "Wave Crash"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      0,
+      28,
+      0,
+      0,
+      0,
+      28
+     ]
+    },
+    {
+     "species": "Excadrill",
+     "item": "Leftovers",
+     "ability": "Mold Breaker",
+     "moves": [
+      "Earthquake",
+      "Iron Head",
+      "Rapid Spin",
+      "Stealth Rock"
+     ],
+     "nature": "Careful",
+     "evs": [
+      28,
+      0,
+      0,
+      0,
+      28,
+      4
+     ]
+    },
+    {
+     "species": "Pelipper",
+     "item": "Sitrus Berry",
+     "ability": "Drizzle",
+     "moves": [
+      "Hurricane",
+      "Ice Beam",
+      "U-turn",
+      "Weather Ball"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      0,
+      28,
+      0,
+      28
+     ]
+    },
+    {
+     "species": "Quaquaval",
+     "item": "Choice Scarf",
+     "ability": "Moxie",
+     "moves": [
+      "Aqua Step",
+      "Close Combat",
+      "Flip Turn",
+      "Triple Axel"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      20,
+      4,
+      0,
+      0,
+      28
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Delphox",
+     "item": "Delphoxite",
+     "ability": "Blaze",
+     "moves": [
+      "Dazzling Gleam",
+      "Flamethrower",
+      "Nasty Plot",
+      "Psyshock"
+     ],
+     "nature": "Timid",
+     "evs": [
+      4,
+      0,
+      0,
+      28,
+      0,
+      28
+     ]
+    },
+    {
+     "species": "Clefable",
+     "item": "Life Orb",
+     "ability": "Magic Guard",
+     "moves": [
+      "Flamethrower",
+      "Moonblast",
+      "Moonlight",
+      "Stealth Rock"
+     ],
+     "nature": "Bold",
+     "evs": [
+      28,
+      0,
+      20,
+      0,
+      0,
+      12
+     ]
+    },
+    {
+     "species": "Decidueye-Hisui",
+     "item": "Rocky Helmet",
+     "ability": "Scrappy",
+     "moves": [
+      "Defog",
+      "Roost",
+      "Triple Arrows",
+      "U-turn"
+     ],
+     "nature": "Impish",
+     "evs": [
+      28,
+      0,
+      28,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Dragonite",
+     "item": "Leftovers",
+     "ability": "Multiscale",
+     "moves": [
+      "Dragon Dance",
+      "Earthquake",
+      "Ice Spinner",
+      "Roost"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      28,
+      20,
+      0,
+      0,
+      0,
+      12
+     ]
+    },
+    {
+     "species": "Excadrill",
+     "item": "Choice Scarf",
+     "ability": "Mold Breaker",
+     "moves": [
+      "Earthquake",
+      "Iron Head",
+      "Rapid Spin",
+      "Stealth Rock"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      28,
+      0,
+      0,
+      0,
+      28
+     ]
+    },
+    {
+     "species": "Samurott-Hisui",
+     "item": "Black Glasses",
+     "ability": "Sharpness",
+     "moves": [
+      "Ceaseless Edge",
+      "Encore",
+      "Sucker Punch",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      20,
+      28,
+      0,
+      0,
+      0,
+      4
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Lopunny",
+     "item": "Lopunnite",
+     "ability": "Limber",
+     "moves": [
+      "Close Combat",
+      "Fake Out",
+      "Mach Punch",
+      "Mega Kick"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      4,
+      28,
+      0,
+      0,
+      0,
+      20
+     ]
+    },
+    {
+     "species": "Dragonite",
+     "item": "Lum Berry",
+     "ability": "Multiscale",
+     "moves": [
+      "Dragon Dance",
+      "Extreme Speed",
+      "Fire Punch",
+      "Outrage"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      28,
+      0,
+      0,
+      0,
+      28
+     ]
+    },
+    {
+     "species": "Garchomp",
+     "item": "Life Orb",
+     "ability": "Rough Skin",
+     "moves": [
+      "Draco Meteor",
+      "Earthquake",
+      "Flamethrower",
+      "Stealth Rock"
+     ],
+     "nature": "Naive",
+     "evs": [
+      0,
+      0,
+      0,
+      28,
+      0,
+      28
+     ]
+    },
+    {
+     "species": "Hatterene",
+     "item": "Eject Button",
+     "ability": "Magic Bounce",
+     "moves": [
+      "Draining Kiss",
+      "Healing Wish",
+      "Nuzzle",
+      "Psychic Noise"
+     ],
+     "nature": "Bold",
+     "evs": [
+      28,
+      0,
+      28,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Samurott-Hisui",
+     "item": "Black Glasses",
+     "ability": "Sharpness",
+     "moves": [
+      "Ceaseless Edge",
+      "Sucker Punch",
+      "Swords Dance",
+      "Taunt"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      20,
+      28,
+      0,
+      0,
+      0,
+      4
+     ]
+    },
+    {
+     "species": "Slowking-Galar",
+     "item": "Colbur Berry",
+     "ability": "Regenerator",
+     "moves": [
+      "Chilly Reception",
+      "Flamethrower",
+      "Future Sight",
+      "Sludge Bomb"
+     ],
+     "nature": "Sassy",
+     "evs": [
+      28,
+      0,
+      0,
+      0,
+      28,
+      0
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Clefable",
+     "item": "Sitrus Berry",
+     "ability": "Unaware",
+     "moves": [
+      "Calm Mind",
+      "Moonblast",
+      "Moonlight",
+      "Wish"
+     ],
+     "nature": "Bold",
+     "evs": [
+      28,
+      0,
+      28,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Corviknight",
+     "item": "Leftovers",
+     "ability": "Pressure",
+     "moves": [
+      "Brave Bird",
+      "Defog",
+      "Protect",
+      "Roost"
+     ],
+     "nature": "Careful",
+     "evs": [
+      28,
+      0,
+      0,
+      0,
+      28,
+      0
+     ]
+    },
+    {
+     "species": "Excadrill",
+     "item": "Choice Scarf",
+     "ability": "Mold Breaker",
+     "moves": [
+      "Earthquake",
+      "Iron Head",
+      "Rapid Spin",
+      "Stealth Rock"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      28,
+      0,
+      0,
+      0,
+      28
+     ]
+    },
+    {
+     "species": "Sableye",
+     "item": "Sablenite",
+     "ability": "Prankster",
+     "moves": [
+      "Knock Off",
+      "Protect",
+      "Recover",
+      "Will-O-Wisp"
+     ],
+     "nature": "Careful",
+     "evs": [
+      28,
+      0,
+      0,
+      0,
+      28,
+      0
+     ]
+    },
+    {
+     "species": "Talonflame",
+     "item": "",
+     "ability": "Flame Body",
+     "moves": [
+      "Defog",
+      "Overheat",
+      "Roost",
+      "Will-O-Wisp"
+     ],
+     "nature": "Bold",
+     "evs": [
+      28,
+      0,
+      20,
+      0,
+      0,
+      4
+     ]
+    },
+    {
+     "species": "Toxapex",
+     "item": "Rocky Helmet",
+     "ability": "Regenerator",
+     "moves": [
+      "Baneful Bunker",
+      "Infestation",
+      "Recover",
+      "Toxic"
+     ],
+     "nature": "Impish",
+     "evs": [
+      28,
+      0,
+      28,
+      0,
+      0,
+      0
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Dragalge",
+     "item": "Dragalgite",
+     "ability": "Poison Point",
+     "moves": [
+      "Draco Meteor",
+      "Flip Turn",
+      "Sludge Bomb",
+      "Thunderbolt"
+     ],
+     "nature": "Modest",
+     "evs": [
+      4,
+      0,
+      0,
+      28,
+      0,
+      20
+     ]
+    },
+    {
+     "species": "Aegislash",
+     "item": "Colbur Berry",
+     "ability": "Stance Change",
+     "moves": [
+      "Close Combat",
+      "Poltergeist",
+      "Shadow Sneak",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      28,
+      28,
+      0,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Corviknight",
+     "item": "Leftovers",
+     "ability": "Pressure",
+     "moves": [
+      "Brave Bird",
+      "Defog",
+      "Roost",
+      "U-turn"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      28,
+      0,
+      28,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Hippowdon",
+     "item": "Sitrus Berry",
+     "ability": "Sand Stream",
+     "moves": [
+      "High Horsepower",
+      "Ice Fang",
+      "Slack Off",
+      "Stealth Rock"
+     ],
+     "nature": "Impish",
+     "evs": [
+      28,
+      0,
+      4,
+      0,
+      20,
+      0
+     ]
+    },
+    {
+     "species": "Rillaboom",
+     "item": "Life Orb",
+     "ability": "Grassy Surge",
+     "moves": [
+      "Drain Punch",
+      "Grassy Glide",
+      "Knock Off",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      0,
+      28,
+      0,
+      0,
+      0,
+      28
+     ]
+    },
+    {
+     "species": "Samurott-Hisui",
+     "item": "Choice Scarf",
+     "ability": "Sharpness",
+     "moves": [
+      "Aqua Cutter",
+      "Ceaseless Edge",
+      "Flip Turn",
+      "Sacred Sword"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      28,
+      0,
+      0,
+      0,
+      28
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Hawlucha",
+     "item": "Grassy Seed",
+     "ability": "Unburden",
+     "moves": [
+      "Acrobatics",
+      "Close Combat",
+      "Substitute",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      20,
+      28,
+      0,
+      0,
+      0,
+      4
+     ]
+    },
+    {
+     "species": "Dragapult",
+     "item": "Life Orb",
+     "ability": "Clear Body",
+     "moves": [
+      "Draco Meteor",
+      "Dragon Darts",
+      "Fire Blast",
+      "Shadow Ball"
+     ],
+     "nature": "Naive",
+     "evs": [
+      0,
+      0,
+      0,
+      28,
+      0,
+      28
+     ]
+    },
+    {
+     "species": "Glimmora",
+     "item": "Red Card",
+     "ability": "Toxic Debris",
+     "moves": [
+      "Mortal Spin",
+      "Mud Shot",
+      "Power Gem",
+      "Stealth Rock"
+     ],
+     "nature": "Bold",
+     "evs": [
+      28,
+      0,
+      20,
+      0,
+      0,
+      4
+     ]
+    },
+    {
+     "species": "Golisopod",
+     "item": "Golisopite",
+     "ability": "Emergency Exit",
+     "moves": [
+      "Aqua Jet",
+      "Close Combat",
+      "Leech Life",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      4,
+      28,
+      0,
+      0,
+      0,
+      28
+     ]
+    },
+    {
+     "species": "Primarina",
+     "item": "Sitrus Berry",
+     "ability": "Torrent",
+     "moves": [
+      "Calm Mind",
+      "Encore",
+      "Moonblast",
+      "Sparkling Aria"
+     ],
+     "nature": "Modest",
+     "evs": [
+      28,
+      0,
+      0,
+      4,
+      0,
+      20
+     ]
+    },
+    {
+     "species": "Rillaboom",
+     "item": "Terrain Extender",
+     "ability": "Grassy Surge",
+     "moves": [
+      "Grassy Glide",
+      "Knock Off",
+      "Superpower",
+      "U-turn"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      20,
+      28,
+      0,
+      0,
+      0,
+      4
+     ]
+    }
+   ]
+  ],
+  "flat": [
+   {
+    "species": "Garchomp",
+    "item": "Sitrus Berry",
+    "ability": "Rough Skin",
+    "moves": [
+     "Dragon Tail",
+     "Earthquake",
+     "Poison Jab",
+     "Stealth Rock"
+    ],
+    "nature": "Impish",
+    "evs": [
+     28,
+     0,
+     28,
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Blaziken",
+    "item": "Life Orb",
+    "ability": "Speed Boost",
+    "moves": [
+     "Close Combat",
+     "Earthquake",
+     "Flare Blitz",
+     "Swords Dance"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     0,
+     28,
+     0,
+     0,
+     0,
+     28
+    ]
+   },
+   {
+    "species": "Corviknight",
+    "item": "Leftovers",
+    "ability": "Pressure",
+    "moves": [
+     "Brave Bird",
+     "Defog",
+     "Roost",
+     "U-turn"
+    ],
+    "nature": "Relaxed",
+    "evs": [
+     28,
+     0,
+     28,
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Dragapult",
+    "item": "Choice Scarf",
+    "ability": "Clear Body",
+    "moves": [
+     "Draco Meteor",
+     "Dragon Darts",
+     "Shadow Ball",
+     "U-turn"
+    ],
+    "nature": "Rash",
+    "evs": [
+     0,
+     0,
+     0,
+     28,
+     0,
+     28
+    ]
+   },
+   {
+    "species": "Floette-Eternal",
+    "item": "Floettite",
+    "ability": "Flower Veil",
+    "moves": [
+     "Calm Mind",
+     "Draining Kiss",
+     "Moonblast",
+     "Synthesis"
+    ],
+    "nature": "Bold",
+    "evs": [
+     28,
+     0,
+     28,
+     4,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Samurott-Hisui",
+    "item": "Black Glasses",
+    "ability": "Sharpness",
+    "moves": [
+     "Ceaseless Edge",
+     "Encore",
+     "Sucker Punch",
+     "Swords Dance"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     20,
+     28,
+     0,
+     0,
+     0,
+     4
+    ]
+   },
+   {
+    "species": "Golisopod",
+    "item": "Golisopite",
+    "ability": "Emergency Exit",
+    "moves": [
+     "Aqua Jet",
+     "Iron Head",
+     "Leech Life",
+     "Swords Dance"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     20,
+     28,
+     0,
+     0,
+     0,
+     4
+    ]
+   },
+   {
+    "species": "Archaludon",
+    "item": "Shuca Berry",
+    "ability": "Stamina",
+    "moves": [
+     "Aura Sphere",
+     "Dragon Pulse",
+     "Electro Shot",
+     "Flash Cannon"
+    ],
+    "nature": "Modest",
+    "evs": [
+     20,
+     0,
+     0,
+     28,
+     0,
+     4
+    ]
+   },
+   {
+    "species": "Basculegion",
+    "item": "Life Orb",
+    "ability": "Adaptability",
+    "moves": [
+     "Aqua Jet",
+     "Flip Turn",
+     "Psychic Fangs",
+     "Wave Crash"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     0,
+     28,
+     0,
+     0,
+     0,
+     28
+    ]
+   },
+   {
+    "species": "Excadrill",
+    "item": "Leftovers",
+    "ability": "Mold Breaker",
+    "moves": [
+     "Earthquake",
+     "Iron Head",
+     "Rapid Spin",
+     "Stealth Rock"
+    ],
+    "nature": "Careful",
+    "evs": [
+     28,
+     0,
+     0,
+     0,
+     28,
+     4
+    ]
+   },
+   {
+    "species": "Pelipper",
+    "item": "Sitrus Berry",
+    "ability": "Drizzle",
+    "moves": [
+     "Hurricane",
+     "Ice Beam",
+     "U-turn",
+     "Weather Ball"
+    ],
+    "nature": "Timid",
+    "evs": [
+     0,
+     0,
+     0,
+     28,
+     0,
+     28
+    ]
+   },
+   {
+    "species": "Quaquaval",
+    "item": "Choice Scarf",
+    "ability": "Moxie",
+    "moves": [
+     "Aqua Step",
+     "Close Combat",
+     "Flip Turn",
+     "Triple Axel"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     20,
+     4,
+     0,
+     0,
+     28
+    ]
+   },
+   {
+    "species": "Delphox",
+    "item": "Delphoxite",
+    "ability": "Blaze",
+    "moves": [
+     "Dazzling Gleam",
+     "Flamethrower",
+     "Nasty Plot",
+     "Psyshock"
+    ],
+    "nature": "Timid",
+    "evs": [
+     4,
+     0,
+     0,
+     28,
+     0,
+     28
+    ]
+   },
+   {
+    "species": "Clefable",
+    "item": "Life Orb",
+    "ability": "Magic Guard",
+    "moves": [
+     "Flamethrower",
+     "Moonblast",
+     "Moonlight",
+     "Stealth Rock"
+    ],
+    "nature": "Bold",
+    "evs": [
+     28,
+     0,
+     20,
+     0,
+     0,
+     12
+    ]
+   },
+   {
+    "species": "Decidueye-Hisui",
+    "item": "Rocky Helmet",
+    "ability": "Scrappy",
+    "moves": [
+     "Defog",
+     "Roost",
+     "Triple Arrows",
+     "U-turn"
+    ],
+    "nature": "Impish",
+    "evs": [
+     28,
+     0,
+     28,
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Dragonite",
+    "item": "Leftovers",
+    "ability": "Multiscale",
+    "moves": [
+     "Dragon Dance",
+     "Earthquake",
+     "Ice Spinner",
+     "Roost"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     28,
+     20,
+     0,
+     0,
+     0,
+     12
+    ]
+   },
+   {
+    "species": "Excadrill",
+    "item": "Choice Scarf",
+    "ability": "Mold Breaker",
+    "moves": [
+     "Earthquake",
+     "Iron Head",
+     "Rapid Spin",
+     "Stealth Rock"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     28,
+     0,
+     0,
+     0,
+     28
+    ]
+   },
+   {
+    "species": "Lopunny",
+    "item": "Lopunnite",
+    "ability": "Limber",
+    "moves": [
+     "Close Combat",
+     "Fake Out",
+     "Mach Punch",
+     "Mega Kick"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     4,
+     28,
+     0,
+     0,
+     0,
+     20
+    ]
+   },
+   {
+    "species": "Dragonite",
+    "item": "Lum Berry",
+    "ability": "Multiscale",
+    "moves": [
+     "Dragon Dance",
+     "Extreme Speed",
+     "Fire Punch",
+     "Outrage"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     28,
+     0,
+     0,
+     0,
+     28
+    ]
+   },
+   {
+    "species": "Garchomp",
+    "item": "Life Orb",
+    "ability": "Rough Skin",
+    "moves": [
+     "Draco Meteor",
+     "Earthquake",
+     "Flamethrower",
+     "Stealth Rock"
+    ],
+    "nature": "Naive",
+    "evs": [
+     0,
+     0,
+     0,
+     28,
+     0,
+     28
+    ]
+   },
+   {
+    "species": "Hatterene",
+    "item": "Eject Button",
+    "ability": "Magic Bounce",
+    "moves": [
+     "Draining Kiss",
+     "Healing Wish",
+     "Nuzzle",
+     "Psychic Noise"
+    ],
+    "nature": "Bold",
+    "evs": [
+     28,
+     0,
+     28,
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Samurott-Hisui",
+    "item": "Black Glasses",
+    "ability": "Sharpness",
+    "moves": [
+     "Ceaseless Edge",
+     "Sucker Punch",
+     "Swords Dance",
+     "Taunt"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     20,
+     28,
+     0,
+     0,
+     0,
+     4
+    ]
+   },
+   {
+    "species": "Slowking-Galar",
+    "item": "Colbur Berry",
+    "ability": "Regenerator",
+    "moves": [
+     "Chilly Reception",
+     "Flamethrower",
+     "Future Sight",
+     "Sludge Bomb"
+    ],
+    "nature": "Sassy",
+    "evs": [
+     28,
+     0,
+     0,
+     0,
+     28,
+     0
+    ]
+   },
+   {
+    "species": "Clefable",
+    "item": "Sitrus Berry",
+    "ability": "Unaware",
+    "moves": [
+     "Calm Mind",
+     "Moonblast",
+     "Moonlight",
+     "Wish"
+    ],
+    "nature": "Bold",
+    "evs": [
+     28,
+     0,
+     28,
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Corviknight",
+    "item": "Leftovers",
+    "ability": "Pressure",
+    "moves": [
+     "Brave Bird",
+     "Defog",
+     "Protect",
+     "Roost"
+    ],
+    "nature": "Careful",
+    "evs": [
+     28,
+     0,
+     0,
+     0,
+     28,
+     0
+    ]
+   },
+   {
+    "species": "Sableye",
+    "item": "Sablenite",
+    "ability": "Prankster",
+    "moves": [
+     "Knock Off",
+     "Protect",
+     "Recover",
+     "Will-O-Wisp"
+    ],
+    "nature": "Careful",
+    "evs": [
+     28,
+     0,
+     0,
+     0,
+     28,
+     0
+    ]
+   },
+   {
+    "species": "Talonflame",
+    "item": "",
+    "ability": "Flame Body",
+    "moves": [
+     "Defog",
+     "Overheat",
+     "Roost",
+     "Will-O-Wisp"
+    ],
+    "nature": "Bold",
+    "evs": [
+     28,
+     0,
+     20,
+     0,
+     0,
+     4
+    ]
+   },
+   {
+    "species": "Toxapex",
+    "item": "Rocky Helmet",
+    "ability": "Regenerator",
+    "moves": [
+     "Baneful Bunker",
+     "Infestation",
+     "Recover",
+     "Toxic"
+    ],
+    "nature": "Impish",
+    "evs": [
+     28,
+     0,
+     28,
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Dragalge",
+    "item": "Dragalgite",
+    "ability": "Poison Point",
+    "moves": [
+     "Draco Meteor",
+     "Flip Turn",
+     "Sludge Bomb",
+     "Thunderbolt"
+    ],
+    "nature": "Modest",
+    "evs": [
+     4,
+     0,
+     0,
+     28,
+     0,
+     20
+    ]
+   },
+   {
+    "species": "Aegislash",
+    "item": "Colbur Berry",
+    "ability": "Stance Change",
+    "moves": [
+     "Close Combat",
+     "Poltergeist",
+     "Shadow Sneak",
+     "Swords Dance"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     28,
+     28,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Hippowdon",
+    "item": "Sitrus Berry",
+    "ability": "Sand Stream",
+    "moves": [
+     "High Horsepower",
+     "Ice Fang",
+     "Slack Off",
+     "Stealth Rock"
+    ],
+    "nature": "Impish",
+    "evs": [
+     28,
+     0,
+     4,
+     0,
+     20,
+     0
+    ]
+   },
+   {
+    "species": "Rillaboom",
+    "item": "Life Orb",
+    "ability": "Grassy Surge",
+    "moves": [
+     "Drain Punch",
+     "Grassy Glide",
+     "Knock Off",
+     "Swords Dance"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     0,
+     28,
+     0,
+     0,
+     0,
+     28
+    ]
+   },
+   {
+    "species": "Samurott-Hisui",
+    "item": "Choice Scarf",
+    "ability": "Sharpness",
+    "moves": [
+     "Aqua Cutter",
+     "Ceaseless Edge",
+     "Flip Turn",
+     "Sacred Sword"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     28,
+     0,
+     0,
+     0,
+     28
+    ]
+   },
+   {
+    "species": "Hawlucha",
+    "item": "Grassy Seed",
+    "ability": "Unburden",
+    "moves": [
+     "Acrobatics",
+     "Close Combat",
+     "Substitute",
+     "Swords Dance"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     20,
+     28,
+     0,
+     0,
+     0,
+     4
+    ]
+   },
+   {
+    "species": "Dragapult",
+    "item": "Life Orb",
+    "ability": "Clear Body",
+    "moves": [
+     "Draco Meteor",
+     "Dragon Darts",
+     "Fire Blast",
+     "Shadow Ball"
+    ],
+    "nature": "Naive",
+    "evs": [
+     0,
+     0,
+     0,
+     28,
+     0,
+     28
+    ]
+   },
+   {
+    "species": "Glimmora",
+    "item": "Red Card",
+    "ability": "Toxic Debris",
+    "moves": [
+     "Mortal Spin",
+     "Mud Shot",
+     "Power Gem",
+     "Stealth Rock"
+    ],
+    "nature": "Bold",
+    "evs": [
+     28,
+     0,
+     20,
+     0,
+     0,
+     4
+    ]
+   },
+   {
+    "species": "Golisopod",
+    "item": "Golisopite",
+    "ability": "Emergency Exit",
+    "moves": [
+     "Aqua Jet",
+     "Close Combat",
+     "Leech Life",
+     "Swords Dance"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     4,
+     28,
+     0,
+     0,
+     0,
+     28
+    ]
+   },
+   {
+    "species": "Primarina",
+    "item": "Sitrus Berry",
+    "ability": "Torrent",
+    "moves": [
+     "Calm Mind",
+     "Encore",
+     "Moonblast",
+     "Sparkling Aria"
+    ],
+    "nature": "Modest",
+    "evs": [
+     28,
+     0,
+     0,
+     4,
+     0,
+     20
+    ]
+   },
+   {
+    "species": "Rillaboom",
+    "item": "Terrain Extender",
+    "ability": "Grassy Surge",
+    "moves": [
+     "Grassy Glide",
+     "Knock Off",
+     "Superpower",
+     "U-turn"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     20,
+     28,
+     0,
+     0,
+     0,
+     4
+    ]
+   }
+  ],
+  "meta": {
+   "source": "smogon sample+community via crob.at",
+   "n_teams": 7,
+   "n_mons": 39,
+   "provenance": {
+    "sample": 7
+   },
+   "team_provenance": [
+    "sample",
+    "sample",
+    "sample",
+    "sample",
+    "sample",
+    "sample",
+    "sample"
+   ],
+   "built": "2026-11-20"
+  }
  }
 }

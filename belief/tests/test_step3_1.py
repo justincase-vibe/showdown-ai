@@ -88,6 +88,35 @@ def test_prior_candidate_dims_present():
         assert isinstance(c["evs"], dict)
 
 
+def test_prior_champions_species_have_data():
+    """D102 regression: gen9championsou used to have NO strategy rows and NO
+    format_form_move rows in the legality DB — ``build_prior`` raised
+    ``no prior for 'delphox' in 'gen9championsou'`` and the env degraded to
+    zero observations. The champions Smogon sets (slug ``championsou``) are
+    now ingested, and the same-gen legal-move fallback covers any species the
+    set file lacks — so every species the champions team pool can field has a
+    usable prior (never-empty belief, the Step-3.1 contract)."""
+    import json
+    cands = build_prior("delphox", "gen9championsou")
+    assert len(cands) >= 1
+    assert sum(c["weight"] for c in cands) == pytest.approx(1.0, abs=1e-9)
+    pools_path = ROOT / "bot" / "team_pools.json"
+    pools = json.loads(pools_path.read_text(encoding="utf8"))
+    mons = {m["species"] for team in pools["gen9championsou"]["teams"] for m in team}
+    assert mons, "champions pool vanished from team_pools.json?"
+    for sp in sorted(mons):
+        cs = build_prior(sp, "gen9championsou")
+        assert cs and sum(c["weight"] for c in cs) == pytest.approx(1.0, abs=1e-9), sp
+
+
+def test_no_prior_still_raises_for_absent_species_in_champions():
+    # the fallback must not paper over "no data at all": a CAP has no sets and
+    # no learnset anywhere in gen 9, so champions raises just like every other
+    # format (loud failure beats a silent empty belief).
+    with pytest.raises(ValueError):
+        build_prior("colossoil", "gen9championsou")
+
+
 def test_no_prior_raises_for_absent_species():
     # A CAP is genuinely nonstandard — no Smogon sets AND no legal moves in a
     # standard format — so build_prior has no prior to build. The never-empty
