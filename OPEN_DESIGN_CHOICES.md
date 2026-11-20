@@ -45,10 +45,13 @@ runner that plays from it):**
 `replay_diag.py` (replay health-check). **Verified:** kept imports work; league
 (51) + gui (87) suites pass CPU-only. Commit `6483161`.
 
-**Still open (see section B):** the browser GUI (`gui/static/` + `gui/server.py`)
-is being retired in favour of `gui.desktop` but is not yet removed; and whether
-the league should be **self-improving** (members learn by playing each other)
-or **train-then-select** (train with `net.trainer`, league only ranks + culls).
+**Status (2026-11-20):** the browser GUI is **REMOVED** (quarantined to
+`_legacy/gui_browser/`, commit `2687ec3`) — ONE GUI remains: `gui.desktop`.
+The league question is **RESOLVED (D103)**: the league is **self-improving**
+(each bot = NN + rollout buffer, PPO update each round, ELO-driven cull +
+fresh-bot injection; seeding = new random net OR snapshot to continue).
+Plan is in PLAN.md D103; step 1 awaits the user's go. Also recorded: the
+checkpoint-dropdown short-name fix (D104).
 
 ---
 
