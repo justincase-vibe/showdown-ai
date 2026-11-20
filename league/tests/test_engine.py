@@ -591,3 +591,134 @@ def test_eval_mode_never_culls(tmp_path):
     assert s["state"] == "completed"
     assert sorted(reg.names()) == ["a", "b", "c", "d"]
     assert "cull_events" not in s
+
+
+# ── D103 step 4 hardening: the _after_round guard (white-box) ───────────────
+#
+# These three test the guard/surgery logic of ``_cull_and_refresh`` in ISOLATION
+# (no SelfPlayRun workers): materialize the live bots, set the round state, and
+# drive ``_after_round`` directly with the round-end state. With EMPTY buffers
+# ``_update_round`` is a pure no-op (``n == 0 -> continue`` for every bot), so
+# what is under test is exactly the cull guard — not the battle loop.
+#
+# The existing cull tests above get a deterministic ELO order by PLAYING a round
+# (the fake always lets pairing[0] win => b1>b2>b3>b4). A direct ``_after_round``
+# call has not played anything, so every bot still sits at ELO_INITIAL (1500);
+# ``select_cull`` breaks ties by NAME, which would cull the alphabetically-first
+# bot (b1), not b4. So each test sets DISTINCT ELOs up front to make the cull
+# target known without a battle.
+
+def _set_elos(reg, mapping) -> None:
+    """Give the roster DISTINCT ELOs (a deterministic cull target) and persist
+    them, without playing a round."""
+    for name, elo in mapping.items():
+        reg.get(name).elo = elo
+    reg.save()
+
+
+def test_cull_skipped_when_round_stopped(tmp_path):
+    """The step-4 guard: the cull runs ONLY on a COMPLETED round.
+
+    After a user stop (or a failure) the campaign is over — minting explorers
+    there would mutate the roster for no reason. A STOPPED round still runs the
+    PPO update (it saves whatever was learned) but must NOT cull; a COMPLETED
+    round at the same boundary does cull."""
+    reg = _learning_roster(tmp_path, "b1", "b2", "b3", "b4")
+    _set_elos(reg, {"b1": 1600, "b2": 1550, "b3": 1500, "b4": 1400})  # b4 weakest
+
+    run = LeagueRun(_cull_cfg(tmp_path, n_rounds=2), registry=reg, pool=FakePool())
+    run._load_bots()              # materialize the live bots (NO SelfPlayRun workers)
+    run._n_rounds = 2
+    run._round_idx = 1            # "round 1 just ended" (1 % cull_every == 0, 1 < 2)
+
+    # a STOPPED round: the PPO update runs (no-op, empty buffers) but NO cull
+    run._after_round({"state": "stopped"})
+    assert run._cull_events == []
+    assert sorted(reg.names()) == ["b1", "b2", "b3", "b4"]
+
+    # a COMPLETED round at the same boundary: the cull fires (b4 = weakest)
+    run._after_round({"state": "completed"})
+    assert len(run._cull_events) == 1
+    assert run._cull_events[0]["culled"] == ["b4"]
+    assert "b4" not in reg.names()
+    run.shutdown()
+
+
+def test_cull_mint_failure_keeps_roster(tmp_path, monkeypatch):
+    """Mint-first atomicity: minting a fresh bot is done BEFORE retiring the
+    culled. If minting fails (disk error) the roster is left UNCHANGED — no
+    partial retirement. (The old retire-first order could have shrunk the roster
+    below the floor, or even below 2, and the next plan() would raise.)
+
+    Patching ``LearningBot.random`` (the mint) to raise does NOT touch the load
+    path — the engine's ``_load_bots`` uses ``from_snapshot``, so the roster
+    materializes normally and only the mint blows up."""
+    import league.learner as learner
+
+    def boom(*a, **k):
+        raise OSError("disk full (simulated mint failure)")
+    monkeypatch.setattr(learner.LearningBot, "random", boom)
+
+    reg = _learning_roster(tmp_path, "b1", "b2", "b3", "b4")
+    _set_elos(reg, {"b1": 1600, "b2": 1550, "b3": 1500, "b4": 1400})  # b4 weakest
+
+    run = LeagueRun(_cull_cfg(tmp_path, n_rounds=2), registry=reg, pool=FakePool())
+    run._load_bots()
+    run._n_rounds = 2
+    run._round_idx = 1
+
+    with pytest.raises(OSError, match="disk full"):
+        run._after_round({"state": "completed"})
+
+    # mint-first => NOTHING was retired before the mint blew up: the roster is
+    # UNCHANGED (all 4 bots, no fresh bot, b4 still present).
+    assert sorted(reg.names()) == ["b1", "b2", "b3", "b4"]
+    assert sorted(run._bots) == ["b1", "b2", "b3", "b4"]
+    assert "b4" in run._bots
+    # no cull was recorded (the failure aborted the surgery)
+    assert run._cull_events == []
+    run.shutdown()
+
+
+def test_cull_name_collision_redraws(tmp_path, monkeypatch):
+    """Name-shadow guard: a fresh bot's name must not SHADOW an existing roster
+    name (a hand-registered bot could own a ``league_*`` name, and
+    ``registry.add`` would silently OVERWRITE its entry — ELO/W-L lost).
+
+    The roster has a bot literally named ``league_abcd`` (high ELO, so it is NOT
+    culled). ``fresh_bot_name`` is scripted to collide with it on the first
+    draw and return a clean ``league_zzzz`` on the second: the engine must skip
+    the collision, mint ``league_zzzz``, and leave ``league_abcd``'s original
+    checkpoint untouched."""
+    import league.learner as learner
+
+    reg = _learning_roster(tmp_path, "league_abcd", "c1", "c2", "c3")
+    # league_abcd is the STRONGEST (survives); c3 the weakest (culled).
+    _set_elos(reg, {"league_abcd": 2000, "c1": 1500, "c2": 1450, "c3": 1400})
+    original_abcd_ckpt = reg.get("league_abcd").ckpt_path
+
+    # scripted 2-draw fresh_bot_name: draw 1 COLLIDES with the roster name, draw 2 is clean
+    draws = iter([Path(tmp_path) / "fresh" / "league_abcd.pt",
+                  Path(tmp_path) / "fresh" / "league_zzzz.pt"])
+    monkeypatch.setattr(learner, "fresh_bot_name", lambda *a, **k: next(draws))
+
+    run = LeagueRun(_cull_cfg(tmp_path, n_rounds=2), registry=reg, pool=FakePool())
+    run._load_bots()
+    run._n_rounds = 2
+    run._round_idx = 1
+
+    run._after_round({"state": "completed"})
+
+    events = run._cull_events
+    assert len(events) == 1 and events[0]["culled"] == ["c3"]
+    added = events[0]["added"]
+    # the collision was skipped; the fresh bot took the CLEAN second draw
+    assert added == ["league_zzzz"]
+    assert "league_zzzz" in reg.names() and "league_zzzz" in run._bots
+    # the pre-existing league_abcd SURVIVED untouched (its original checkpoint,
+    # not shadowed/overwritten by the fresh bot)
+    assert "league_abcd" in reg.names()
+    assert reg.get("league_abcd").ckpt_path == original_abcd_ckpt
+    # the fresh bot has its OWN file (one-file-per-bot) under refresh_dir
+    assert (Path(tmp_path) / "fresh" / "league_zzzz.pt").is_file()
+    run.shutdown()

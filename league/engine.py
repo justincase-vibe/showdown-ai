@@ -463,10 +463,16 @@ class LeagueRun:
         """End of a round: the D103 step-3 PPO update over each bot's
         rollout, then the step-4 cull + refresh of the weakest bots (AFTER
         the update — the culled bots' final weights are saved first; only
-        when a next round exists)."""
+        when a next round exists).
+
+        The UPDATE runs no matter how the round ended (it saves what was
+        learned); the CULL runs only on a COMPLETED round — after a user
+        stop or a failure the campaign is over, and minting explorers there
+        would mutate the roster for no reason."""
         if self.cfg.learning and self._bots:
             self._update_round()
-            self._cull_and_refresh()
+            if s.get("state") == "completed":
+                self._cull_and_refresh()
 
     def request_stop(self, reason: str = "user") -> None:
         if self._sp is None:
@@ -585,11 +591,11 @@ class LeagueRun:
                      f"retired ({len(bots)} bots, floor "
                      f"{max(2, self.cfg.min_roster)})")
             return
-        # 1) retire the culled (roster entries only — the .pt artifacts stay)
-        for name in culled:
-            self.registry.remove(name)
-            self._bots.pop(name, None)
-        # 2) mint a FRESH random bot per culled slot (roster size constant).
+        # 1) mint the FRESH bots FIRST (atomicity): if minting fails (disk,
+        #    whatever) the roster is still a SUPERSET of the original
+        #    (original + some fresh) — always legal for plan(). Retiring
+        #    first and failing mid-mint would SHRINK the roster, possibly
+        #    below the floor or even below 2 (the next plan() would raise).
         #    seed=None = truly random (the diversity source, D103 step 4);
         #    fresh_bot_name = a unique OWN file (the one-file-per-bot rule).
         vocabs = self._vocabs
@@ -597,21 +603,39 @@ class LeagueRun:
             from net.vocab_db import build_vocabs
             vocabs = self._vocabs = build_vocabs()
         out_dir = self.cfg.refresh_dir or "scratch"
-        added: List[str] = []
+        added: List[Tuple[str, Any]] = []
+        taken = {b.name for b in bots}
         for _ in culled:
-            path = fresh_bot_name("league", out_dir)
-            name = path.stem
+            # a unique file AND a roster name that does not SHADOW an
+            # existing bot (fresh_bot_name guarantees the file only; a
+            # hand-registered bot could own a "league_*" name, and
+            # registry.add would silently overwrite its entry).
+            for _draw in range(64):
+                path = fresh_bot_name("league", out_dir)
+                if path.stem not in taken:
+                    break
+            else:
+                raise RuntimeError(
+                    "cull+refresh: 64 fresh-name draws all shadowed an "
+                    "existing roster name — the roster is unexpectedly full")
+            taken.add(path.stem)
             bot = LearningBot.random(
-                name=name, ckpt_path=str(path), vocabs=vocabs,
+                name=path.stem, ckpt_path=str(path), vocabs=vocabs,
                 device=self.cfg.device)
             bot.save()
-            self.registry.add(name, str(path))
+            self.registry.add(path.stem, str(path))
+            added.append((path.stem, bot))
+        # 2) retire the culled (roster entries only — the .pt artifacts stay)
+        for name in culled:
+            self.registry.remove(name)
+            self._bots.pop(name, None)
+        # 3) the fresh bots go LIVE (the driver factory reads self._bots)
+        for name, bot in added:
             self._bots[name] = bot
-            added.append(name)
-        # 3) the roster changed -> replan (new bots fight, culled don't)
+        # 4) the roster changed -> replan (new bots fight, culled don't)
         self.plan()
         event = {"round": self._round_idx, "culled": list(culled),
-                 "added": list(added)}
+                 "added": [name for name, _ in added]}
         self._cull_events.append(event)
         self.log(f"[league] cull round {self._round_idx}: retired {culled} "
                  f"-> fresh random bot(s) {added} "
