@@ -147,6 +147,14 @@ def main(argv: Optional[list] = None) -> int:
                               error=f"{type(exc).__name__}: {exc}", exit_code=1)
         log(f"FATAL: {type(exc).__name__}: {exc}")
         return 1
+    finally:
+        # C — reap the long-lived Node calc workers on the way out (covers both
+        # return paths; atexit in damage.worker is the backstop). Never raises.
+        try:
+            from damage import worker as _worker
+            _worker.shutdown_pool()
+        except Exception:  # noqa: BLE001
+            pass
 
     runstate.write_status(rd, state=state_final, round=trainer.round, exit_code=0)
     log(f"{state_final}: rounds={trainer.round} (planned {rounds_planned}) "

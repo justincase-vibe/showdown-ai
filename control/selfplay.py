@@ -230,11 +230,21 @@ class SelfPlayRun:
     def shutdown(self) -> None:
         """Tear the pool down (idempotent). Call after ``wait()`` (or on error).
         Only kills servers THIS run spawned — the pool reuses (never kills)
-        pre-existing ones, e.g. the user's :8000 play server."""
+        pre-existing ones, e.g. the user's :8000 play server. Also reaps THIS
+        process's long-lived Node calc workers (C)."""
         try:
             self.pool.shutdown()
         except Exception as e:  # noqa: BLE001 — teardown must never raise into the caller
             self.log(f"[run] WARNING: pool shutdown error: {e}")
+        # C — reap the long-lived Node calc workers explicitly + early (atexit in
+        # damage.worker is the backstop; an explicit teardown is the stable path
+        # and also covers a mid-run exception, since this runs in the caller's
+        # ``finally``). Never raises into the caller.
+        try:
+            from damage import worker as _worker
+            _worker.shutdown_pool()
+        except Exception as e:  # noqa: BLE001
+            self.log(f"[run] WARNING: calc worker pool shutdown error: {e}")
 
     # ── workers ────────────────────────────────────────────────────────────
     def _worker(self) -> None:
