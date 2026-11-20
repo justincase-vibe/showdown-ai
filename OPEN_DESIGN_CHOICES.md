@@ -82,6 +82,7 @@ revealed-flag shortcut).
 | 8 | **Concurrent runs** | keep single-slot vs allow multiple vs auto-expire idle "play" sessions | **RESOLVED (2026-11-20):** single-slot kept; a non-play start pre-empts an active PLAY session (item A3) |
 | 9 | **`on_finish` contract** | `play_battle_on` catches+logs a raising hook vs leave it to the caller | leave to caller (engine already defends) |
 | 10 | **Checkpoint naming** | ~~allow collisions (scratch vs runs)~~ vs a global unique name | **RESOLVED (2026-11-19, D99):** `{n}b_{type}_{id}.pt` (e.g. `50b_bc_a3f2.pt`). No date — avoids same-day collisions; 4-char uuid4 hex id — unique and league-friendly. |
+| 11 | **Switch-rate verdict gate is one-sided/weak** | The `switch_rate_gap` gate (\|gap\| ≤ 0.15) is structurally one-sided: a *switch* decision's legal list is **only** switches, so every switch-decision is automatically a "predicted switch" ⇒ `pred_switch ≥ n_switch` always ⇒ `gap ≥ 0` always. It only ever fires by predicting switches on *move*-decisions, and trivially passes at gap=0 (which is exactly what the good nets show). It is a **weak** anti-collapse check, not the strong one the docstring implies. | **OPEN (2026-11-20):** replace/supplement it with an action-type-conditional check — e.g. "predict a switch on a **move**-decision at a rate near the human move→switch rate" (the honest collapse test). Keep **switch-accuracy** as the primary switch-quality gate (it's the real signal — and the BC nets only *barely* clear it: n2000 switch-acc 0.387 vs chance 0.259 / const 0.264). |
 
 ---
 
@@ -98,3 +99,72 @@ Smaller data → lower top1, but every run **passes** the S4.3 gate (beats chanc
 + constant baselines, predicts switches at the human rate, no revealed-flag
 shortcut). To improve top1: scale battles/epochs (you have `gen9ou.jsonl` 20k +
 `gen9ou_part2.jsonl`) and run on the **GPU** via the one-click button.
+
+---
+
+## D. Net-learning verdict — "is the net actually learning?" (2026-11-20)
+
+> Investigation the user asked for after the A3 fix. Evidence-based; no new
+> training was run (CPU-only reads + one checkpoint-load probe).
+
+**Verdict: the BC (imitation) net genuinely learns state→action — but unevenly
+(moves ≫ switches). The self-play PPO net only shows "beats random" with no
+improvement trend, because its opponent is `random` (a saturated, weak signal).
+So imitation is the real learning path; self-play needs the league (varied,
+stronger opponents) to keep improving. The user's pivot to the league was
+well-founded.**
+
+### Evidence — BC net (best = `s43_bc_n2000`, 1463 battles, 5741 held-out)
+- **Fits:** train loss 1.12 → 0.96 over 13 epochs (`scratch/_scale_n2000.log`).
+- **Generalizes:** held-out top1 0.436 → 0.508 (peak **0.542**) while train fits
+  → not pure memorization.
+- **Beats the honest baselines:** top1 0.542 vs chance 0.224 / const 0.234;
+  move-acc **0.733** vs chance 0.182 / const 0.198. (n1000: 0.476; n50: 0.308.)
+- **No "grab the new move" shortcut:** (n50) first-use 0.276 < repeat 0.342.
+- **Weak spot — switches:** switch-acc **stuck ~0.34 across all 20 epochs**
+  (chance 0.259, const 0.264). The net is bad at choosing *which* mon to
+  switch to. This is the net's real limitation, not a training bug.
+
+### The `switch_rate_gap = 0.0` is **NOT a bug** (traced)
+A switch decision's legal list is *only* switches ⇒ it is always a "predicted
+switch"; the good nets additionally never predict a switch on a *move*-decision.
+So `pred_switch == n_switch` exactly and the gap is 0 by construction. Consequence:
+that gate is one-sided/weak (see B.11). The honest switch signal is **switch-acc**.
+
+### Evidence — self-play PPO net (`runs/20261120T015832Z`, 10 rounds × 5)
+- **Opponent = `random`** (`config.json`). Win rate: 3,4,5,4,4,5,4,4,4,5 = **84%
+  and FLAT** (no improvement trend).
+- KL/clip → ~0 by round 7: **expected** for on-policy PPO — `trainer.update()`
+  refreshes `old_logprob` to the current net, `epochs=2`, small lr ⇒ epoch-1
+  ratio ≡ 1.0. **Not a freeze bug.** But it does mean the policy barely moves
+  per round: the sparse ±1 terminal reward is **saturated** (beating random is
+  easy), so there is little gradient pressure left.
+- ~43 s/battle on CPU (50 battles ≈ 36 min).
+
+**Honest read:** (1) "learning" is proven for the BC net (real fit +
+generalization + beats honest baselines), weakly on switches. (2) "learning" is
+NOT well-demonstrated for the PPO net — 84% vs random with no trend is
+consistent with "quickly better than random, then stopped." That's a property of
+the random opponent + sparse reward, not (necessarily) a broken net. (3) The BC
+net (expert imitation) is very likely the **strongest single policy** we have →
+make it a league seed / opponent.
+
+### New follow-ups surfaced (need your call)
+- **N1 — switch-rate gate (B.11):** strengthen it (action-type-conditional)
+or accept switch-acc as the real gate. *(design choice, section B.11)*
+- **N2 — D81 re-verify blocked:** the best BC checkpoint's PASS predates the
+  D81 first-use/repeat leak gate (its meta lacks those fields). Gates 1–4 are
+  still valid; re-run `evaluate()` under the current code to add gate 4. **Blocked
+  on N3** (the trace cache is now stale, so a re-eval needs a rebuild).
+- **N3 — trace cache is stale (fingerprint drift):** current `9318a22b…` vs
+  cached `6d798cc29f…`. Since the cache was built (2026-11-18 08:37Z), the
+  fingerprint set changed: `belief/state.py` (**champions prior gap fix —
+  possibly behavioral**) + `legality.db` (updated) + `belief/evidence.py`,
+  `damage/calc.py`, `node_calc.js` (non-behavioral: batch transport / retry /
+  server). **The checkpoints still LOAD fine** (verified: all 4 → 7.21M params
+  under the current registry/vocabs), so nothing is lost — only **re-training /
+  re-eval** is affected. Options: **(a)** rebuild the cache (safe; reflects the
+  champions fix — my lean, since ≥1 change is behavioral); **(b)** narrow the
+  fingerprint to behavior-affecting code / add a calc-output fingerprint; **(c)**
+  confirm gen9ou traces are byte-identical and bless the old cache. **My lean: (a)**
+  for the next BC run; (b) if we want cheap re-evals.
