@@ -34,10 +34,14 @@ on_battle) → league/driver → PokeAgent + BotRegistry ELO`. Fast stack green:
    `control.selfplay_main`; the server's `api_start` handles it (CPU-only, no
    device check); `launcher.browse_checkpoints` is extracted as a shared function
    (no duplication); fast test stack **119/119 green**.
-3. **Single active-run slot + long-lived "play" sessions.** `start_trainer`
-   refuses any new run while one is active. A "play until stopped" session
-   (`n_battles=0`) holds the slot **indefinitely** — this is exactly what blocked
-   my imitation run (an idle 3.8 h play session had to be stopped first).
+3. ~~**Single active-run slot + long-lived "play" sessions.**~~
+   **RESOLVED (2026-11-20):** a NON-play start now gracefully pre-empts a
+   lingering PLAY session (play is the low-priority interactive mode,
+   `n_battles=0` = "play until stopped") and proceeds — so an idle play session
+   no longer holds the single slot forever. Play never pre-empts a real
+   workload, and two of the same workload still refuse (single-slot preserved
+   for real runs). See `gui.launcher._assert_startable` +
+   `gui/tests/test_a3_play_preempt.py` (7 tests).
 4. ~~**Checkpoint name collision.**~~ **FIXED (D99):** new naming format
    `{n}b_{type}_{id}.pt` (e.g. `50b_bc_a3f2.pt`) — the 4-char uuid4 hex id makes
    collisions impossible. Existing date-named checkpoints still work; new runs
@@ -75,7 +79,7 @@ revealed-flag shortcut).
 | 5 | **Replay storage** | keep all vs top-ELO only? disk budget? (library has no pruning — ready for either) | keep all for now; add pruning later |
 | 6 | **Server lifetime** | 8 always-on vs start-on-demand | on-demand (saves RAM when idle) |
 | 7 | **Global STOP scope** | kill training only vs also the pool's servers (never your `:8000`) | training + this-run's servers; never `:8000` |
-| 8 | **Concurrent runs** | keep single-slot vs allow multiple vs auto-expire idle "play" sessions | auto-expire idle play + keep single-slot (item A3) |
+| 8 | **Concurrent runs** | keep single-slot vs allow multiple vs auto-expire idle "play" sessions | **RESOLVED (2026-11-20):** single-slot kept; a non-play start pre-empts an active PLAY session (item A3) |
 | 9 | **`on_finish` contract** | `play_battle_on` catches+logs a raising hook vs leave it to the caller | leave to caller (engine already defends) |
 | 10 | **Checkpoint naming** | ~~allow collisions (scratch vs runs)~~ vs a global unique name | **RESOLVED (2026-11-19, D99):** `{n}b_{type}_{id}.pt` (e.g. `50b_bc_a3f2.pt`). No date — avoids same-day collisions; 4-char uuid4 hex id — unique and league-friendly. |
 
