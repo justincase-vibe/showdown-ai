@@ -66,6 +66,16 @@ class LeagueConfig:
                                          # IS the self-improving loop); False: the
                                          # legacy eval-only run (rank checkpoints,
                                          # no capture) — one engine, a mode flag
+    # ── the PPO update (D103 step 3; defaults mirror net.trainer.TrainConfig) ──
+    n_rounds: int = 1                     # play+update cycles per GUI launch (1 = one)
+    epochs: int = 2                       # 1–2 on-policy PPO passes per round-end update
+    lr: float = 3e-4
+    clip_eps: float = 0.2
+    vf_coef: float = 0.5
+    ent_coef: float = 0.01
+    max_norm: float = 0.5
+    gamma: float = 0.99
+    lam: float = 0.95
     # ── the pool (the RAM ceiling is enforced by the pool, not here) ───
     n_servers: int = 2
     per_server: int = 2
@@ -124,11 +134,22 @@ class LeagueRun:
         self._nets: Dict[str, Any] = {}
         self._bots: Dict[str, Any] = {}  # learning mode: name -> LearningBot
         self._collectors: Dict[int, Tuple[Any, Any]] = {}  # pairing idx -> (coll_a, coll_b)
-        self._sp: Optional[Any] = None    # the SelfPlayRun (the run mechanics)
+        self._sp: Optional[Any] = None    # the CURRENT round's SelfPlayRun
         self._pairings: List[Tuple[str, str]] = []
         self._results: List[Dict[str, Any]] = []
         self._lk = threading.Lock()
         self.state = "created"
+        # multi-round (D103 step 3): the shared pool is reused across rounds
+        # (servers boot once, not per round); bookkeeping below survives the
+        # per-round buffer drain so the summary reports CUMULATIVE learning.
+        self._started = False
+        self._n_rounds = 0
+        self._round_idx = 0
+        self._stop_requested = False
+        self._total_steps: Dict[str, int] = {}        # cumulative decisions collected
+        self._total_updates: Dict[str, int] = {}      # cumulative PPO updates per bot
+        self._total_errors = 0
+        self._last_update_metrics: Dict[str, Dict[str, float]] = {}
 
     # ── roster ──────────────────────────────────────────────────────────
     def add_bot(self, name: str, ckpt_path: str,
@@ -297,9 +318,20 @@ class LeagueRun:
         else:
             out_a, out_b = 0.0, 0.0
         n_a = len(coll_a)
-        self._bots[a_name].buffer.extend(coll_a.finalize(out_a).steps)
+        # GAE-at-finalize (D103 step 3): the battle boundary is known HERE, so
+        # fill_gae runs per battle (never across the whole buffer at update
+        # time). The config's gamma/lam drive it.
+        coll_a = coll_a.finalize(out_a, gamma=self.cfg.gamma, lam=self.cfg.lam)
+        self._bots[a_name].buffer.extend(coll_a.steps)
         n_b = len(coll_b)
-        self._bots[b_name].buffer.extend(coll_b.finalize(out_b).steps)
+        coll_b = coll_b.finalize(out_b, gamma=self.cfg.gamma, lam=self.cfg.lam)
+        self._bots[b_name].buffer.extend(coll_b.steps)
+        with self._lk:
+            # per-battle collection count (accurate even if the <2 buffer is
+            # retained across rounds, since this is what THIS battle captured)
+            self._total_steps[a_name] = self._total_steps.get(a_name, 0) + n_a
+            self._total_steps[b_name] = self._total_steps.get(b_name, 0) + n_b
+            self._collectors.pop(idx, None)
         self.log(f"[league] battle {idx}: buffered {n_a} step(s) for "
                  f"{a_name} ({out_a:+.0f}) + {n_b} step(s) for {b_name} "
                  f"({out_b:+.0f})")
@@ -348,54 +380,182 @@ class LeagueRun:
         self.log(f"[league] battle {idx}: {a_name} vs {b_name} -> "
                  f"{'WIN ' + winner if winner else 'DRAW'} (steps={steps})")
 
-    # ── lifecycle (delegated to SelfPlayRun — one run engine) ───────────
+    # ── lifecycle (multi-round over ONE shared pool; one run engine) ─────
     def start(self) -> None:
-        if self._sp is not None:
+        if self._started:
             raise RuntimeError("LeagueRun.start: already started")
+        self._started = True
         self.plan()
+        self._n_rounds = max(1, int(self.cfg.n_rounds))
+        self._round_idx = 0
+        self._ensure_pool()
+        self._begin_round()
+        self.state = "running"
+
+    def _ensure_pool(self) -> None:
+        """ONE shared pool for the WHOLE run — every round reuses it, so the
+        servers boot ONCE (not once per round). An injected pool (tests) is used
+        as-is; otherwise a real ``ResourcePool`` is created here and torn down
+        exactly once in :meth:`shutdown`."""
+        if self._pool is not None:
+            return
+        from pool import PoolConfig, ResourcePool
+        self._pool = ResourcePool(PoolConfig(
+            n_servers=self.cfg.n_servers, per_server=self.cfg.per_server,
+            port_base=self.cfg.port_base, boot_timeout=self.cfg.boot_timeout),
+            log=self.log)
+
+    def _begin_round(self) -> None:
+        """Start the NEXT round's SelfPlayRun over the shared pool (a fresh
+        driver factory + fresh per-battle agents/collectors each round)."""
         from control.selfplay import SelfPlayConfig, SelfPlayRun
         sp_cfg = SelfPlayConfig(
             n_battles=len(self._pairings),
             battle_format=self.cfg.battle_format,
-            seed=self.cfg.seed,
+            seed=self.cfg.seed + 100000 * self._round_idx,   # distinct per round
             max_steps=self.cfg.max_steps,
-            n_servers=self.cfg.n_servers,
-            per_server=self.cfg.per_server,
-            port_base=self.cfg.port_base,
-            boot_timeout=self.cfg.boot_timeout,
-            n_workers=self.cfg.n_workers,
-            save_replays=self.cfg.save_replays,
+            n_servers=self.cfg.n_servers, per_server=self.cfg.per_server,
+            port_base=self.cfg.port_base, boot_timeout=self.cfg.boot_timeout,
+            n_workers=self.cfg.n_workers, save_replays=self.cfg.save_replays,
             library_root=self.cfg.library_root,
             max_consecutive_errors=self.cfg.max_consecutive_errors)
+        self._round_idx += 1
         self._sp = SelfPlayRun(sp_cfg, run_dir=self.run_dir,
                                battle_driver_factory=self._driver_factory_fn(),
                                on_battle=self._on_battle,
                                pool=self._pool, library=self._library, log=self.log)
         self._sp.start()
-        self.state = "running"
+        self.log(f"[league] round {self._round_idx}/{self._n_rounds} started "
+                 f"({len(self._pairings)} pairing(s))")
 
     def wait(self, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Block until EVERY round has played + updated (or a stop/failed).
+
+        One round = ``SelfPlayRun.wait`` (its battles) + :meth:`_after_round`
+        (the step-3 PPO update). The loop advances rounds until ``n_rounds``
+        is reached, a stop is requested, or a round fails (a broken pool must
+        not burn the remaining rounds)."""
         if self._sp is None:
             raise RuntimeError("LeagueRun.wait: not started")
-        s = self._sp.wait(timeout)
-        self.state = s.get("state", self.state)
-        s["pairings_planned"] = len(self._pairings)
-        s["pairings_played"] = len(self._results)
-        s["pairings_errored"] = int(s.get("errors", 0))
-        s["standings"] = self.registry.standings()
-        if self._bots:
-            s["steps_collected_by_bot"] = {
-                name: len(b.buffer) for name, b in sorted(self._bots.items())}
-        return s
+        while True:
+            s = self._sp.wait(timeout)
+            self._total_errors += int(s.get("errors", 0))
+            self._after_round(s)
+            done = (self._stop_requested
+                    or s.get("state") in ("failed", "stopped")
+                    or self._round_idx >= self._n_rounds)
+            if done:
+                break
+            self._begin_round()
+        self.state = self._sp.state
+        return self._final_summary()
+
+    def _after_round(self, s: Dict[str, Any]) -> None:
+        """End of a round: the D103 step-3 PPO update over each bot's rollout."""
+        if self.cfg.learning and self._bots:
+            self._update_round()
 
     def request_stop(self, reason: str = "user") -> None:
         if self._sp is None:
             raise RuntimeError("LeagueRun.request_stop: not started")
+        self._stop_requested = True
         self._sp.request_stop(reason)
 
     def shutdown(self) -> None:
-        if self._sp is not None:
-            self._sp.shutdown()
+        """Tear down the shared pool + the Node calc workers ONCE (idempotent).
+
+        Called once at the very end (``league_main``'s ``finally``) — NOT per
+        round: the pool is shared across rounds and must stay up until the last
+        round finishes (``SelfPlayRun.shutdown`` is never called per round for
+        exactly this reason)."""
+        # best-effort: stop an in-flight round (if any) before killing servers
+        if self._sp is not None and getattr(self._sp, "state", None) == "running":
+            try:
+                self._sp.request_stop(reason="shutdown")
+            except Exception as e:  # noqa: BLE001 — teardown must never raise
+                self.log(f"[league] WARNING: stop in-flight round failed: {e}")
+        if self._pool is not None:
+            try:
+                self._pool.shutdown()
+            except Exception as e:  # noqa: BLE001
+                self.log(f"[league] pool shutdown error: {e}")
+        # reap the long-lived Node calc workers (idempotent; atexit is the
+        # backstop). Covers a mid-run exception since this runs in the caller's
+        # finally (mirrors SelfPlayRun.shutdown's worker teardown).
+        try:
+            from damage import worker as _worker
+            _worker.shutdown_pool()
+        except Exception as e:  # noqa: BLE001
+            self.log(f"[league] calc worker pool shutdown error: {e}")
+
+    # ── the D103 step-3 update (per bot, after each round) ─────────────
+    def _update_round(self) -> None:
+        """Run ONE on-policy PPO update per learning bot over its GAE'd rollout,
+        save the updated weights to the bot's OWN path, and drain the buffer
+        (fresh rollout each round — the on-policy discipline).
+
+        Reuses ``net.ppo`` EXACTLY as ``SelfPlayTrainer.update`` does (no PPO
+        math re-derived): ``steps_to_batch`` -> on-policy ``old_logprob``
+        refresh -> ``PPOTrainer.update`` (1–2 epochs) -> ``bot.save`` -> clear.
+
+        A bot with <2 buffered steps is SKIPPED (not enough for a meaningful
+        PPO pass) and keeps its buffer to accumulate more next round — the same
+        ``<2 -> skip`` contract as ``SelfPlayTrainer.train_round`` (which
+        raises; the league must NOT raise on a bot's thin round)."""
+        import numpy as np
+        import torch
+        from net.ppo import PPOTrainer, steps_to_batch, chosen_logprobs
+
+        for name, bot in self._bots.items():
+            steps = bot.buffer.steps
+            n = len(steps)
+            if n == 0:
+                continue
+            if n < 2:
+                self.log(f"[league] {name}: {n} step(s) — too few for a PPO "
+                         f"pass (skipped update; buffer kept for next round)")
+                continue
+            batch = steps_to_batch(steps, bot.device)
+            # on-policy baseline refresh (mirror SelfPlayTrainer.update): the
+            # ratio baseline is the CURRENT net's logprobs, recomputed right
+            # before the passes (the stored old_logprob was from collection).
+            with torch.no_grad():
+                batch["old_logprob"] = chosen_logprobs(bot.net, batch).clone()
+            trainer = PPOTrainer(bot.net, lr=self.cfg.lr, clip_eps=self.cfg.clip_eps,
+                                 vf_coef=self.cfg.vf_coef, ent_coef=self.cfg.ent_coef,
+                                 max_norm=self.cfg.max_norm, epochs=self.cfg.epochs,
+                                 device=bot.device)
+            adv = np.array([st.advantage for st in steps], dtype=np.float32)
+            ret = np.array([st.ret for st in steps], dtype=np.float32)
+            metrics = trainer.update(batch, advantages=adv, returns=ret)
+            bot.n_updates += 1
+            bot.save()                     # its OWN path (pristine-snapshot rule)
+            bot.clear_buffer()
+            self._total_updates[name] = self._total_updates.get(name, 0) + 1
+            self._last_update_metrics[name] = metrics
+            self.log(f"[league] {name}: PPO update #{bot.n_updates} over {n} steps "
+                     f"(loss={metrics.get('loss', float('nan')):.4f}) -> saved "
+                     f"{Path(bot.ckpt_path).name}")
+
+    # ── the final summary (cumulative across rounds) ────────────────────
+    def _final_summary(self) -> Dict[str, Any]:
+        s: Dict[str, Any] = {
+            "state": self.state,
+            "rounds": self._round_idx,
+            "rounds_planned": self._n_rounds,
+            "pairings_planned": len(self._pairings),
+            "pairings_played": len(self._results),
+            "pairings_errored": self._total_errors,
+            "errors": self._total_errors,
+            "standings": self.registry.standings(),
+        }
+        if self.cfg.learning:
+            s["steps_collected_by_bot"] = dict(self._total_steps)
+            s["updates_by_bot"] = {n: self._total_updates.get(n, 0)
+                                   for n in self._bots}
+            s["n_saved_by_bot"] = {n: self._bots[n].n_saved for n in self._bots}
+            s["last_update_metrics_by_bot"] = dict(self._last_update_metrics)
+        return s
 
     # ── introspection ───────────────────────────────────────────────────
     def results(self) -> List[Dict[str, Any]]:
@@ -411,6 +571,8 @@ class LeagueRun:
             rs = list(self._results)
         s = {
             "state": self.state,
+            "rounds": self._round_idx,
+            "rounds_planned": self._n_rounds,
             "pairings_planned": len(self._pairings),
             "pairings_played": len(rs),
             "wins_by_bot": {b: sum(1 for r in rs if r["winner"] == b)

@@ -247,6 +247,35 @@ def _fake_play_factory(result, partial_before_error: bool = False):
     return fake_play
 
 
+def _fake_play_factory_n(result, n_decisions: int = 3,
+                         partial_before_error: bool = False):
+    """Like ``_fake_play_factory`` but fires ``n_decisions`` real decisions per
+    side — enough (>=2) to drive the D103 step-3 PPO update path (the default
+    1-decision fake only exercises the <2 skip)."""
+    from net.env import build_action_list, build_obs, my_side
+    from net.tests.test_env_obs import _FakeBattle, _FakeMon
+    from net.vocab_db import build_vocabs
+
+    def fake_play(server_cfg, **kw):
+        v = build_vocabs()
+        b = _FakeBattle(
+            active=_FakeMon("garchomp", moves=["outrage", "earthquake"]),
+            avail_moves=["outrage", "earthquake"], tera=True)
+        lines = [ln for ln in b._build_replay_log().split("\n") if ln.strip()]
+        side = my_side(b, lines)
+        obs = build_obs(b, "gen9ou", v, side)
+        acts = build_action_list(b)
+        for cap, ag in ((kw["capture_a"], kw["agent_a"]),
+                        (kw["capture_b"], kw["agent_b"])):
+            if cap is not None:
+                for _ in range(n_decisions):
+                    cap(obs, ag.act(obs, acts, deterministic=True))
+        if partial_before_error:
+            raise RuntimeError("pool exploded")
+        return result
+    return fake_play
+
+
 def test_learning_run_buffers_experience_with_terminal_rewards(tmp_path,
                                                                 monkeypatch):
     import league.driver as drv
@@ -320,6 +349,79 @@ def test_learning_run_discards_partial_trajectory_on_error(tmp_path,
     # NO buffered steps (the partial trajectory was discarded, not finalized)
     assert len(run._bots["alpha"].buffer) == 0
     assert len(run._bots["beta"].buffer) == 0
+
+
+# ── D103 step 3: the round-end PPO update (>=2 -> update+save+drain) ──────
+def test_learning_run_updates_saves_and_drains_when_enough_steps(tmp_path,
+                                                                 monkeypatch):
+    """A bot with >=2 buffered decisions runs ONE PPO update, saves its UPDATED
+    weights to its own checkpoint, and drains the buffer (the round-end
+    contract). The checkpoint bytes MUST change (the weights were learned)."""
+    import league.driver as drv
+    monkeypatch.setattr(drv, "play_agent_battle_on",
+                        _fake_play_factory_n((True, False, 2), n_decisions=3))
+    reg = _learning_roster(tmp_path, "alpha", "beta")
+    a_ckpt, b_ckpt = reg.get("alpha").ckpt_path, reg.get("beta").ckpt_path
+    before_a, before_b = Path(a_ckpt).read_bytes(), Path(b_ckpt).read_bytes()
+    run = LeagueRun(_cfg(learning=True), registry=reg, pool=FakePool())
+    run.start()
+    s = run.wait()
+    run.shutdown()
+
+    assert s["state"] == "completed" and s["errors"] == 0
+    assert run._bots["alpha"].n_updates == 1 and run._bots["beta"].n_updates == 1
+    assert len(run._bots["alpha"].buffer) == 0      # drained after the update
+    assert len(run._bots["beta"].buffer) == 0
+    assert Path(a_ckpt).read_bytes() != before_a      # weights changed + re-saved
+    assert Path(b_ckpt).read_bytes() != before_b
+    assert s["updates_by_bot"] == {"alpha": 1, "beta": 1}
+    assert s["n_saved_by_bot"] == {"alpha": 1, "beta": 1}
+    assert s["steps_collected_by_bot"] == {"alpha": 3, "beta": 3}
+    assert "loss" in s["last_update_metrics_by_bot"]["alpha"]
+
+
+def test_learning_run_skips_update_when_too_few_steps(tmp_path, monkeypatch):
+    """A bot with <2 buffered decisions (the default 1-decision fake) is SKIPPED
+    — no update, no save (checkpoint UNCHANGED) — but KEEPS its buffer to
+    accumulate more next round (the <2-skip contract, league must not raise)."""
+    import league.driver as drv
+    monkeypatch.setattr(drv, "play_agent_battle_on",
+                        _fake_play_factory((True, False, 2)))   # 1 decision/side
+    reg = _learning_roster(tmp_path, "alpha", "beta")
+    a_ckpt = reg.get("alpha").ckpt_path
+    before_a = Path(a_ckpt).read_bytes()
+    run = LeagueRun(_cfg(learning=True), registry=reg, pool=FakePool())
+    run.start()
+    s = run.wait()
+    run.shutdown()
+
+    assert s["state"] == "completed" and s["errors"] == 0
+    assert run._bots["alpha"].n_updates == 0 and run._bots["beta"].n_updates == 0
+    assert len(run._bots["alpha"].buffer) == 1      # retained (kept for next round)
+    assert Path(a_ckpt).read_bytes() == before_a     # NOT re-saved (no update)
+    assert s["updates_by_bot"] == {"alpha": 0, "beta": 0}
+    assert s["steps_collected_by_bot"] == {"alpha": 1, "beta": 1}
+
+
+def test_learning_run_multi_round_updates_each_round(tmp_path, monkeypatch):
+    """n_rounds=2 -> each bot plays + updates TWICE (fresh rollout per round over
+    the PREVIOUS round's updated net — the self-improving loop). The shared
+    pool is booted once (the FakePool is reused across both rounds)."""
+    import league.driver as drv
+    monkeypatch.setattr(drv, "play_agent_battle_on",
+                        _fake_play_factory_n((True, False, 2), n_decisions=3))
+    reg = _learning_roster(tmp_path, "alpha", "beta")
+    run = LeagueRun(_cfg(learning=True, n_rounds=2), registry=reg, pool=FakePool())
+    run.start()
+    s = run.wait()
+    run.shutdown()
+
+    assert s["state"] == "completed" and s["errors"] == 0
+    assert s["rounds"] == 2 and s["rounds_planned"] == 2
+    assert run._bots["alpha"].n_updates == 2 and run._bots["beta"].n_updates == 2
+    assert s["updates_by_bot"] == {"alpha": 2, "beta": 2}
+    assert s["n_saved_by_bot"] == {"alpha": 2, "beta": 2}
+    assert s["steps_collected_by_bot"] == {"alpha": 6, "beta": 6}  # 3/round x 2
 
 
 def test_eval_mode_run_has_no_learning_side_effects(tmp_path):
