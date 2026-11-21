@@ -423,6 +423,45 @@ I'd flag it \u2014 but the registry lock is the smaller, more contained fix.
 
 ---
 
+## 2026-11-21 \u2014 Environment validated + NEXT MACRO STEP (options, awaiting your call)
+
+**Environment status: DONE + validated.** A 28-battle CPU smoke (8 fresh random
+bots, learning mode) passed: `state=completed, 28/28, errors=0`; all 8 bots
+collected 350\u2013930 steps and ran a finite PPO update (loss \u2208 [\u22120.21, +0.12],
+no NaN); ELO spread 1443\u20131569; zero-sum holds; no leaked Node servers. A
+~1008-battle run (36 rounds, cull every 4) is going in the background
+(`scratch/_full_validate.log`). Observed (not bugs): ~25% of random-net battles
+stall to the 200-step cap (\u2192 draw, 0 reward both sides); mild `Task was destroyed
+but it is pending!` poke-env teardown warnings (cosmetic, not the ConnectionReset
+exceptions we already fixed).
+
+**What we can do now: the league produces RELATIVE strength (ELO within the
+league) but NOT absolute strength (\u201cis this bot actually good at P\u00f4kemon?\u201d).
+That's the gap.** Options for the next build step:
+
+* **A \u2014 Fitness / evaluation harness (RECOMMENDED next).** A ladder of fixed
+  reference opponents (random \u2192 a BC baseline \u2192 a strong fixed policy) + a
+  win-rate harness that scores ANY bot against it. Prerequisite for everything
+  else: tells us if the league is actually improving bots, and gives the
+  strategy-sharing step a way to rank \u201cwinning\u201d strategies. You asked for this
+  (\u201cget a reasonably strong ai model out there and let ours fight against that\u201d).
+  Small, testable, high-leverage.
+* **B \u2014 Strategy sharing / delta blending (your idea).** When top bots converge
+  on a node change, blend a small delta into the main agent. Higher-risk
+  research; needs a trained-bot pool + a fitness measure (A) to know what
+  \u201cwinning\u201d is. Do AFTER A.
+* **C \u2014 Scale the league (more rounds/bots, longer training).** \u201cLet it cook.\u201d
+  Already happening (the background run); but without A we can't tell if it's
+  improving. Run in PARALLEL with A.
+* **D \u2014 GUI polish / play-vs-checkpoint.** Useful for your workflow, not an
+  AI-strength step. Side task.
+
+**Lean:** A next (with C running in the background as the first data point),
+then B once we have trained bots + a fitness measure. Doubles/6v6 stays later
+as agreed. Your call when you're back.
+
+---
+
 ## A. Workflow errors found
 
 ### Fixed this pass
