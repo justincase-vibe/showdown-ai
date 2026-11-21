@@ -12,6 +12,7 @@ S4.1/S4.2 gates — this only proves the refactor preserved the pipeline and tha
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from net.env import _zero_obs, build_obs, my_side
 from net.tests.test_s41 import make_ctx, make_vocabs
@@ -84,6 +85,15 @@ def test_build_obs_defensive_on_garbage_log():
     assert set(obs.keys()) == set(_zero_obs().keys())
     for arr in obs.values():
         assert np.isfinite(arr.astype(float)).all()
+
+
+def test_build_obs_raises_when_vocabs_is_none():
+    # A missing vocabs is a WIRING error, not a transient data gap: it must fail
+    # LOUD (ValueError), NOT silently degrade to a blind zero-obs every turn (the
+    # A3 self-check bug — heuristic vs random ran 3/3 with both sides blind).
+    # Contrast: a VALID vocabs + a garbage log still degrades gracefully (above).
+    with pytest.raises(ValueError, match="is required"):
+        build_obs(_FakeBattle(), "gen9ou", None, "p1")
 
 
 # ── my_side: the POV auto-detector (a p2 bot must swap) ────────────────────

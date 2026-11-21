@@ -190,6 +190,19 @@ def evaluate(
             "evaluate() needs a pool (real battles), an injected server_cfg, "
             "or a fake env_factory (tests) to play on")
     bot_make = _resolve_bot(bot, vocabs, device)
+    # Real battles build a real observation (net.env.build_obs), which REQUIRES
+    # vocabs. Checked AFTER bot validation (so a bad bot still reports the bot
+    # error) but before ANY battle (so a missing vocabs fails LOUD at the API
+    # boundary instead of a blind zero-obs deep in the encoder — the A3
+    # self-check bug: heuristic vs random ran 3/3 with BOTH sides playing blind).
+    # A fake `decide` (test injection) bypasses that path, so only then may
+    # vocabs be absent.
+    if vocabs is None and decide is None:
+        raise ValueError(
+            "evaluate(): `vocabs` is required for real battles "
+            "(net.vocab_db.build_vocabs()); it is only optional when a fake "
+            "`decide` (test injection) bypasses the real observation path. "
+            "Playing without it would make the bot blind (zero-obs every turn).")
 
     # THE battle primitive (one-workflow): agent_a = bot (p1), agent_b = ref (p2).
     from league.driver import play_agent_battle_on

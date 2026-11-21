@@ -330,7 +330,19 @@ def build_obs(battle: Any, fmt: str, vocabs: Any, side: str = "p1") -> Dict[str,
     belief's "own" team is the real p2 team (the env's POV-correctness trick).
     Defensive: any belief/encode failure degrades to a zero observation (logged)
     so a live battle never dies on a data gap (a species with no prior, ...).
+
+    ``vocabs`` is REQUIRED: a missing vocabulary is a wiring/config error, NOT a
+    transient data gap. It used to be swallowed by the catch-all below and silently
+    degrade to a BLIND zero-obs every turn (the A3 self-check bug: the bot won only
+    because its heuristic beats a random net even when blind). A precondition
+    violation must fail loud — so the guard lives HERE, before the try, not inside it.
     """
+    if vocabs is None:
+        raise ValueError(
+            "build_obs: `vocabs` is required — pass a real net vocabulary "
+            "(e.g. net.vocab_db.build_vocabs()). None is a wiring error, not a "
+            "transient data gap; degrading to a blind zero-obs here would "
+            "silently play a bot that sees nothing (the A3 self-check bug).")
     try:
         text = battle._build_replay_log()
         if side == "p2":

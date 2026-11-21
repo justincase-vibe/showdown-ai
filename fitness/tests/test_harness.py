@@ -137,6 +137,22 @@ def test_evaluate_rejects_no_server_and_no_fake_env():
         evaluate(bot=_dummy_bot, refs=[ref], n_battles=1)  # no way to play
 
 
+def test_evaluate_real_battle_requires_vocabs():
+    # Real battles (real decide path) build a real observation, which REQUIRES
+    # vocabs. A missing vocabs must fail LOUD at the API boundary — not silently
+    # play a blind zero-obs bot (the A3 self-check bug). A fake `decide` (test
+    # injection) bypasses that path, so vocabs is only required when decide is
+    # absent. (Checked AFTER bot validation, so a bad bot still reports bot.)
+    ref = Reference(name="r", make_agent=lambda s: object())
+    with pytest.raises(ValueError, match="vocabs"):
+        evaluate(bot=_dummy_bot, refs=[ref], n_battles=1, server_cfg=object())
+    # ...and the SAME shape with a fake decide (test injection) is fine — it
+    # never touches build_obs, so vocabs may be absent (the hermetic path).
+    ok = evaluate(bot=_dummy_bot, refs=[ref], n_battles=1,
+                  env_factory=_seq_env([1]), decide=_pass_decide)
+    assert ok.per_ref[ref.name].n == 1
+
+
 def test_evaluate_rejects_unknown_bot():
     ref = Reference(name="r", make_agent=lambda s: object())
     with pytest.raises(TypeError, match="bot must be"):
@@ -168,20 +184,21 @@ def test_evaluate_bot_beats_random_live():
     # Run it explicitly: pytest fitness/tests -k live (starts a server, ~30-60s).
     from pool import ResourcePool, PoolConfig
 
-    pool = ResourcePool(PoolConfig(ports=[8901], per_server=1))
+    pool = ResourcePool(PoolConfig(n_servers=1, per_server=1, port_base=8901))
     try:
         pool.start(wait_healthy=True)
-        ref = None  # built below to keep the import lazy
         from fitness.ladder import random_reference
         from net.vocab_db import build_vocabs
 
         vocabs = build_vocabs()
         # a random net as the "bot" (a legal but untrained policy) vs the
         # random reference — both weak, so it just needs to RUN to completion.
+        # `vocabs` is REQUIRED for the real obs path (see net.env.build_obs).
         result = evaluate(
             bot=(lambda seed: random_reference(vocabs, device="cpu").agent(seed)),
             refs=[random_reference(vocabs, device="cpu")],
-            n_battles=2, fmt="gen9bss3v3", pool=pool, max_steps=40)
+            n_battles=2, fmt="gen9bss3v3", pool=pool, max_steps=40,
+            vocabs=vocabs)
         assert result.per_ref["random"].n == 2
     finally:
         pool.shutdown()
