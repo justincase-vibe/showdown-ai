@@ -31,7 +31,58 @@ from typing import Any, Dict, List, Optional
 
 from . import ko as _ko
 
-__all__ = ["ko_ladder_score", "rank_moves", "threat_assessment"]
+__all__ = ["ko_ladder_score", "rank_moves", "threat_assessment", "choose_action"]
+
+#: per-gen cached species -> display-types (lazy; avoids a net.legality import
+#: at module load so ``import fitness.strategy`` stays torch-free / cheap).
+_TYPES_BY_GEN: Dict[int, Dict[str, tuple]] = {}
+
+
+def _species_types(species: str, gen: int) -> tuple:
+    """A species' display types, or () if unknown. Cached per gen. Defensive:
+    a lookup failure just yields no types (the hazard penalty degrades to 0)."""
+    if not species:
+        return ()
+    table = _TYPES_BY_GEN.get(gen)
+    if table is None:
+        table = _TYPES_BY_GEN[gen] = {}
+    if species in table:
+        return table[species]
+    types = ()
+    try:
+        from legality.lookup import get_species
+        types = tuple(get_species(species, gen).get("types") or ())
+    except Exception:  # noqa: BLE001 — an unknown species must not kill a decision
+        types = ()
+    table[species] = types
+    return types
+
+
+def _pick_switch(switches: List[Dict], ctx: Dict, gen: int = 9) -> Dict:
+    """The best legal switch-in, hazard-aware from the CONTEXT (opponent-side
+    Stealth Rock / Toxic Spikes penalise type-weak switch-ins). Degrades to the
+    first legal switch when there's only one, no hazards, or no types known —
+    never raises."""
+    if len(switches) == 1:
+        return switches[0]
+    field = ctx.get("field", {}) or {}
+    stealthrock = bool((field.get("stealthrock") or {}).get("p2"))
+    toxicspikes = bool((field.get("toxicspikes") or {}).get("p2"))
+    if not (stealthrock or toxicspikes):
+        return switches[0]
+
+    def score(act: Dict) -> float:
+        types = set(_species_types(str(act.get("species") or ""), gen))
+        if not types:
+            return 0.0
+        penalty = 0.0
+        if stealthrock and (types & {"Rock", "Steel", "Flying", "Bug"}):
+            penalty += 2.0
+        if toxicspikes and (types & {"Poison", "Flying"}):
+            penalty += 1.0
+        return -penalty
+
+    return max(switches, key=score)
 
 
 def _move_key(move: Any) -> str:
@@ -192,3 +243,82 @@ def threat_assessment(
             worst_move, worst_score = m, s
     return {"threat": _threat_label(assessments[_move_key(worst_move)]),
             "worst": worst_move, "assessments": assessments}
+
+
+def choose_action(
+    ctx: Dict,
+    acts: List[Dict],
+    *,
+    fmt: str,
+    gen: int = 9,
+    calc_fn: Optional[Any] = None,
+    switch_threshold: float = 0.30,
+    **overrides: Any,
+) -> Optional[Dict]:
+    """The COMPLETE KO-aware decision, ENTIRELY from the ``get_context()``
+    snapshot + the legal actions — the piece that ties the brains together.
+
+    Decision order (deterministic):
+      1. no actions -> ``None`` (pass/wait).
+      2. no moves legal (force-switch) -> the best switch-in (hazard-aware).
+      3. threatened — the opponent's likely move would ``guaranteed_ko`` / 
+         ``can_ko`` MY active — OR my active HP <= ``switch_threshold``, and a
+         switch is legal -> switch (hazard-aware target).
+      4. otherwise -> the best damaging move (``rank_moves``: KO ladder, then
+         damage; a status move sorts last).
+
+    Fork-NEUTRAL: a pure function over ``(ctx, acts)`` (no obs, no driver). The
+    heuristic's ``act_with_context`` (whichever a/b/c interface is chosen) is a
+    THIN wrapper over this. Reuses :func:`rank_moves` + :func:`threat_assessment`
+    -> the SINGLE KO core -> the ONE damage model. Never raises on a partial
+    belief state (degrades to a safe, legal action).
+
+    :param ctx: the ``belief.state.BeliefState.get_context()`` snapshot
+                (POV-correct: ``active.p1`` = my active, ``active.p2`` = theirs).
+    :param acts: the legal action dicts (``kind`` in ``move``/``tera``/``switch``;
+                move actions carry ``move``, switch actions carry ``species``).
+    :return: the chosen action dict, or ``None`` to pass/wait.
+    """
+    acts = list(acts or [])
+    if not acts:
+        return None
+
+    moves = [(a, a.get("move")) for a in acts
+             if a.get("kind") in ("move", "tera") and a.get("move")]
+    switches = [a for a in acts if a.get("kind") == "switch"]
+
+    # 1) force-switch: only switches are legal.
+    if not moves:
+        return _pick_switch(switches, ctx, gen) if switches else acts[0]
+
+    own_slot = (ctx.get("active") or {}).get("p1")
+    opp_slot = (ctx.get("active") or {}).get("p2")
+
+    # can't resolve the actives (degenerate ctx) -> a safe, legal move (A3.1)
+    if not own_slot or not opp_slot:
+        return moves[0][0]
+
+    own_hp = _ko._hp_frac((ctx.get("own") or {}).get(own_slot))
+    opp_block = (ctx.get("opponent") or {}).get(opp_slot, {}) or {}
+    opp_moves = opp_block.get("top_moves") or opp_block.get("moves") or []
+
+    # 2) defensive: will the opponent's likely move KO me this turn?
+    threat = threat_assessment(
+        ctx, own_slot, opp_slot, opp_moves, fmt=fmt, gen=gen,
+        calc_fn=calc_fn, **overrides)["threat"]
+
+    # 3) switch when threatened or low-HP, if a switch is legal.
+    if switches and (threat in ("guaranteed_ko", "can_ko")
+                     or own_hp <= switch_threshold):
+        return _pick_switch(switches, ctx, gen)
+
+    # 4) offensive: the best damaging move (KO ladder, then damage).
+    names = [name for _a, name in moves]
+    order = rank_moves(
+        ctx, own_slot, opp_slot, names, fmt=fmt, gen=gen,
+        calc_fn=calc_fn, **overrides)["order"]
+    best_name = order[0] if order else names[0]
+    for a, name in moves:
+        if name == best_name:
+            return a
+    return moves[0][0]

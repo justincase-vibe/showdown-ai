@@ -35,16 +35,121 @@ def _dmg(min_pct, max_pct, exp_pct, immune=False):
 
 
 def fake_calc(table):
-    """A calc_fn that maps move-name -> (min,max,exp) pct (deterministic)."""
+    """A calc_fn that maps move-name -> (min,max,exp) pct (deterministic).
+    Unknown moves degrade to 0 damage (no KO) so choose_action tests can mix
+    known and unknown moves."""
     calls = {"n": 0}
 
     def _calc(attacker, defender, move, fmt=None, gen=None):
         name = move if isinstance(move, str) else move.get("name")
         calls["n"] += 1
-        m, x, e = table[name]
+        m, x, e = table.get(name, (0, 0, 0))
         return _dmg(m, x, e)
 
     return _calc, calls
+
+
+# ── choose_action: the complete decision (ties the brains + switch together) ──
+def _full_ctx(own_hp=0.8, own="charizard", opp="venusaur", opp_hp=0.5,
+              opp_moves=("hammer",), stealthrock=False, toxicspikes=False):
+    return {
+        "active": {"p1": "p1a", "p2": "p2a"},
+        "own": {"p1a": {"name": own, "hp_frac": own_hp, "ability": "",
+                        "item": "", "statuses": [], "boosts": {},
+                        "moves": ["ember", "tackle"]}},
+        "opponent": {"p2a": {"species": opp, "hp_frac": opp_hp, "ability": "",
+                             "item": "", "statuses": [], "boosts": {},
+                             "top_moves": list(opp_moves)}},
+        "field": {"stealthrock": {"p2": 1} if stealthrock else {},
+                  "toxicspikes": {"p2": 1} if toxicspikes else {}},
+    }
+
+
+def _acts(move_names, switch_species=()):
+    acts = [{"kind": "move", "move": m} for m in move_names]
+    acts += [{"kind": "switch", "species": s} for s in switch_species]
+    return acts
+
+
+def test_choose_switches_when_threatened():
+    # opponent's hammer (min 85) KOs my 80%-HP active (threshold 80) -> guaranteed
+    # threat -> switch, even though my HP is healthy.
+    calc, _ = fake_calc({"hammer": (85, 95, 90)})
+    ctx = _full_ctx(own_hp=0.8, opp_moves=("hammer",))
+    acts = _acts(["ember", "tackle"], ["garchomp", "torterra"])
+    assert S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc)["kind"] == "switch"
+
+
+def test_choose_best_move_when_safe():
+    # opponent's hammer is harmless (10-20% vs my 80%); my ember (min 50) KOs the
+    # 50%-HP opponent -> no switch, play the KO move.
+    calc, _ = fake_calc({"hammer": (10, 20, 15), "ember": (50, 60, 55),
+                         "tackle": (5, 10, 7)})
+    ctx = _full_ctx(own_hp=0.8, opp_hp=0.5, opp_moves=("hammer",))
+    acts = _acts(["ember", "tackle"], ["garchomp"])
+    assert S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc) == \
+        {"kind": "move", "move": "ember"}
+
+
+def test_choose_switches_when_low_hp():
+    # opponent's move is safe, but my HP (20%) <= 30% threshold -> switch
+    calc, _ = fake_calc({"hammer": (10, 20, 15)})
+    ctx = _full_ctx(own_hp=0.2, opp_moves=("hammer",))
+    acts = _acts(["ember", "tackle"], ["garchomp", "torterra"])
+    assert S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc)["kind"] == "switch"
+
+
+def test_choose_force_switch_when_no_moves():
+    calc, _ = fake_calc({})
+    ctx = _full_ctx()
+    acts = [{"kind": "switch", "species": "garchomp"},
+            {"kind": "switch", "species": "torterra"}]
+    assert S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc)["kind"] == "switch"
+
+
+def test_choose_attacks_when_threatened_but_no_switch():
+    # threatened (opponent KOs me) but NO switch legal -> fall back to attacking
+    # with the best move (ember KOs the 50%-HP opponent).
+    calc, _ = fake_calc({"hammer": (85, 95, 90), "ember": (50, 60, 55),
+                         "tackle": (5, 10, 7)})
+    ctx = _full_ctx(own_hp=0.8, opp_hp=0.5, opp_moves=("hammer",))
+    acts = _acts(["ember", "tackle"])  # no switches
+    assert S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc) == \
+        {"kind": "move", "move": "ember"}
+
+
+def test_choose_tera_action_is_a_move():
+    calc, _ = fake_calc({"ember": (50, 60, 55)})
+    ctx = _full_ctx(own_hp=0.8, opp_hp=0.5, opp_moves=())
+    acts = [{"kind": "tera", "move": "ember"}, {"kind": "move", "move": "tackle"}]
+    # tera ember (KO) beats tackle; no opponent moves -> no defensive switch
+    assert S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc) == \
+        {"kind": "tera", "move": "ember"}
+
+
+def test_choose_no_acts_passes():
+    assert S.choose_action(_full_ctx(), [], fmt="gen9ou",
+                           calc_fn=lambda *a, **k: {"min_pct": 0, "max_pct": 0,
+                                                   "expected_pct": 0}) is None
+
+
+def test_choose_hazard_aware_switch_target():
+    # Stealth Rock on the opponent's side: prefer the switch-in NOT weak to it.
+    # Dragonite is Flying/Dragon (SR-weak); Garchomp is Ground/Dragon (SR-safe).
+    calc, _ = fake_calc({"hammer": (85, 95, 90)})
+    ctx = _full_ctx(own_hp=0.8, opp_moves=("hammer",), stealthrock=True)
+    acts = _acts(["ember"], ["dragonite", "garchomp"])
+    assert S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc) == \
+        {"kind": "switch", "species": "garchomp"}
+
+
+def test_choose_degenerate_ctx_first_move():
+    calc, _ = fake_calc({})
+    ctx = {"active": {"p1": None, "p2": None}, "own": {}, "opponent": {}, "field": {}}
+    acts = _acts(["ember", "tackle"])
+    # can't resolve actives -> a safe, legal move (the first one)
+    assert S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc) == \
+        {"kind": "move", "move": "ember"}
 
 
 # ── ko_ladder_score: the pure (tier, magnitude) mapping ──────────────────────
