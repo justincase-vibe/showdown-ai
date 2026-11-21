@@ -75,6 +75,29 @@ class SwitchOut(Event):
 
 
 @dataclass
+class TeamPreview(Event):
+    """A mon in a side's team is revealed during team preview (a ``|poke|`` line).
+
+    ``side`` is ``p1``/``p2``; ``slot`` is the PREVIEW-order slot (``p2a``-``p2f``,
+    list order); ``species`` is the toID-normalized species. The belief
+    accumulates the opponent's (p2) previews to know its FULL team — the bench
+    the net must plan coverage against — not just the active mon.
+
+    NOTE: preview order is NOT the field order in singles (the player picks the
+    lead during the preview phase, so the active species is not necessarily the
+    first previewed). The belief maps the active to its field slot and the rest
+    to the bench slots in ``get_context()`` — see ``state.py``.
+    (The own side p1 is fully known from the ``own_team`` spec, so p1 previews
+    are inert here.)
+    """
+
+    type: ClassVar[str] = "team_preview"
+    side: str = ""
+    slot: str = ""
+    species: str = ""
+
+
+@dataclass
 class Faint(Event):
     type: ClassVar[str] = "faint"
     side: str = ""
@@ -279,7 +302,8 @@ class Unknown(Event):
 
 #: every concrete event class, by tag — handy for tests and the report
 EVENT_TYPES = [
-    BattleStart, Turn, SwitchIn, SwitchOut, Faint, AbilityRevealed, MoveUsed,
+    BattleStart, Turn, SwitchIn, SwitchOut, TeamPreview, Faint, AbilityRevealed,
+    MoveUsed,
     MoveFailed, HitCount, DamageObserved, HealObserved, StatusApplied,
     StatusCured, BoostChanged, TeraUsed, ItemRevealed, WeatherChanged,
     TerrainChanged, TailwindChanged, FieldEffectChanged, BattleEnd, Unknown,

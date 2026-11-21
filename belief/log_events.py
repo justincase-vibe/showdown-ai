@@ -58,6 +58,7 @@ from .events import (
     SwitchIn,
     SwitchOut,
     TailwindChanged,
+    TeamPreview,
     TeraUsed,
     TerrainChanged,
     Turn,
@@ -71,7 +72,9 @@ IGNORED_TAGS = frozenset({
     # battle meta (no set evidence)
     "hint", "-hint", "name", "player", "teamsize", "rating", "gen", "tier",
     "battle_type", "pokestats", "details", "value", "rule", "ruleset",
-    "team", "pokeball", "t:", "gametype", "clearpoke", "poke", "teampreview",
+    # `poke` is NOT here — it maps to TeamPreview (the opponent's team comp);
+    # `teampreview` (the phase marker, no payload) stays ignored.
+    "team", "pokeball", "t:", "gametype", "clearpoke", "teampreview",
     "showteam", "rated", "chat", "message", "-message", "html", "debug",
     "bigerror", "detailschange",
     # human-ladder ambient noise (S4.0 gate, verified 2026-11-17 against
@@ -201,6 +204,10 @@ class LogAdapter:
         self.species_by_slot: Dict[str, str] = {}
         self.maxhp_by_slot: Dict[str, int] = {}
         self._maxhp_species: Dict[str, str] = {}  # which mon owns each slot's maxhp
+        # per-side |poke| count -> preview-order slot (a..f). The side shape
+        # ``|poke|p2|Species`` names no slot, so we assign by list order (the
+        # fork's format); a slot shape ``|poke| p2a 1 |Species|`` names its own.
+        self._poke_order: Dict[str, int] = {}
         self._items_revealed: set = set()
         self._abilities_revealed: set = set()
         # hp-line dedupe (the sim logs each hp change twice, back-to-back):
@@ -322,6 +329,33 @@ class LogAdapter:
         if tag == "leave":
             side, slot = _slot_of(p[0])
             return SwitchOut(side=side, slot=slot)
+        if tag == "poke" and len(p) >= 2:
+            # Team preview (|poke|): reveal one team mon. The side shape is
+            # ``|poke|p2|Species[, details]`` (the fork's format; battle.js
+            # add("poke", side, details)); a slot shape ``|poke| p2a 1 |Species|``
+            # also occurs in some logs. The slot is the PREVIEW order (a..f), NOT
+            # the field slot — the player picks the lead during the preview
+            # phase, so the active species is not necessarily the first previewed.
+            # The belief maps the active to its field slot and the rest to bench
+            # slots in get_context() (state.py). p1 previews are inert (the own
+            # team is fully known from the own_team spec).
+            name = p[1].split(",")[0].strip()
+            sp = to_id(name)
+            if not sp:
+                return None
+            key = p[0].strip().split()[0]
+            side = key[:2]
+            if side not in ("p1", "p2"):
+                return None
+            if len(key) == 3 and key[2] in "abcdef":
+                slot = key  # explicit slot shape
+            else:
+                n = self._poke_order.get(side, 0)
+                if n >= 6:
+                    return None
+                self._poke_order[side] = n + 1
+                slot = f"{side}{'abcdef'[n]}"
+            return TeamPreview(side=side, slot=slot, species=sp)
         if tag == "faint":
             side, slot = _slot_of(p[0])
             return Faint(side=side, slot=slot)

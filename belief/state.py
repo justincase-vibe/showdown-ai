@@ -536,6 +536,15 @@ class BeliefState:
         # = 0) from "gone" (fainted = 1) — both otherwise read hp_frac 0.
         self.fainted_slots: Dict[str, bool] = {}
         self.active: Dict[str, Optional[str]] = {"p1": None, "p2": None}
+        # opponent team composition (from the |poke| preview): the FULL team in
+        # preview order — the bench the net plans coverage against, not just the
+        # active mon. In singles the field slots only ever hold the active (p2a),
+        # so the 5 bench mons are known ONLY from this preview list. 
+        # opp_fainted_species tracks which team mons are GONE (fainted), so the
+        # alive bench excludes them (the opponent analog of own_fainted_species,
+        # D68 — "benched, untouched" vs "gone").
+        self.opp_team: List[str] = []
+        self.opp_fainted_species: List[str] = []
         # per-turn move-order buffer (speed-order evidence, 3.4-4): entries are
         # ('m', side, slot, move) and order-breakers ('sw',) / ('break',).
         # Flushed on Turn / BattleEnd — the moves of ONE turn only.
@@ -699,6 +708,32 @@ class BeliefState:
             ent = -sum(pi * math.log2(pi) for pi in p if pi > 0) / max(1, math.log2(len(p)))
             block["confidence"] = round(max(0.0, min(1.0, 1.0 - ent)), 4)
             ctx["opponent"][slot] = block
+        # opponent BENCH (the team composition minus the active) — so the net
+        # sees the FULL team for coverage planning, not just the active mon.
+        # In singles the field slots only ever hold the active (p2a), so the
+        # bench mons are known ONLY from the |poke| preview (self.opp_team).
+        # The active is already placed at its field slot (p2a) above from its
+        # own belief (species + HP + posterior); we place the ALIVE bench at
+        # p2b..p2f in preview order, excluding the active and any fainted mon.
+        # This REUSES the existing 6 opp_species slots — no new dimension, so
+        # the registry checksum is unchanged and checkpoints stay loadable.
+        active_p2 = self.active.get("p2")
+        active_sp = (self._slots[active_p2].species
+                     if (active_p2 is not None and active_p2 in self._slots)
+                     else None)
+        bench = [sp for sp in self.opp_team
+                 if sp != active_sp and sp not in self.opp_fainted_species]
+        for i, sp in enumerate(bench[:5]):
+            slot = f"p2{'bcdef'[i]}"
+            if slot in ctx["opponent"]:
+                continue  # never clobber a real field-slot belief (doubles, etc.)
+            ctx["opponent"][slot] = {
+                "hp_frac": 0.0, "statuses": [], "boosts": {}, "moves": [],
+                "tera": "", "last_hit": 0, "hit_this_turn": False,
+                "last_move_failed": False, "stockpile": 0, "used_protect": False,
+                "volatiles": [], "species": sp, "fainted": False,
+                "posterior": [], "top_moves": [], "confidence": 0.0,
+            }
         return ctx
 
     # ══════════════════════════ event dispatch (3.3 + 3.4) ══════════════════════
@@ -712,6 +747,17 @@ class BeliefState:
         reading False). Fact and field bookkeeping happens regardless and is
         observable on ``own_facts`` / ``slot.facts`` / ``field``.
         """
+        if isinstance(event, E.TeamPreview):
+            # The opponent's (p2) team composition — the bench the net plans
+            # coverage against, not just the active mon. Order-preserving +
+            # deduped (a legal team has no duplicate species; a malformed repeat
+            # is a no-op). This establishes the PRIOR team knowledge; it does not
+            # change any slot's SET POSTERIOR, so it returns False (no 3.3 update).
+            # The own side (p1) is fully known from the own_team spec, so p1
+            # previews are inert here.
+            if event.side == "p2" and event.species and event.species not in self.opp_team:
+                self.opp_team.append(event.species)
+            return False
         if isinstance(event, E.SwitchIn):
             self._turn_buffer.append(("sw",))
             if event.side == "p2":
@@ -736,6 +782,14 @@ class BeliefState:
                 sp = self.own_active_species.get(event.slot)
                 if sp is not None and sp not in self.own_fainted_species:
                     self.own_fainted_species.append(sp)
+            else:
+                # opponent (p2): the fainted mon is a GONE member of the team (the
+                # net must not count it as switchable bench). Its species is the
+                # occupant of the fainted field slot (p2a in singles); a fainted
+                # mon is removed from the alive bench in get_context().
+                sb = self._slots.get(event.slot)
+                if sb is not None and sb.species not in self.opp_fainted_species:
+                    self.opp_fainted_species.append(sb.species)
             if self.active.get(event.side) == event.slot:
                 self.active[event.side] = None
             self._turn_buffer.append(("break",))

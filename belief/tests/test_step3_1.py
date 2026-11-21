@@ -384,8 +384,11 @@ def test_adapter_slot_reuse_updates_maxhp():
 
 
 def test_adapter_noise_and_empty_lines_are_ignored():
+    # NOTE: |poke| is NOT in this noise list — it now maps to TeamPreview (the
+    # opponent's team comp; see test_team_preview.py). |teampreview| (the phase
+    # marker, no payload) is still pure noise.
     lines = ["", "   ", "|t:|1794783370", "|gametype|singles",
-             "|clearpoke", "|poke|p1|Garchomp, L50, M|", "|teampreview|3",
+             "|clearpoke", "|teampreview|3",
              "|split|p1", "|-immune|p2a: Charizard", "|-resisted|p1a: Garchomp",
              "|-supereffective|p2a: X", "|upkeep", "|-crit|p2a: X"]
     assert events_from_log(lines) == []
