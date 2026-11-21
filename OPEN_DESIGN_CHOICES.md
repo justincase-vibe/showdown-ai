@@ -523,8 +523,13 @@ sequential-first OK for v1 (a 20-battle eval \u2248 6\u20138 min on CPU) vs conc
     switch to the healthiest bench; else play the highest-base-power damaging
     move (status moves ranked last). Hermetic: legality, switch-when-low,
     best-power move, pass, determinism.
-  * **A3.2** type-effectiveness + STAB scoring (`get_type_chart` + own type),
-    hazard-aware switch target.
+  * **A3.2 ✅** type-aware move scoring: `power * type_effectiveness(move_type,
+    opp_types) * (1.5 if STAB else 1.0)` (status/unknown-power -> 0; unknown types
+    degrade to pure power). Decodes active own/opp species via the shared
+    `net.vocab` + `get_species` types; per-gen chart cached; torch-free at import.
+    3 hermetic tests (STAB, immune-avoidance, unknown-type degradation).
+  * **A3.2b** hazard-aware switch target (prefer a switch-in mon not weak to
+    Stealth Rock when SR is up on the opponent's side).
   * **A3.3 (the crux)** damage-calc "will-this-KO / will-I-KO". **OPEN for you
     (interface decision):** `.act(obs, acts)` does NOT expose the belief state /
     calc. Options: (a) keep the heuristic **obs-only** (contract-stable, weaker);

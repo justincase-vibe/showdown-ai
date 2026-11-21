@@ -37,6 +37,27 @@ def _obs(own_hp: float | None = None, active: bool = True) -> dict:
     return {"own_slot": slot}
 
 
+def _obs_types(own_species: str, opp_species: str, own_hp: float = 1.0) -> dict:
+    """An obs whose active own/opp mon have KNOWN species (for type scoring)."""
+    from net.registry import MAX_SLOTS, SLOT_DIM, SLOT_INDEX
+    from net.vocab_db import build_vocabs
+    voc = build_vocabs()
+    own_slot = np.zeros((MAX_SLOTS, SLOT_DIM), dtype=np.float32)
+    opp_slot = np.zeros((MAX_SLOTS, SLOT_DIM), dtype=np.float32)
+    own_sp = np.zeros(MAX_SLOTS, dtype=np.int64)
+    opp_sp = np.zeros(MAX_SLOTS, dtype=np.int64)
+    own_slot[0, SLOT_INDEX["active"]] = 1.0
+    own_slot[0, SLOT_INDEX["present"]] = 1.0
+    own_slot[0, SLOT_INDEX["hp_frac"]] = float(own_hp)
+    opp_slot[0, SLOT_INDEX["active"]] = 1.0
+    opp_slot[0, SLOT_INDEX["present"]] = 1.0
+    opp_slot[0, SLOT_INDEX["hp_frac"]] = 1.0
+    own_sp[0] = voc.species.index(own_species)
+    opp_sp[0] = voc.species.index(opp_species)
+    return {"own_slot": own_slot, "opp_slot": opp_slot,
+            "own_species": own_sp, "opp_species": opp_sp}
+
+
 # ── legality + basic behaviour ──────────────────────────────────────────────
 def test_pass_on_empty_acts():
     d = HeuristicAgent(gen=9).act(_obs(own_hp=1.0), [])
@@ -90,6 +111,38 @@ def test_unknown_move_still_chosen_if_only_option():
     acts = [{"kind": "move", "move": "not-a-real-move-xyz"}]
     d = HeuristicAgent(gen=9).act(_obs(own_hp=1.0), acts)
     assert d.action is acts[0]                        # legal > "best"
+
+
+# ── A3.2: type-aware move scoring (effectiveness * STAB) ──────────────────
+def test_stab_boosts_the_matching_type_move():
+    # charizard (Fire/Flying) vs venusaur (Grass/Poison), both 40-power:
+    #   ember   (Fire)  : eff 2.0 * STAB 1.5  -> 120   (wins)
+    #   aqua jet(Water) : eff 0.5 * 1.0       ->  20
+    o = _obs_types("charizard", "venusaur")
+    acts = [{"kind": "move", "move": "ember"},
+            {"kind": "move", "move": "aqua jet"}]
+    d = HeuristicAgent(gen=9).act(o, acts)
+    assert d.action is acts[0]                         # ember (STAB Fire)
+
+
+def test_avoids_an_immune_move_in_favour_of_a_damaging_one():
+    # charizard (Fire/Flying) vs gengar (Ghost/Poison), both 40-power:
+    #   tackle   (Normal) : eff 0.0 (immune to Ghost) ->  0
+    #   aqua jet (Water)  : eff 1.0                   -> 40   (wins)
+    o = _obs_types("charizard", "gengar")
+    acts = [{"kind": "move", "move": "tackle"},
+            {"kind": "move", "move": "aqua jet"}]
+    d = HeuristicAgent(gen=9).act(o, acts)
+    assert d.action is acts[1]                         # aqua jet (tackle is immune)
+
+
+def test_type_scoring_degrades_to_power_when_types_unknown():
+    # no species in obs -> effectiveness 1.0, no STAB -> pure power wins
+    o = _obs(own_hp=1.0)                               # own_slot only, no species
+    acts = [{"kind": "move", "move": "tackle"},
+            {"kind": "move", "move": "earthquake"}]
+    d = HeuristicAgent(gen=9).act(o, acts)
+    assert d.action is acts[1]                         # earthquake (100) > tackle (40)
 
 
 # ── determinism + decision shape (the strong-reference contract) ───────────
