@@ -1122,7 +1122,23 @@ branch a state with **zero** live-sim dependency.
   **omits tera** (moves + switches only). *Do you want tera bookkeeping added to
   the context for M2b, or leave it out (rare in the formats we target)?*
 
-### Gate status
-M1 committed + green. **M2a is the next step and is NOT yet built** (this
-session = the decision + this documentation, per "decide before building").
-No GPU touched; no `git add -A`; only the two M1 files are committed.
+### M2a — BUILT + TESTED (this session)
+The non-branching bridge is in and green:
+- `net/world_model.py` — `State` (canonical p1-POV ctx + `decider`) +
+  `PokeWorldModel` (`actions`/`value`/`policy` live via the ONE
+  `PokeAgent.forward_obs` path; `step` + the p2-POV orientation raise as M2b).
+  The value is mapped to the ROOT player's perspective (the M1 `_backup`
+  contract); every value/policy head call stays in-distribution (decider POV).
+- `net/tests/test_world_model.py` — 8 tests, CPU-only, random-init net,
+  against the realistic `test_s41.make_ctx` context: the D60 legal list (moves
+  + alive bench, in training order; fainted bench excluded), value == the net's
+  value head mapped to root (`2V−1`), policy == the net's masked prob (sums to
+  1, identity-stable to action order), determinism, and the M2b boundary
+  (`step` and `decider='p2'` both raise).
+- **Gate:** full net suite **127 passed / 1 skipped / 2 deselected**
+  (CPU-only; was 119 before M2a, +8 the new WorldModel tests).
+
+**Still NOT built (awaiting OC-6/7/8):** M2b (`step` + the p2-POV
+orientation) — the branching + the "new source of truth" the handoff warned
+about. No GPU touched; no `git add -A`; committed only the M2a files + this
+doc.
