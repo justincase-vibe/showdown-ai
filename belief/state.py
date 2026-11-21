@@ -588,7 +588,7 @@ class BeliefState:
                 return {"hp_frac": 0.0, "statuses": [], "boosts": {},
                         "moves": [], "last_hit": 0, "hit_this_turn": False,
                         "last_move_failed": False, "stockpile": 0,
-                        "used_protect": False, "volatiles": []}
+                        "used_protect": False, "volatiles": [], "maxhp": None}
             hp_frac = self._hp_fraction(facts) or 0.0
             return {
                 "hp_frac": round(hp_frac, 4),
@@ -603,6 +603,16 @@ class BeliefState:
                 "used_protect": facts.used_protect,
                 # curated per-mon volatiles (D61), sorted for determinism
                 "volatiles": sorted(facts.volatiles),
+                # M2b data-flow: the mon's max HP. PUBLIC (the switch-in line
+                # reveals it; the belief tracks it as ground truth), so no leak.
+                # It is CONTEXT, not OBSERVATION — the encoder reads specific
+                # fields and ignores this one, so the registry checksum is
+                # unchanged and existing checkpoints stay loadable. Needed by
+                # the MCTS step to turn a predicted-damage delta into an
+                # HP-fraction update (hp_frac - damage / maxhp). None when the
+                # mon's max HP is not yet known (bench placeholders, pre-first-
+                # switch opponent mon) — step must tolerate that.
+                "maxhp": facts.maxhp,
             }
 
         ctx: Dict = {
@@ -733,6 +743,10 @@ class BeliefState:
                 "last_move_failed": False, "stockpile": 0, "used_protect": False,
                 "volatiles": [], "species": sp, "fainted": False,
                 "posterior": [], "top_moves": [], "confidence": 0.0,
+                # bench placeholders have no observed max HP yet — keep the key
+                # present (maxhp None) so every mon block shares one schema and
+                # consumers (the MCTS step) never KeyError on a bench slot.
+                "maxhp": None,
             }
         return ctx
 
