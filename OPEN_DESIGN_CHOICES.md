@@ -1176,7 +1176,10 @@ bit-identical).
    field reassignment; the `ctx` dict is still mutable. M2b's `step` MUST hand
    out a **deep-copied** ctx (never mutate a node's ctx in place) or the shared
    dict corrupts the whole MCTS tree (parent + descendants share one live
-   dict). Now documented on `State`.
+   dict). **NOW BUILT + TESTED:** `State.copy(decider=None)` deep-copies the
+   ctx (the safe child primitive for `step`) + a `flip_decider` helper; pinned
+   by `test_state_copy_is_independent_of_parent` (mutate the child's ctx, the
+   parent's ctx is provably unaffected).
 2. **Two forward passes per node.** `value()` and `policy()` each run a full
    `forward_obs`; MCTS calls both per node. M2b should **cache the forward
    result per state** (one pass feeds both heads). Not a bug — an efficiency

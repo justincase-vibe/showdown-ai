@@ -17,7 +17,7 @@ import os
 import pytest
 
 from net import make_random_net, PokeAgent, encode_context
-from net.world_model import PokeWorldModel, State, _map_value
+from net.world_model import PokeWorldModel, State, _map_value, flip_decider
 from net.tests.test_s41 import make_ctx, make_vocabs
 
 
@@ -190,3 +190,45 @@ def test_p2_decider_is_m2b_boundary():
         wm.actions(State(ctx, "p2"))
     with pytest.raises(NotImplementedError):
         wm.value(State(ctx, "p2"))
+
+
+# ── State isolation: M2b's step must build children from a DEEP copy ─────────
+def test_state_copy_is_independent_of_parent():
+    """M2b's step builds a child State and mutates its ctx. That mutation must
+    NEVER leak into the parent node's ctx (a frozen dataclass does not make the
+    dict immutable) — ``State.copy`` is the safe primitive that guarantees this.
+    A shared-dict leak would corrupt the ENTIRE MCTS tree (parent + descendants
+    would share one live dict)."""
+    ctx = {
+        "turn": 3,
+        "own": {"p1a": {"hp_frac": 1.0, "moves": ["earthquake"]}},
+        "opponent": {"p2a": {"species": "blastoise"}},
+        "active": {"p1": "p1a", "p2": "p2a"},
+    }
+    parent = State(ctx, "p1")
+    child = parent.copy("p2")                    # deep copy + flipped decider
+    # mutate the CHILD's ctx in place (exactly what M2b's step will do)
+    child.ctx["own"]["p1a"]["hp_frac"] = 0.0
+    child.ctx["own"]["p1a"]["moves"].append("roar")
+    child.ctx["opponent"]["p2a"]["species"] = "garchomp"
+    child.ctx["turn"] = 4
+    # the PARENT's ctx must be completely unaffected
+    assert parent.ctx["own"]["p1a"]["hp_frac"] == 1.0
+    assert parent.ctx["own"]["p1a"]["moves"] == ["earthquake"]
+    assert parent.ctx["opponent"]["p2a"]["species"] == "blastoise"
+    assert parent.ctx["turn"] == 3
+    assert child.decider == "p2" and parent.decider == "p1"
+
+
+def test_state_copy_keeps_decider_by_default():
+    ctx = {"own": {"p1a": {"hp_frac": 1.0}}}
+    parent = State(ctx, "p1")
+    child = parent.copy()
+    assert child.decider == parent.decider == "p1"
+    child.ctx["own"]["p1a"]["hp_frac"] = 0.0
+    assert parent.ctx["own"]["p1a"]["hp_frac"] == 1.0   # isolated
+
+
+def test_flip_decider():
+    assert flip_decider("p1") == "p2"
+    assert flip_decider("p2") == "p1"

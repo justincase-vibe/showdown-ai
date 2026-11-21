@@ -58,11 +58,18 @@ net-forward code path (the "no code written twice" rule).
 """
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .agent import PokeAgent
 from .encoder import encode_context
+
+
+def flip_decider(decider: str) -> str:
+    """The opponent's turn: ``'p1' -> 'p2'``, ``'p2' -> 'p1'`` (M2b's ``step``
+    flips this to build the opponent's-turn child)."""
+    return "p2" if decider == "p1" else "p1"
 
 
 @dataclass(frozen=True)
@@ -75,12 +82,25 @@ class State:
     ``State`` (a new ctx, the flipped decider).
 
     NOTE: ``frozen=True`` guards field REASSIGNMENT only — the ``ctx`` dict
-    itself is still mutable. So M2b's ``step`` MUST hand out a DEEP-COPIED ctx
-    (never mutate a node's ctx in place) or the shared dict corrupts the whole
-    MCTS tree (a parent and its descendants would share one live dict).
+    itself is still mutable. So M2b's ``step`` MUST build the child from a
+    DEEP-COPY (see :meth:`copy`) and never mutate a node's ctx in place, or the
+    shared dict corrupts the whole MCTS tree (parent + descendants share one
+    live dict).
     """
     ctx: Dict
     decider: str = "p1"
+
+    def copy(self, decider: Optional[str] = None) -> "State":
+        """A NEW State with a DEEP-COPIED ctx (independent of ``self.ctx``).
+
+        THE safe primitive for M2b's ``step``: build the child from a copy so
+        mutating the child's ctx can never corrupt the parent node's ctx
+        (``frozen`` does not make the dict immutable). ``decider`` defaults to
+        ``self.decider``; pass :func:`flip_decider(self.decider)`` to build the
+        opponent's-turn child.
+        """
+        return State(copy.deepcopy(self.ctx),
+                     self.decider if decider is None else decider)
 
 
 def _orient(ctx: Dict, decider: str) -> Dict:
