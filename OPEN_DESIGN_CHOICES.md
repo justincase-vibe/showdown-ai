@@ -1197,3 +1197,28 @@ bit-identical).
 * **OC-8 — tera in the world model:** add "tera-used" tracking to the context
   for M2b (else multi-ply search teras repeatedly), or leave tera out of the
   search (rare in our target formats). M2a currently omits tera.
+* **OC-9 — the p2-POV posterior asymmetry (the real crux of the `_orient`
+  swap).** Confirmed from `belief/state.py::get_context()`: the belief is
+  **P1's** model — `own` (p1's team) is FULLY known (name/ability/item + the
+  full spec moveset), but `opponent` (p2's team) carries ONLY `species` + a
+  `posterior` (top-K {ability, moves, weight}) + `top_moves` + `confidence`,
+  and stores **NO true ability/item for p2** — only p1's posterior over them.
+  So a p2-POV flip is NOT a clean invertible reflection:
+  - **p2's "own" team**: the belief only has the POSTERIOR, not the truth → to
+    present it as "own" (the net trains own-side as fully known) I must pick a
+    deterministic stand-in.
+  - **p1's team becomes the opponent**: the belief KNOWS p1's ability/item/
+    moves (they're p1's own), so from p2's view they'd be "revealed" —
+    asymmetric with reality, but it's all the belief has.
+  Options: **(a) [my lean] deterministic top-1** — p2's own = argmax-posterior
+  candidate (ability + its moves); p1's opponent = known species+moves with
+  ability/item taken from p1's own spec (the belief knows them). In-
+  distribution for the net (own-side = fully known); it's an APPROXIMATION —
+  fine, the MCTS search is exploring, not exact, and the value head (trained
+  on p1-POV self-play) is the ground truth the search converges toward.
+  **(b) posterior-symmetric** — keep the posterior channel on BOTH sides; but
+  the net trains own-side as fully known, so a posterior on own is OUT-of-
+  distribution (risky). **(c) opponent-reply is heuristic-only** — don't build
+  a full p2-POV own-team model at all; score the opponent's reply with the
+  policy prior + a fixed heuristic (e.g. they play their best-KO move).
+  Cheapest, but least faithful to the real game.
