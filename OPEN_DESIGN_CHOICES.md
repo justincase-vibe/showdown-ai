@@ -1222,3 +1222,11 @@ bit-identical).
   a full p2-POV own-team model at all; score the opponent's reply with the
   policy prior + a fixed heuristic (e.g. they play their best-KO move).
   Cheapest, but least faithful to the real game.
+  **Progress (this session):** the STRUCTURAL core is now built + round-trip
+  tested as pure, invertible `world_model._flip_pov` (own<->opponent + slot
+  remap `p1x<->p2x` + field side-flip + fainted/active swap) with
+  `_flip_pov(_flip_pov(ctx)) == ctx` pinned — so the fiddliest part of M2b's
+  `_orient` is proven a correct PERMUTATION. It carries the posterior opaquely
+  (makes NO OC-9 decision). Wiring `_flip_pov` into `_orient(ctx,"p2")` + the
+  OC-9 refinement is the last structural M2b step, then `step` (OC-6) completes
+  the engine. `_orient` still raises for p2 (M2a boundary held).

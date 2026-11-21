@@ -103,15 +103,100 @@ class State:
                      self.decider if decider is None else decider)
 
 
+def _remap_slot(slot: Optional[str]) -> Optional[str]:
+    """Reflect a field-slot id across the p1/p2 axis: ``p1a<->p2a``,
+    ``p1b<->p2b`` (the slot LETTER is preserved — same team member, seen from
+    the other side). ``None`` -> ``None``. A non-p1/p2 slot passes through
+    (defensive)."""
+    if slot is None:
+        return None
+    if slot.startswith("p1"):
+        return "p2" + slot[2:]
+    if slot.startswith("p2"):
+        return "p1" + slot[2:]
+    return slot
+
+
+def _flip_field(field: Dict) -> Dict:
+    """Flip the side-keyed field state across p1<->p2. Weather / terrain /
+    trickroom / wonderroom are side-NEUTRAL and pass through untouched.
+    ``tailwind_side`` swaps p1<->p2; each ``{p1, p2}`` screen/hazard dict has
+    its two side entries swapped (any other key, e.g. a turn-counter, is kept)."""
+    f = dict(field or {})
+    tw = f.get("tailwind_side", "")
+    if tw == "p1":
+        f["tailwind_side"] = "p2"
+    elif tw == "p2":
+        f["tailwind_side"] = "p1"
+    for name in ("reflect", "lightscreen", "auroraveil", "stealthrock",
+                 "stickyweb", "safeguard", "spikes", "toxicspikes"):
+        d = f.get(name)
+        if isinstance(d, dict):
+            f[name] = {("p2" if k == "p1" else "p1" if k == "p2" else k): v
+                       for k, v in d.items()}
+    return f
+
+
+def _block_to_own(block: Dict) -> Dict:
+    """Opponent-schema -> own-schema for the p1<->p2 block swap. The encoder
+    reads the OWN side's species from ``name``; the opponent block carries
+    ``species``. So: set ``name = species`` and drop the now-redundant
+    ``species`` key. Everything else (posterior / top_moves / moves / hp_frac /
+    statuses ...) is carried opaquely with the block — the neutral 'carry what
+    the belief has' stance. OC-9 decides whether M2b refines the posterior
+    SEMANTICS (drop it on own / synthesize it on the now-opponent / top-1)."""
+    b = {k: v for k, v in block.items() if k != "species"}
+    b["name"] = block.get("species") or block.get("name", "")
+    return b
+
+
+def _block_to_opp(block: Dict) -> Dict:
+    """Own-schema -> opponent-schema for the p1<->p2 block swap (the inverse of
+    :func:`_block_to_own`). Set ``species = name`` and drop the redundant
+    ``name``; the rest is carried opaquely (see :func:`_block_to_own")."""
+    b = {k: v for k, v in block.items() if k != "name"}
+    b["species"] = block.get("name") or block.get("species", "")
+    return b
+
+
+def _flip_pov(ctx: Dict) -> Dict:
+    """Reflect a canonical (p1-POV) belief context into the OPPOSITE (p2-POV)
+    point of view: ``own<->opponent`` blocks (slot ids ``p1x<->p2x``),
+    side-keyed ``field`` state flipped, and ``fainted`` / ``active`` swapped.
+
+    PURE and INVERTIBLE: applying it twice is the IDENTITY (pinned by
+    ``test_flip_pov_round_trip_is_identity``), so it is a correct PERMUTATION of
+    the context — NOT a lossy transformation. This is the validated structural
+    CORE of M2b's ``_orient(ctx, "p2")``. It makes NO decision about the
+    posterior's semantics (OC-9) — each block's posterior/top_moves ride along
+    to the new side. ``_orient`` deliberately does NOT call this yet: wiring it
+    in would bake in the 'carry-opaquely' (OC-9 option b) stance, so M2b applies
+    the OC-9 refinement on top once the user picks it.
+    """
+    own = ctx.get("own", {}) or {}
+    opp = ctx.get("opponent", {}) or {}
+    fainted = ctx.get("fainted", {}) or {}
+    active = ctx.get("active", {}) or {}
+    return {
+        "turn": ctx.get("turn", 0),
+        "fainted": {"p1": fainted.get("p2", 0), "p2": fainted.get("p1", 0)},
+        "active": {"p1": _remap_slot(active.get("p2")),
+                   "p2": _remap_slot(active.get("p1"))},
+        "field": _flip_field(ctx.get("field", {})),
+        "own": {_remap_slot(s): _block_to_own(b) for s, b in opp.items()},
+        "opponent": {_remap_slot(s): _block_to_opp(b) for s, b in own.items()},
+    }
+
+
 def _orient(ctx: Dict, decider: str) -> Dict:
     """Return ``ctx`` oriented to ``decider``'s POV.
 
     M2a: ``"p1"`` (the canonical root orientation) -> ``ctx`` as-is.
-    ``"p2"`` is the opponent-reply case and is **M2b**: it needs the field-aware
-    own<->opponent reflection + slot remap (own schema: name/ability/item;
-    opponent schema: species/posterior/top_moves). It is exercised and tested
-    once ``step`` actually produces p2-turn nodes. Raising here keeps M2a honest
-    and avoids shipping an untested, fiddly swap into the search path.
+    ``"p2"`` is the opponent-reply case and is **M2b**: its STRUCTURAL core is
+    the validated, invertible :func:`_flip_pov` (own<->opponent + slot remap +
+    field side-flip + fainted/active swap — round-trips to identity). Wiring it
+    in is deliberately held until OC-9 (the posterior semantics) is decided, so
+    M2a stays honest and the search path never ships an untested swap.
     """
     if decider == "p1":
         return ctx

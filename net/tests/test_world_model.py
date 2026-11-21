@@ -17,7 +17,7 @@ import os
 import pytest
 
 from net import make_random_net, PokeAgent, encode_context
-from net.world_model import PokeWorldModel, State, _map_value, flip_decider
+from net.world_model import PokeWorldModel, State, _map_value, flip_decider, _flip_pov
 from net.tests.test_s41 import make_ctx, make_vocabs
 
 
@@ -232,3 +232,64 @@ def test_state_copy_keeps_decider_by_default():
 def test_flip_decider():
     assert flip_decider("p1") == "p2"
     assert flip_decider("p2") == "p1"
+
+
+# ── _flip_pov: the invertible structural core of the p2-POV swap (M2b) ──────
+def test_flip_pov_round_trip_is_identity():
+    """``_flip_pov`` is a PERMUTATION of the context, not a lossy transform:
+    applying it twice must be the IDENTITY. This is the correctness proof for
+    the fiddliest part of M2b's ``_orient`` (slot remap + own<->opponent +
+    field side-flip + fainted/active swap) — and it is INDEPENDENT of OC-9 (the
+    posterior semantics), which this deliberately does NOT decide."""
+    ctx = {
+        "turn": 7,
+        "fainted": {"p1": 0, "p2": 1},
+        "active": {"p1": "p1a", "p2": "p2b"},
+        "field": {
+            "weather": "raindance", "terrain": "",
+            "trickroom": True, "tailwind_side": "p1",
+            "reflect": {"p1": 1, "p2": 0},
+            "spikes": {"p1": 2, "p2": 0},
+        },
+        "own": {"p1a": {"name": "garchomp", "ability": "roughskin",
+                        "item": "lifeorb", "moves": ["earthquake"], "hp_frac": 0.8}},
+        "opponent": {"p2b": {"species": "blastoise",
+                             "posterior": [{"ability": "raindish", "moves": ["surf"], "weight": 0.9}],
+                             "top_moves": ["surf"], "moves": ["surf"],
+                             "confidence": 0.9, "hp_frac": 0.5}},
+    }
+    assert _flip_pov(_flip_pov(ctx)) == ctx
+
+
+def test_flip_pov_maps_sides_fields_and_slots():
+    """The single flip maps each part to the RIGHT side: own<->opponent (slot
+    remap + name<->species schema), field sides, fainted, active. The
+    posterior/top_moves ride along with their block (carried opaquely — OC-9
+    decides their SEMANTICS, not this structural move)."""
+    ctx = {
+        "turn": 7,
+        "fainted": {"p1": 0, "p2": 1},
+        "active": {"p1": "p1a", "p2": "p2b"},
+        "field": {"tailwind_side": "p1", "reflect": {"p1": 1, "p2": 0},
+                  "spikes": {"p1": 2, "p2": 0}, "trickroom": True},
+        "own": {"p1a": {"name": "garchomp", "moves": ["earthquake"]}},
+        "opponent": {"p2b": {"species": "blastoise", "top_moves": ["surf"]}},
+    }
+    p2 = _flip_pov(ctx)
+    # own<->opponent; the slot LETTER is preserved across the p1/p2 axis
+    assert set(p2["own"]) == {"p1b"} and set(p2["opponent"]) == {"p2a"}
+    # schema: opponent's species -> own name (redundant key dropped)
+    assert p2["own"]["p1b"]["name"] == "blastoise"
+    assert "species" not in p2["own"]["p1b"]
+    assert p2["opponent"]["p2a"]["species"] == "garchomp"
+    assert "name" not in p2["opponent"]["p2a"]
+    # posterior/top_moves carried opaquely with their block (OC-9 stays open)
+    assert p2["own"]["p1b"]["top_moves"] == ["surf"]
+    # field sides flipped; side-neutral field passes through
+    assert p2["field"]["tailwind_side"] == "p2"
+    assert p2["field"]["reflect"] == {"p1": 0, "p2": 1}
+    assert p2["field"]["spikes"] == {"p1": 0, "p2": 2}
+    assert p2["field"]["trickroom"] is True
+    # fainted + active swapped (active slots remapped across the axis)
+    assert p2["fainted"] == {"p1": 1, "p2": 0}
+    assert p2["active"] == {"p1": "p1b", "p2": "p2a"}
