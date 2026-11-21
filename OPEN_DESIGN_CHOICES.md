@@ -1215,6 +1215,18 @@ bit-identical).
    result per state** (one pass feeds both heads). Not a bug — an efficiency
    landmine that only matters once `step` produces a real tree.
 
+**De-risk (this ping — decision-independent, `bad2cf7`):** built the
+**action-transform primitives** `apply_hp_delta` / `apply_faint` /
+`apply_switch` (pure, POV-aware, context-only — no net/calc/RNG). A switch /
+faint / HP-delta is the SAME under every viable OC-6/OC-9 option, so this
+encodes no design decision — it proves the "apply the action's effect" mechanics
+before the OC-gated parts (the calc spread + the posterior refinement) are wired
+in. Each returns a NEW ctx (never mutates the input — the MCTS tree must not
+corrupt a shared parent ctx); pinned by `test_world_model_transforms` (7 tests).
+Net suite 143 passed / 0 failed (CPU). So when OC-6 + OC-9 are picked, `step`
+WIREs these in + the batched calc + the posterior refinement — it does NOT
+re-derive the structural mechanics.
+
 **Your call still needed to unblock M2b (re-stated for a fast decision):**
 * **OC-6 — world-model fidelity of `step`:** (a) minimal bookkeeping
   (HP+switch+faint; status/boosts via the calc where it knows them) + a
