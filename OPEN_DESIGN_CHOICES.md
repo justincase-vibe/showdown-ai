@@ -882,3 +882,75 @@ or accept switch-acc as the real gate. *(design choice, section B.11)*
   fingerprint to behavior-affecting code / add a calc-output fingerprint; **(c)**
   confirm gen9ou traces are byte-identical and bless the old cache. **My lean: (a)**
   for the next BC run; (b) if we want cheap re-evals.
+
+---
+
+## 2026-11-21 — Bench-aware net (the net sees the ENTIRE battle state)
+
+**Goal (user-approved):** the net must see the whole team, not just the active
+mon. Scenario (user's words): *Garchomp @80% vs a confirmed-slow Blastoise @5%,
+fast Fairy + Gliscor benched → the net should weigh the bench and pick COVERAGE
+(Rock hits Flying/Ground Gliscor), not just hit the active.*
+
+### The gap (verified, not assumed)
+In singles the lead is chosen during team preview, so the `|poke|` preview order
+does NOT map to field slots — only the active mon ever occupies field slot `p2a`
+(verified in `scratch/hf_sample_replay.json`: preview = Kyurem, Tinkaton,
+**Blaziken**(#3), Great Tusk, Sinistcha, Darkrai, but the lead is
+`|switch|p2a: Blaziken|`). The 5 bench mons were therefore never registered and
+the net saw only `opp_species[0]` — **the bench was invisible**.
+
+### Step 1 — BUILT, TESTED, COMMITTED (`18c13cd`)
+- `|poke|` → `TeamPreview` event (adapter); belief accumulates the opponent team
+  (`self.opp_team`); `get_context()` places the active at `p2a` and the ALIVE
+  bench at `p2b`–`p2f` (preview order, minus active + fainted).
+- **Representation = repurpose the existing 6 `opp_species` slots.** No new
+  dimension → registry checksum unchanged → **existing checkpoints still load**
+  (honors “don't delete old data”). This deviates from the naive “preview order →
+  field slot” mapping, which would LOSE a bench species in singles — I proved
+  that wrong in a test (`test_context_shows_all_six_opp_species`).
+- The ACTIVE mon's damage/max-HP EV inference (3.6) is preserved — the preview
+  handler only touches `opp_team` (pinned by
+  `test_preview_does_not_clobber_active_ev_inference`, real calc).
+- **Verified:** 9 new tests green; belief+net suite **254 passed, 1 skipped,
+  4 deselected** (CPU-only); end-to-end `get_context → encode_context` confirms
+  all 6 `opp_species` slots non-zero + distinct + correctly indexed
+  (`[1,4,6,3,5,2]` = blaziken/kyurem/tinkaton/greattusk/sinistcha/darkrai).
+
+### Decisions I made (recorded — NOT yet user-approved)
+- **Bench shows only the ALIVE team** (excludes the active + any fainted mon)
+  via a new `opp_fainted_species` list (the opponent analog of the existing
+  `own_fainted_species`, D68). A fainted bench mon is **omitted** (not shown as
+  fainted).
+
+### Open questions (need your call)
+- **OQ-bench-1 — fainted bench mon: omit vs show-as-fainted.** I chose *omit*
+  (a gone mon must not be offered as switchable bench). Alternative: keep the slot
+  but set `fainted=True` so the net sees “that mon is gone” (more info, but the
+  slot would read hp 0 + fainted 1 — distinguishable from benched-untouched via
+  the existing `fainted` column). *My lean: omit (cleaner, and the fainted count
+  global already tells the net how many are gone).*
+- **OQ-bench-2 — BC-baseline re-baseline.** Populating the bench slots changes the
+  **input distribution** the net sees (bench slots were all-zero when the BC
+  checkpoints were trained, now they carry species). The BC baseline's behavior
+  with a populated bench is therefore untrained. This is FINE for the intended
+  artifact (the NEW self-play-league net, random init, which will train WITH the
+  bench) — but the BC baseline's decisions will change. *Do you want to
+  re-baseline the BC net, or is it fine as-is (it's a baseline, not the target)?*
+- **OQ-bench-3 — bench posterior.** Bench slots carry `posterior=[] / confidence=0`
+  (no set inference yet — they're never active, so no damage evidence). The net
+  still sees their *species* (the key signal for coverage). Later we could run
+  set inference on a bench mon IF it ever becomes active (it does — it switches in
+  and becomes the active, where inference already works). *No action needed now.*
+
+### Next (awaiting your GO — do NOT start without confirmation)
+**Step 2 (the (b) seam — you already picked option b):** add an optional `ctx`
+kwarg to `PokeAgent.act` (`net/agent.py`) + `HeuristicAgent.act` (`heuristic.py`);
+a `build_obs_and_ctx()` enabler in `net/env.py` (single belief-build, `build_obs`
+thin wrapper, obs byte-identical); the driver (`league/driver.py`) builds ctx once
+and passes it; update `human_play.py`, `trainer.py` (the protected GPU path) to
+tolerate it; suite stays green. This hands the structured `get_context()` (now
+including the bench) to the agent so the brain (`fitness/strategy.py::choose_action`)
+can use it. **Step 3** (bench-aware heuristic: among moves that all KO the active,
+prefers the one with best coverage on the likely switch-in). **Step 4** (training;
+GPU, last, you-run).
