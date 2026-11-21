@@ -309,6 +309,76 @@ user's scratch and live roster are never touched). Hardening commit `5a35cca`.
 
 ---
 
+## 2026-11-21 \u2014 Teardown leak fix (the `ConnectionResetError` noise) + orphan-server cleanup
+
+**Task (user: "please fix occuring bugs and provide insight on potential fixes
+in terms of design").** The one concrete occurring bug was the
+`ConnectionResetError` / `ConnectionClosedError` teardown noise (112 / 56 /
+168 tracebacks in the pre-fix smoke log). Fixed, verified, and committed
+(`d117292`). This was a **lifecycle leak, not a battle-logic bug**.
+
+**Root cause (verified against the poke-env source + a live diagnostic).**
+Each `PokeEnv` spins up its **own** event-loop thread (`env._loop`) and BOTH
+of its agents own a `PSClient` whose `listen()` coroutine runs on that loop.
+poke-env reaps those **only at `atexit`** (`poke_env.concurrency.__clear_loop`)
+\u2014 `PokeEnv.close()` never stops them. We create a fresh `ShowdownEnv` per
+battle and never stopped the clients, so N battles \u21d2 N leaked loop-threads +
+sockets. When the pool then tree-killed the servers, the still-live `listen()`
+died as a raw `ConnectionResetError` (poke-env's `listen()` only treats a clean
+`ConnectionClosedOK` as non-exceptional) \u21d2 the `logger.exception` tracebacks.
+
+**The fix (chosen \u2014 clean per-battle teardown).** `ShowdownEnv.close()` now
+stops **each agent's** client via poke-env's own
+`PSClient.stop_listening()` (best-effort, never raises) while the server is
+still up, so `listen()` exits through the clean `ConnectionClosedOK` path and
+the socket is freed immediately (no accumulation over a long run).
+
+**Mistake made + caught (self-review):** my first fix called
+`_stop_ps_client(self.ps_client)`, but **`env.ps_client` does not exist**
+(verified live: the attribute is `MISSING`) \u2014 the clients live on the
+**agents** (`agent1.ps_client` / `agent2.ps_client`), so that call was a silent
+no-op (the smoke test still showed the full noise). The corrected call targets
+the two agents. Lesson: a helper that "passes" its unit tests can still be a
+no-op if it's pointed at the wrong object \u2014 the live diagnostic + the
+before/after smoke counts are what actually proved it.
+
+**Gate:** full suite **276 passed / 1 skipped** (CPU-only; +5 hermetic
+`_stop_ps_client` tests). Real-server smoke run (8 bots, 4 servers, 28
+battles) \u2192 **0** `ConnectionResetError`, **0** `ConnectionClosedError`, **0**
+tracebacks, **VERDICT PASS** (28/28, 0 errors, all 8 bots buffered + ran 1 PPO
+update + saved; ELO spread sensible). The smoke run did **not** leak its own
+servers (verified: no leaked procs from that run's window).
+
+**Orphan cleanup (found while verifying).** 25 leaked `node.exe` processes
+from the fork (1 main server + 24 `room-battle.js`/worker children) were still
+alive, the main one `LISTENING` on `0.0.0.0:49980` \u2014 the **diagnostic port**
+the previous session used for `_diag_close.py`. They were ~22 min older than
+the smoke run, i.e. **not** from this run: a leaked Showdown server from the
+earlier diagnostic, consuming RAM. Killed the whole tree (25 \u2192 0). NOTE for
+the user: an interrupted/diag run can leave a Showdown server tree behind;
+the league pool tree-kills on a CLEAN shutdown, but a hard stop (LLM stuck +
+PC restart) does not.
+
+**Design direction (NOT built \u2014 flagged for your call):**
+* **Connection pooling / client reuse (bigger fix, also speeds up battles).**
+  Keep one `PSClient` + loop **per Showdown server** and share it across the
+  battles on that server instead of creating a client per battle. This attacks
+  the same leak class more fundamentally AND the observed slowness (each battle
+  currently pays a fresh websocket handshake/login; the smoke run was
+  ~440 s for 28 battles). Higher risk / a real refactor \u2014 a later step, not
+  now.
+* **Trade-off:** poke-env's own `PokeEnv.close()` also does NOT stop the
+  client, so "just call `super().close()`" is not enough \u2014 with the
+  per-battle env model the stop is OUR responsibility (now handled).
+
+**Open for you (see report):** (1) is connection pooling in scope now or later
+(lean: **later** \u2014 ship the clean per-battle teardown now)? (2) best-effort
+teardown (chosen \u2014 cleanup must never fail the battle) vs strict? (3) keep
+`scratch/_smoke_league_run.py` + `scratch/_diag_close.py` as re-runnable QA
+tools (I kept both) or clean them up after?
+
+---
+
 ## A. Workflow errors found
 
 ### Fixed this pass
