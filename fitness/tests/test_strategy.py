@@ -319,5 +319,51 @@ def test_threat_empty_moves():
     assert t == {"threat": "unknown", "worst": None, "assessments": {}}
 
 
+# ── REAL integration: real BeliefState -> real get_context() -> the brain ──────
+# Closes the hermetic-only gap: every other brain test above uses a HAND-CRAFTED
+# ctx dict. This proves the brain consumes a REAL get_context() snapshot (field
+# names, slot keys, top_moves) WITHOUT silently degrading, using the REAL shared
+# damage calc (CPU + Node, no GPU). If a field the brain reads were missing from
+# get_context(), this would fail (hermetic tests would not catch it).
+def test_real_get_context_feeds_the_brain_end_to_end():
+    from belief import events as E
+    from belief.state import BeliefState
+
+    own = {"p1a": {"name": "garchomp", "ability": "roughskin", "item": "lifeorb",
+                   "evs": {"atk": 252},
+                   "moves": ["earthquake", "dragonclaw", "stoneedge", "toxic"]}}
+    bs = BeliefState("gen9ou", own_team=own)
+    bs.add_opponent("p2a", "blastoise")  # real prior -> real posterior/top_moves
+    bs.update(E.SwitchIn(side="p1", slot="p1a", species="garchomp", hp=183, maxhp=183))
+    bs.update(E.SwitchIn(side="p2", slot="p2a", species="blastoise", hp=183, maxhp=183))
+    # knock the opponent down to 1 HP -> any real damaging move must KO it
+    bs.update(E.DamageObserved(target_side="p2", target_slot="p2a", hp_after=1,
+                               maxhp=183, ko=False, source_kind="move",
+                               move="dragonclaw", source_side="p1", source_slot="p1a"))
+    bs.update(E.MoveUsed(side="p2", slot="p2a", move="hydropump"))  # reveal a move
+
+    ctx = bs.get_context()
+    own_slot, opp_slot = ctx["active"]["p1"], ctx["active"]["p2"]
+
+    # 1) structure: the exact fields the brain reads are present (the pinned gap).
+    assert ctx["own"][own_slot]["name"] == "garchomp"
+    assert ctx["opponent"][opp_slot]["species"] == "blastoise"
+    assert 0.0 < ctx["opponent"][opp_slot]["hp_frac"] <= 1.0
+    assert ctx["opponent"][opp_slot]["top_moves"], "opponent moves must be known"
+
+    # 2) the brain runs on the REAL ctx with the REAL calc (no crash / no degrade).
+    moves = ctx["own"][own_slot]["moves"]
+    acts = [{"kind": "move", "move": m} for m in moves]
+    r = S.rank_moves(ctx, own_slot, opp_slot, moves, fmt="gen9ou")
+    assert r["order"], "brain must not silently degrade to an empty order"
+    # 3) at 1 HP the top move is a genuine KO (calc + interpretation agree).
+    assert (r["assessments"][r["best"]]["guaranteed_ko"]
+            or r["assessments"][r["best"]]["can_ko"])
+    # 4) choose_action returns a legal DAMAGING move (never the status 'toxic').
+    chosen = S.choose_action(ctx, acts, fmt="gen9ou")
+    assert chosen is not None and chosen.get("move") in moves
+    assert chosen.get("move") != "toxic"
+
+
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(pytest.main([__file__, "-v"]))
