@@ -28,7 +28,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Union
 
-__all__ = ["PerRefResult", "EvalResult", "evaluate"]
+__all__ = ["PerRefResult", "EvalResult", "evaluate", "compute_fitness"]
 
 #: a bot = a checkpoint path (str/Path) OR a ``seed -> PokeAgent`` factory
 #: OR a ``Reference`` (reuse a ladder entry as the bot, e.g. ref-vs-ref).
@@ -64,9 +64,12 @@ class PerRefResult:
 class EvalResult:
     """The full evaluation: per-reference records + the aggregate score.
 
-    ``fitness_score`` is the weighted aggregate the user ranks bots by — it is
-    filled in A4 (A2 leaves it ``None`` so the weighted aggregation is a single
-    deliberate step, not a silent default)."""
+    ``fitness_score`` is the weighted aggregate the user ranks bots by (A4):
+    the weighted AVERAGE of the per-reference win-rates (see
+    :func:`compute_fitness`), normalized to [0, 1]. Weights come from each
+    :class:`~fitness.ladder.Reference`'s ``.weight`` (stronger rungs count
+    more), so a bot that beats the floor but loses to the strong rungs lands
+    mid-range, and one that beats every rung lands near 1.0."""
     format: str
     n_battles: int
     per_ref: Dict[str, PerRefResult] = field(default_factory=dict)
@@ -218,4 +221,33 @@ def evaluate(
             if log is not None:
                 log(f"[fitness] {ref.name} #{_ + 1}: {outcome} (steps={n_steps})")
         result.per_ref[ref.name] = pr
+    # A4: the weighted aggregate. Weights already live on each Reference.
+    result.fitness_score = compute_fitness(
+        result.per_ref, {r.name: r.weight for r in refs_list})
     return result
+
+
+def compute_fitness(per_ref: Any,
+                    weights: Optional[Dict[str, float]] = None) -> float:
+    """The weighted aggregate fitness score, normalized to [0, 1].
+
+    A weighted AVERAGE of per-reference win-rates::
+
+        sum_r(w_r * win_rate_r) / sum_r(w_r)
+
+    Stronger references (higher ``w_r``) move the score more — a bot that beats
+    the weak floor but loses to the strong rungs lands mid-range, a bot that
+    beats every rung lands near 1.0. ``per_ref`` maps name ->
+    :class:`PerRefResult` (or a raw win-rate ``float``); ``weights`` maps
+    name -> weight (any reference not named defaults to weight 1.0).
+    """
+    num = 0.0
+    den = 0.0
+    for name, pr in (per_ref or {}).items():
+        wr = float(pr) if isinstance(pr, (int, float)) else float(getattr(pr, "win_rate", 0.0))
+        w = float((weights or {}).get(name, 1.0))
+        num += w * wr
+        den += w
+    if den <= 0:
+        return 0.0
+    return max(0.0, min(1.0, num / den))

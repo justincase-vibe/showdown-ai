@@ -153,7 +153,8 @@ def test_evalresult_is_json_serializable():
     blob = json.dumps(result.to_dict())  # must not raise
     d = json.loads(blob)
     assert d["per_ref"]["random"]["wins"] == 1
-    assert d["fitness_score"] is None  # A2 leaves the weighted score for A4
+    # A4: one ref (weight 1.0) with a 1/3 win-rate -> fitness = 1/3.
+    assert d["fitness_score"] == pytest.approx(1.0 / 3.0)
 
 
 # ── live self-check (deselected by default: needs a real server + torch) ────
@@ -184,6 +185,39 @@ def test_evaluate_bot_beats_random_live():
         assert result.per_ref["random"].n == 2
     finally:
         pool.shutdown()
+
+
+# ── A4: the weighted aggregate (pure — no battles needed) ──────────────────
+def test_compute_fitness_is_weighted_average_of_win_rates():
+    from fitness.harness import compute_fitness
+    # beat the floor (w=1, 100%), lose to the strong rung (w=2, 0%):
+    #   (1.0*1.0 + 2.0*0.0) / (1.0 + 2.0) = 1/3  -> mid-range, as the plan wants.
+    f = compute_fitness({"random": 1.0, "heuristic": 0.0},
+                        {"random": 1.0, "heuristic": 2.0})
+    assert f == pytest.approx(1.0 / 3.0)
+
+
+def test_compute_fitness_bounds_all_wins_and_all_losses():
+    from fitness.harness import compute_fitness
+    w = {"random": 1.0, "heuristic": 2.0}
+    assert compute_fitness({"random": 1.0, "heuristic": 1.0}, w) == pytest.approx(1.0)
+    assert compute_fitness({"random": 0.0, "heuristic": 0.0}, w) == pytest.approx(0.0)
+
+
+def test_compute_fitness_accepts_perrefresult_objects():
+    from fitness.harness import compute_fitness, PerRefResult
+    pr = {"random": PerRefResult(ref="random", wins=3, losses=1),         # 0.75
+          "heuristic": PerRefResult(ref="heuristic", wins=1, losses=3)}  # 0.25
+    f = compute_fitness(pr, {"random": 1.0, "heuristic": 2.0})
+    assert f == pytest.approx((1.0 * 0.75 + 2.0 * 0.25) / 3.0)
+
+
+def test_compute_fitness_defaults_missing_weights_and_handles_empty():
+    from fitness.harness import compute_fitness
+    # a ref not in `weights` defaults to weight 1.0
+    assert compute_fitness({"mystery": 0.5}) == pytest.approx(0.5)
+    assert compute_fitness({}) == 0.0
+    assert compute_fitness(None) == 0.0
 
 
 if __name__ == "__main__":  # pragma: no cover

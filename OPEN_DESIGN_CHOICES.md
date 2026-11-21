@@ -490,7 +490,7 @@ not just relative ELO. Reuse what exists (D100, no code twice):
 heuristic = mid-range. Gives Option B (strategy blending) a way to rank
 \u201cwinning\u201d strategies, and gives the league a per-round learning curve.
 
-> **STATUS (2026-11-21): A1 ✅ done (commit `b303812`) · A2 ✅ done (this change) · A3–A5 pending.**
+> **STATUS (2026-11-21): A1 ✅ done (commit `b303812`) · A2 ✅ done · A3.1 + A3.2 ✅ done · A4 ✅ done · A3.3/A3.2b/A5 pending.**
 > The package landed as `fitness/` (not `eval/`) — `eval` shadows a Python builtin, so the real dir is `fitness/`.
 
 **Build order (one reviewable step each):**
@@ -499,7 +499,10 @@ heuristic = mid-range. Gives Option B (strategy blending) a way to rank
 3. **A3** `HeuristicAgent` \u2014 the strong rule-based reference (the crux; may be
    2\u20133 sub-steps: move selection, then switching/recovery, then damage-calc use).
    Self-check: heuristic beats random >70%.
-4. **A4** `fitness_score` (weighted aggregate) + test.
+4. **A4 ✅** `fitness_score` = `compute_fitness` (weighted average of per-ref
+   win-rates, normalized to [0,1]); wired into `evaluate`; weights come from each
+   Reference's `.weight`. 4 hermetic tests (weighted avg, bounds, PerRefResult,
+   defaults/empty).
 5. **A5** integration \u2014 evaluate the league's top-1 bot after each round (log the
    curve) + a GUI \u201cevaluate this checkpoint\u201d button.
 
