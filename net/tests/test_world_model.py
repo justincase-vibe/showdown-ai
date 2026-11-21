@@ -17,7 +17,7 @@ import os
 import pytest
 
 from net import make_random_net, PokeAgent, encode_context
-from net.world_model import PokeWorldModel, State
+from net.world_model import PokeWorldModel, State, _map_value
 from net.tests.test_s41 import make_ctx, make_vocabs
 
 
@@ -71,6 +71,31 @@ def test_value_is_net_value_head_mapped_to_root():
     assert -1.0 <= wm.value(st) <= 1.0
 
 
+# ── the ROOT-VIEW value mapping, in isolation (M2b's perspective contract) ──
+def test_map_value_root_and_opponent_decider():
+    """``_map_value`` is the PURE net-free perspective map. Testing it directly
+    proves BOTH branches of the M2b value contract without needing the p2-POV
+    observation orientation (M2b) or effect bookkeeping (OC-6):
+
+      * decider IS the root   -> 2V − 1   (root's own win-prob, reward space)
+      * decider is the opp    -> −(2V − 1) (zero-sum: opp's win is root's loss)
+    """
+    V = 0.8
+    # root decider: + mapping
+    assert _map_value(V, "p1", "p1") == 2.0 * V - 1.0
+    # opponent decider: sign flip (zero-sum)
+    assert _map_value(V, "p2", "p1") == -(2.0 * V - 1.0)
+    # symmetric: whichever side is the root, the root's own view is +, the
+    # opponent's view is − (the root is not hard-coded to "p1")
+    assert _map_value(V, "p2", "p2") == 2.0 * V - 1.0
+    assert _map_value(V, "p1", "p2") == -(2.0 * V - 1.0)
+    # range: a (0,1) win-prob always maps into (−1, +1)
+    for v in (0.0, 0.25, 0.5, 0.75, 1.0):
+        for d in ("p1", "p2"):
+            assert -1.0 <= _map_value(v, d, "p1") <= 1.0
+
+
+# ── value + policy are deterministic (random-init, CPU) ────────────────────
 def test_value_and_policy_deterministic_under_seed():
     ctx = make_ctx()
     v = make_vocabs(ctx)

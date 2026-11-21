@@ -1142,3 +1142,55 @@ The non-branching bridge is in and green:
 orientation) — the branching + the "new source of truth" the handoff warned
 about. No GPU touched; no `git add -A`; committed only the M2a files + this
 doc.
+
+---
+
+## 2026-11-21 — M1+M2a self-review + M2b de-risk (this session)
+
+**Self-review (all verified correct, no active bugs):**
+* **M1 backup sign-convention** (`mcts._backup`): traced end-to-end — a
+  node's `value` is always stored from the SELECTOR's (parent mover's)
+  perspective, so "always-maximize" selection is correct for both players, and
+  the leaf→root walk flips the sign one step at a time. Consistent with the
+  `2V−1` reward-space contract shared by `ppo.py`.
+* **Pointer-head identity** (`model.py`): per-action logits = `intent ·
+  action_embed` (both normalized) — depend only on the action's OWN embedding,
+  never its position. The "shuffled-list → same per-action prior" test verifies
+  a real structural property, not a fluke.
+* **Value mapping** (`world_model.value`): decider win-prob → root reward is
+  correct for BOTH cases (root: `2V−1`; opponent: `−(2V−1)`).
+* **Gate:** net suite **129 passed / 1 skipped / 2 deselected** (CPU-only;
+  was 128, +1 the new test below).
+
+**De-risk (sanctioned in-scope step, independent of OC-6):** extracted the
+root-view value mapping into a PURE net-free function
+`world_model._map_value(decider_win_prob, decider, root_decider)` and added
+`test_map_value_root_and_opponent_decider`. This validates M2b's **perspective
+contract for BOTH decider cases in isolation** — so M2b only has to wire the
+p2-POV *observation* orientation (`_orient`) on top of an already-verified
+mapping. `value()` now delegates to it (no behavior change; the p1-root case is
+bit-identical).
+
+**Two LATENT M2b risks flagged (NOT active bugs in M2a — pin these before M2b):**
+1. **`State` frozen ≠ immutable-dict.** `dataclass(frozen=True)` only blocks
+   field reassignment; the `ctx` dict is still mutable. M2b's `step` MUST hand
+   out a **deep-copied** ctx (never mutate a node's ctx in place) or the shared
+   dict corrupts the whole MCTS tree (parent + descendants share one live
+   dict). Now documented on `State`.
+2. **Two forward passes per node.** `value()` and `policy()` each run a full
+   `forward_obs`; MCTS calls both per node. M2b should **cache the forward
+   result per state** (one pass feeds both heads). Not a bug — an efficiency
+   landmine that only matters once `step` produces a real tree.
+
+**Your call still needed to unblock M2b (re-stated for a fast decision):**
+* **OC-6 — world-model fidelity of `step`:** (a) minimal bookkeeping
+  (HP+switch+faint; status/boosts via the calc where it knows them) + a
+  world-model-vs-sim agreement gate [my lean]; (b) richer; (c) full sim
+  replay per node (rejected — network round-trips defeat fast local search).
+* **OC-7 — decider-in-state:** the decider-aware design I built M2a on
+  (context + `decider`; heads on the decider's POV; value mapped to root) vs a
+  simpler "root-only decider" stub. M2a + the `_map_value` de-risk assume the
+  decider-aware design.
+* **OC-8 — tera in the world model:** add "tera-used" tracking to the context
+  for M2b (else multi-ply search teras repeatedly), or leave tera out of the
+  search (rare in our target formats). M2a currently omits tera.

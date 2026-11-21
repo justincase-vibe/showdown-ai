@@ -36,6 +36,12 @@ player's perspective (M1's ``_backup`` sign-flips from there). So:
   * ``policy(state, actions)`` always runs on the decider's POV over the
     decider's own legal set.
 
+The ROOT-VIEW mapping itself (decider win-prob -> root reward in (−1,+1)) is
+the PURE :func:`_map_value`, tested in isolation for BOTH decider cases (see
+``tests/test_world_model.py``). That decouples the perspective CONVENTION from
+the p2-POV OBS-ORIENTATION (``_orient``) so M2b only has to wire the orientation
+on top of an already-verified mapping.
+
 M2a only ever sees ``decider="p1"`` (the root): without ``step`` the search
 cannot reach a p2-turn node. The p2-POV orientation (the field-aware
 own<->opponent reflection + slot remap) is M2b — it is exercised and tested
@@ -66,8 +72,12 @@ class State:
     ``ctx`` is the ``BeliefState.get_context()`` dict (JSON-safe, p1-POV).
     ``decider`` is "p1" or "p2" — the player who acts at this node. The root of
     a search is "p1" (the deciding player). M2b's ``step`` will produce a new
-    ``State`` (a new ctx, the flipped decider). Frozen so a node's state is
-    immutable (MCTS never mutates a state in place).
+    ``State`` (a new ctx, the flipped decider).
+
+    NOTE: ``frozen=True`` guards field REASSIGNMENT only — the ``ctx`` dict
+    itself is still mutable. So M2b's ``step`` MUST hand out a DEEP-COPIED ctx
+    (never mutate a node's ctx in place) or the shared dict corrupts the whole
+    MCTS tree (a parent and its descendants would share one live dict).
     """
     ctx: Dict
     decider: str = "p1"
@@ -89,6 +99,22 @@ def _orient(ctx: Dict, decider: str) -> Dict:
         f"PokeWorldModel: decider={decider!r} (opponent-POV) is M2b — paired with "
         "step and exercised once step produces p2-turn nodes. M2a covers the root "
         "(p1-POV) case only. See OPEN_DESIGN_CHOICES.md (OC-7).")
+
+
+def _map_value(decider_win_prob: float, decider: str, root_decider: str) -> float:
+    """Map the value head's (0,1) win-prob (from the DECIDER's POV) to the
+    MCTS ROOT player's reward in (−1, +1). PURE and net-free — so the
+    perspective CONTRACT is unit-testable for BOTH decider cases without
+    building the p2-POV observation orientation (M2b) or any effect
+    bookkeeping (OC-6).
+
+    * ``decider is the root`` -> ``2V − 1`` (the root's own win-prob, reward
+      space).
+    * ``decider is the opponent`` -> ``−(2V − 1)`` (zero-sum: the opponent's
+      win-prob is the root's loss-prob).
+    """
+    sign = 1.0 if decider == root_decider else -1.0
+    return sign * (2.0 * float(decider_win_prob) - 1.0)
 
 
 def _actions_from_own(ctx: Dict) -> List[Dict]:
@@ -154,8 +180,8 @@ class PokeWorldModel:
         acts = _actions_from_own(ctx)
         out = self._forward(ctx, acts)
         v = float(out["value"][0, 0, 0].item())           # (0,1) decider-POV
-        sign = 1.0 if state.decider == self.root_decider else -1.0
-        return sign * (2.0 * v - 1.0)
+        # the ROOT-VIEW mapping is _map_value (pure, tested for both deciders)
+        return _map_value(v, state.decider, self.root_decider)
 
     def policy(self, state: State, actions: List[Dict]) -> List[float]:
         """The policy-head priors over ``actions`` (the masked distribution, so
