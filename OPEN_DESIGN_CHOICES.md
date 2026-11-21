@@ -492,6 +492,7 @@ heuristic = mid-range. Gives Option B (strategy blending) a way to rank
 
 > **STATUS (2026-11-21): A1 ✅ done (commit `b303812`) · A2 ✅ done · A3.1/A3.2/A3.2b ✅ done · A4 ✅ done · A3.3/A5 pending.**
 > The package landed as `fitness/` (not `eval/`) — `eval` shadows a Python builtin, so the real dir is `fitness/`.
+> **✅ vocabs=None blind-play bug FIXED (commit `cb78e50`)** — the A3 self-check was playing BOTH sides blind (zero-obs every turn); the old 3/3 was a false positive. Now `build_obs`/`evaluate` fail loud on a missing vocabs, the self-check passes `vocabs`, and re-runs show **0 zero-obs errors**; the 20-battle gate is a solid **PASS (0.750 vs random)** with both sides seeing real state (see the 2026-11-21 section below).
 
 **Build order (one reviewable step each):**
 1. **A1** `eval/ladder.py` \u2014 `random` reference + ladder container. (small)
@@ -605,6 +606,57 @@ what a *genuine* unexpected data gap should do — options: (a) keep zero-obs
 obs — a slightly-stale-but-real state beats a blind one); (c) a targeted partial
 obs (fill only the failed field). **My lean: (b) last-known-good**, with (a) as
 the very-first-turn fallback. Not built until you pick.
+
+---
+
+## 2026-11-21 — vocabs=None blind-play bug (A3 self-check): ROOT-CAUSED + FIXED
+
+**Symptom:** the A3 self-check (`scratch/_a3_selfcheck.py`, heuristic vs random,
+real battles) logged ~30x `build_obs degraded to zero obs (AttributeError:
+'NoneType' object has no attribute 'weather')` — the bot won 3/3, but BOTH sides
+were playing BLIND (a zero obs every turn). A "pass" built on blind play is a
+false positive.
+
+**Root cause (traced + reproduced):** the harness path called `evaluate(...)`
+WITHOUT `vocabs`, so `vocabs=None` flowed `evaluate` → `play_agent_battle_on`
+→ `policy_action` → `build_obs` → `encode_context` → `vocabs.weather` →
+`AttributeError` → swallowed by `build_obs`'s catch-all → a **blind zero-obs**
+every turn. A missing vocabulary is a **wiring/config error, not a transient data
+gap** — it fails on EVERY turn, not one. (The league path was always fine:
+`SelfPlayRun._driver_vocabs()` builds and passes vocabs to every driver. Only the
+direct-harness/self-check path forgot it.)
+
+**Fix (fail loud, defense in depth — commit `cb78e50`):**
+1. **`net/env.py::build_obs`** raises `ValueError` on `vocabs is None` — BEFORE the
+   catch-all, so a wiring error fails LOUD instead of degrading to blind. This is
+   the single choke point (every real-obs path funnels through it). A valid vocabs
+   + a transient gap (garbage log, no prior) still degrades gracefully (unchanged).
+2. **`fitness/harness.py::evaluate`** raises at the API boundary when the real
+   decide path needs vocabs (checked AFTER bot validation, so a bad bot still
+   reports the bot error; a fake `decide` test-injection still may omit vocabs).
+3. **`scratch/_a3_selfcheck.py`** now passes `vocabs=vocabs` (the direct bug).
+4. **Regression tests** pin both guards; also fixed a stale `PoolConfig(ports=…)`
+   kwarg in the deselected harness live smoke (`ports` is a derived property).
+
+**Verification:** repro confirms `build_obs(…, None, …)` now RAISES (was silent
+zero-obs); full stack **614 passed / 1 skipped / 8 deselected** (green); re-ran the
+A3 self-check → **0 zero-obs / 0 weather / 0 decision errors** (the bug is gone).
+
+**Gate re-read (honest, not a bug):** with REAL obs both sides now see the state.
+The old blind **3/3 was a false positive** (both sides blind). The 5-battle first
+re-run looked weak (2W 1L 2D → 0.400) but was a tiny, high-variance sample; a
+**20-battle re-run (`scratch/_a3_smoke20.log`) is the firm read: 15W 1L 4D →
+win_rate 0.750 → PASS, 0 zero-obs errors.** The 4 draws are max-step (80) stalls.
+The heuristic is a **ladder rung (a reference point, weight 2), not the trained
+bot**, and 0.75 vs a legal random net confirms it's a sound "clearly better than
+random" rung.
+**OPEN for you:** is the heuristic strong enough to be the top ladder rung?
+Options: (a) accept it as a coarse "better than random" rung — **now well-
+supported by the 0.750 pass** (fine for now); (b) strengthen it (accuracy/PP/
+priority/status-aware scoring) before relying on it to rank trained bots;
+(c) replace it with an existing open-source bot as the top rung. My lean:
+**(a) now** (the 0.750 pass validates it), revisit (b)/(c) once we have trained
+bots to compare against.
 
 ---
 
