@@ -349,6 +349,12 @@ tracebacks, **VERDICT PASS** (28/28, 0 errors, all 8 bots buffered + ran 1 PPO
 update + saved; ELO spread sensible). The smoke run did **not** leak its own
 servers (verified: no leaked procs from that run's window).
 
+**Process note (user, 2026-11-21):** battle-based test/smoke runs get a **10-min
+(600 s)** shell timeout — stall games can exceed the old 360 s cap the previous
+note referenced, so any re-run of a real-server battle loop uses 600 s headroom.
+(This is a timeout on the *test command*, NOT a battle limit in the game engine;
+the in-game cap is still `max_steps`.)
+
 **Orphan cleanup (found while verifying).** 25 leaked `node.exe` processes
 from the fork (1 main server + 24 `room-battle.js`/worker children) were still
 alive, the main one `LISTENING` on `0.0.0.0:49980` \u2014 the **diagnostic port**
