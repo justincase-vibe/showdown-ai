@@ -127,5 +127,70 @@ def test_rank_accepts_dict_move_specs():
     assert r["order"][0] == {"name": "hammer"} and r["best"] == {"name": "hammer"}
 
 
+# ── threat_assessment: the DEFENSIVE half (will the opponent KO me?) ──────────
+def _own_ctx(own_hp=0.5, own="charizard", opp="venusaur"):
+    return {
+        "own": {"p1a": {"name": own, "hp_frac": own_hp, "ability": "",
+                        "item": "", "statuses": [], "boosts": {}}},
+        "opponent": {"p2a": {"name": opp, "hp_frac": 1.0, "ability": "",
+                             "item": "", "statuses": [], "boosts": {}}},
+    }
+
+
+def test_threat_detects_guaranteed_ko():
+    # my mon at 50% HP (threshold 50): "hammer" min 60 >= 50 -> guaranteed KO
+    calc, _ = fake_calc({"hammer": (60, 70, 65), "tackle": (10, 20, 15)})
+    t = S.threat_assessment(_own_ctx(own_hp=0.5), "p1a", "p2a",
+                            ["tackle", "hammer"], fmt="gen9ou", calc_fn=calc)
+    assert t["threat"] == "guaranteed_ko" and t["worst"] == "hammer"
+
+
+def test_threat_picks_the_hardest_ko_as_worst():
+    # my mon at 50% (threshold 50):
+    #   c: min 50 >= 50 -> guaranteed_ko  (hardest)
+    #   a: max 55 >= 50, min 45 < 50 -> can_ko
+    #   b: max 45 < 50 -> no KO
+    calc, _ = fake_calc({"a": (45, 55, 50), "b": (40, 45, 42), "c": (50, 60, 55)})
+    t = S.threat_assessment(_own_ctx(own_hp=0.5), "p1a", "p2a",
+                            ["a", "b", "c"], fmt="gen9ou", calc_fn=calc)
+    assert t["threat"] == "guaranteed_ko" and t["worst"] == "c"
+
+
+def test_threat_can_ko_tier():
+    # my mon at 45% (threshold 45): "ember" max 50 >= 45 but min 40 < 45 -> can_ko
+    calc, _ = fake_calc({"ember": (40, 50, 45), "tackle": (5, 10, 7)})
+    t = S.threat_assessment(_own_ctx(own_hp=0.45), "p1a", "p2a",
+                            ["tackle", "ember"], fmt="gen9ou", calc_fn=calc)
+    assert t["threat"] == "can_ko" and t["worst"] == "ember"
+
+
+def test_threat_safe_when_no_move_kos():
+    # my mon full HP (threshold 100): every move deals < 100 -> safe;
+    # the worst is still the higher-damage one
+    calc, _ = fake_calc({"a": (10, 20, 15), "b": (30, 40, 35)})
+    t = S.threat_assessment(_own_ctx(own_hp=1.0), "p1a", "p2a",
+                            ["a", "b"], fmt="gen9ou", calc_fn=calc)
+    assert t["threat"] == "safe" and t["worst"] == "b"
+
+
+def test_threat_unknown_when_opponent_species_unknown():
+    # opponent species unknown -> opp_move_ko degrades (unknown_attacker) -> "unknown"
+    def boom(*a, **k):
+        raise AssertionError("calc must not run when the attacker is unknown")
+    ctx = {"own": {"p1a": {"name": "charizard", "hp_frac": 0.5}},
+           "opponent": {"p2a": {}}}  # no species
+    t = S.threat_assessment(ctx, "p1a", "p2a", ["ember", "hammer"],
+                            fmt="gen9ou", calc_fn=boom)
+    assert t["threat"] == "unknown" and t["worst"] is not None
+    assert t["assessments"]["ember"]["unknown_attacker"] is True
+
+
+def test_threat_empty_moves():
+    t = S.threat_assessment(_own_ctx(), "p1a", "p2a", [], fmt="gen9ou",
+                            calc_fn=lambda *a, **k: {"min_pct": 0, "max_pct": 0,
+                                                    "expected_pct": 0, "immune": False})
+    assert t == {"threat": "unknown", "worst": None, "assessments": {}}
+
+
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(pytest.main([__file__, "-v"]))

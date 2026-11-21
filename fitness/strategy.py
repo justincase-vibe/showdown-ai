@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional
 
 from . import ko as _ko
 
-__all__ = ["ko_ladder_score", "rank_moves"]
+__all__ = ["ko_ladder_score", "rank_moves", "threat_assessment"]
 
 
 def _move_key(move: Any) -> str:
@@ -117,3 +117,78 @@ def rank_moves(
     order = sorted(moves, key=lambda m: ko_ladder_score(assess(m)), reverse=True)
     return {"order": order, "best": order[0] if order else None,
             "assessments": assessments}
+
+
+def _threat_label(assessment: Optional[Dict]) -> str:
+    """Map one :func:`fitness.ko` assessment to a defensive threat label.
+
+    ``guaranteed_ko`` (the opponent's move ALWAYS KOs me) > ``can_ko`` (can, on a
+    bad roll) > ``expected_ko`` (average KOs) > ``safe`` (best move still can't)
+    > ``unknown`` (a party's species is unknown, so it couldn't be assessed).
+    """
+    a = assessment or {}
+    if a.get("guaranteed_ko"):
+        return "guaranteed_ko"
+    if a.get("can_ko"):
+        return "can_ko"
+    if a.get("expected_ko"):
+        return "expected_ko"
+    if a.get("unknown_defender") or a.get("unknown_attacker"):
+        return "unknown"
+    return "safe"
+
+
+def threat_assessment(
+    ctx: Dict,
+    own_slot: str,
+    opp_slot: str,
+    opp_moves: List[Any],
+    *,
+    fmt: str,
+    gen: int = 9,
+    calc_fn: Optional[Any] = None,
+    own_ability: Optional[str] = None,
+    own_item: Optional[str] = None,
+    opp_ability: Optional[str] = None,
+    opp_item: Optional[str] = None,
+    own_tera: Optional[str] = None,
+    opp_tera: Optional[str] = None,
+) -> Dict:
+    """'Will I be KO'd by the opponent's move?' — the DEFENSIVE half of the crux.
+
+    Ranks the opponent's candidate moves (from ``ctx['opponent'][opp_slot]``'s
+    ``top_moves`` / ``moves``) by how badly they'd KO MY active mon, and returns
+    the worst (highest) threat. This is what lets an agent switch / protect
+    PROACTIVELY (before its HP is low) instead of only reacting to a fixed
+    HP threshold. Pure + interface-agnostic (takes the ``get_context()``
+    snapshot); reuses the SINGLE KO core (``opp_move_ko``) -> the ONE damage
+    model. Never raises on a partial belief state.
+
+    :return: ``{'threat': 'guaranteed_ko'|'can_ko'|'expected_ko'|'safe'|'unknown',
+                'worst': move | None,
+                'assessments': {move_name: ko_assessment}}``.
+    """
+    opp_moves = list(opp_moves or [])
+    if not opp_moves:
+        return {"threat": "unknown", "worst": None, "assessments": {}}
+
+    assessments: Dict[str, Dict] = {}
+
+    def assess(move: Any) -> Dict:
+        key = _move_key(move)
+        if key not in assessments:
+            assessments[key] = _ko.opp_move_ko(
+                ctx, own_slot, opp_slot, move, fmt=fmt, gen=gen, calc_fn=calc_fn,
+                own_ability=own_ability, own_item=own_item,
+                opp_ability=opp_ability, opp_item=opp_item,
+                own_tera=own_tera, opp_tera=opp_tera)
+        return assessments[key]
+
+    worst_move, worst_score = None, None
+    for m in opp_moves:
+        a = assess(m)
+        s = ko_ladder_score(a)
+        if worst_score is None or s > worst_score:
+            worst_move, worst_score = m, s
+    return {"threat": _threat_label(assessments[_move_key(worst_move)]),
+            "worst": worst_move, "assessments": assessments}
