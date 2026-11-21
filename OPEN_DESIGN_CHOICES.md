@@ -5,6 +5,36 @@
 > (C) the current checkpoint board. Review this when you're back — nothing in
 > section B is built until you pick.
 
+---
+
+## ⚡ DECISIONS NEEDED — read this first (2026-11-21)
+
+> One-page board of every open choice that gates the lookahead engine
+> (M2b → M5). Full reasoning is in the dated sections below; this is just the
+> scannable "pick one" board. **Nothing in the "Blocks" column is built until
+> you pick.** My lean is the safe default — reply "go with your lean" and I
+> proceed. The two that actually BLOCK M2b are **OC-6** and **OC-9**.
+
+| # | Decision | My lean | Blocks | One-line consequence |
+|---|----------|---------|--------|----------------------|
+| **OC-6** | `step` world-model fidelity | **(a)** minimal bookkeeping (HP+switch+faint; status/boosts via the calc) + a sim-agreement gate | M2b `step` (last big piece) | Fast, API-reachable search; the sim stays ground-truth via the gate |
+| **OC-9** | p2-POV posterior handling | **(a)** deterministic top-1 (argmax-posterior as p2's "own") | wiring `_flip_pov` into `_orient` (p2-POV obs) | In-distribution for the net; an honest approximation the value head refines |
+| **OC-7** | decider-in-state design | confirm the design M2a is built on (ctx + `decider`; heads on decider POV; value→root) | (already assumed) | needed for the double-switch / opponent-reply scenarios |
+| **OC-8** | tera in the search | omit for now (rare in our target formats) | `step` action-list | avoids illegal repeated-tera across a multi-ply search |
+| OC-2 | re-baseline the value head before it's the MCTS leaf? | re-verify the best checkpoint's value head is sane (M3) | M3 quality (not the M2b build) | a weak leaf makes MCTS weaker; cheap to check |
+| OC-3 | MCTS inference budget (iterations/decision) | start ~400 live, higher in training | a tuning knob | strength vs latency |
+| OC-4 | role of the hand-coded `choose_action` | **(c)** fold its signals into M4 learned obs; retire it as a path | M4 (not M2b) | one decision path — no two workflows |
+| OC-1 | MCTS vs pure value-learning | MCTS (in progress) | — | the direct engine for win-condition / double-switch / threat |
+| OC-5 | scenario priority / M1→M5 order | keep search-first (M1→M5) | sequencing | phases are swappable if you'd rather start elsewhere |
+
+**To unblock the engine: pick OC-6 + OC-9** (or "go with your lean"); OC-7/OC-8
+are confirmations; OC-1/2/3/4/5 are later (M3/M4/tuning). The decision-
+inDEPENDENT structural de-risk is already DONE (perspective contract, `State`
+isolation, `_flip_pov` permutation) — so a decision unblocks a short build, not
+a re-derivation.
+
+---
+
 Pipeline audited this pass:
 `dashboard → POST /api/train/start → launcher.start_trainer → validate → spawn
 detached → entry main → run → runstate protocol → stop/status` **and** the
