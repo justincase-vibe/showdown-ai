@@ -136,8 +136,35 @@ def test_move_ko_degrades_when_defender_unknown():
     a = move_ko(ctx, "p1a", "p2a", "ember", fmt="gen9ou",
                 calc_fn=lambda *a, **k: (_ for _ in ()).throw(AssertionError("no calc")))
     assert a["unknown_defender"] and not a["can_ko"]
+    # the ATTACKER (my mon, known here) must NOT be flagged
+    assert "unknown_attacker" not in a
     # degraded shape matches the normal path's meaning: threshold = hp*100 (not 0)
     assert a["defender_hp_frac"] == 1.0 and a["ko_threshold_pct"] == 100.0
+
+
+def test_opp_move_ko_degrades_when_attacker_unknown():
+    # THE LATENT BUG (now fixed): opp_move_ko's ATTACKER is the opponent, whose
+    # species is inferred and may be unknown. It must degrade gracefully instead
+    # of letting the calc raise on an empty attacker dict. This test FAILS
+    # against the pre-fix code (the fake calc would be called and throw).
+    ctx = {"own": {"p1a": {"name": "charizard", "hp_frac": 0.5}},
+           "opponent": {"p2a": {}}}  # opponent species unknown -> attacker {}
+    a = opp_move_ko(ctx, "p1a", "p2a", "ember", fmt="gen9ou",
+                    calc_fn=lambda *a, **k: (_ for _ in ()).throw(AssertionError("calc called")))
+    assert a.get("unknown_attacker") is True and not a.get("unknown_defender")  # defender (my mon) IS known
+    assert not a["can_ko"]
+    assert a["defender_hp_frac"] == 0.5 and a["ko_threshold_pct"] == 50.0
+
+
+def test_move_ko_degrades_when_attacker_unknown():
+    # symmetric guard: if MY mon's species were unknown (degenerate ctx), move_ko
+    # must also degrade rather than let the calc raise.
+    ctx = {"own": {"p1a": {}},  # no species -> attacker {}
+           "opponent": {"p2a": {"name": "venusaur", "hp_frac": 0.4}}}
+    a = move_ko(ctx, "p1a", "p2a", "ember", fmt="gen9ou",
+                calc_fn=lambda *a, **k: (_ for _ in ()).throw(AssertionError("calc called")))
+    assert a.get("unknown_attacker") is True and not a.get("unknown_defender")
+    assert not a["can_ko"]
 
 
 def test_hp_frac_zero_is_preserved_not_masked_to_full():

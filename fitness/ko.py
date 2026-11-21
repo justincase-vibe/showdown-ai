@@ -41,6 +41,26 @@ def _hp_frac(block: Optional[Dict], default: float = 1.0) -> float:
     return max(0.0, min(1.0, float(v)))
 
 
+def _degraded(hp: float, *, unknown_defender: bool = False,
+              unknown_attacker: bool = False) -> Dict:
+    """A safe 'no KO signal' assessment — SAME shape/meaning as the normal path
+    (threshold = ``hp*100``, all verdicts False) plus the flag(s) explaining WHY
+    the KO could not be assessed: a party's species is unknown, so the shared
+    damage calc cannot run (it requires a species name on both mons). Never
+    raises — a heuristic must degrade, not crash, on a partial belief state.
+    """
+    d: Dict[str, Any] = {
+        "immune": False, "min_pct": 0.0, "max_pct": 0.0, "expected_pct": 0.0,
+        "defender_hp_frac": hp, "ko_threshold_pct": hp * 100.0,
+        "can_ko": False, "guaranteed_ko": False, "expected_ko": False,
+    }
+    if unknown_defender:
+        d["unknown_defender"] = True
+    if unknown_attacker:
+        d["unknown_attacker"] = True
+    return d
+
+
 def block_to_calc_mon(block: Optional[Dict], *,
                       ability: Optional[str] = None,
                       item: Optional[str] = None,
@@ -141,22 +161,21 @@ def move_ko(ctx: Dict, own_slot: str, opp_slot: str, move: Any, *,
     :return: the :func:`ko_assessment` dict. If the opponent's species is unknown
              (empty calc dict) it degrades to a safe "no KO signal" assessment.
     """
-    calc_fn = calc_fn or _default_calc()
     own = (ctx.get("own", {}) or {}).get(own_slot, {}) or {}
     opp = (ctx.get("opponent", {}) or {}).get(opp_slot, {}) or {}
+    attacker = block_to_calc_mon(own, ability=own_ability, item=own_item,
+                                 tera_type=own_tera)
     defender = block_to_calc_mon(opp, ability=opp_ability, item=opp_item,
                                  tera_type=opp_tera)
     hp = _hp_frac(opp)
-    if not defender:
-        # no known opponent species -> no meaningful damage calc (never crash).
-        # Same shape/meaning as the normal path: threshold = hp*100, verdicts all
-        # False (the ``unknown_defender`` flag is the signal, not the threshold).
-        return {"immune": False, "min_pct": 0.0, "max_pct": 0.0, "expected_pct": 0.0,
-                "defender_hp_frac": hp,
-                "ko_threshold_pct": hp * 100.0, "can_ko": False, "guaranteed_ko": False,
-                "expected_ko": False, "unknown_defender": True}
-    attacker = block_to_calc_mon(own, ability=own_ability, item=own_item,
-                                 tera_type=own_tera)
+    if not attacker or not defender:
+        # a party's species is unknown -> the shared calc cannot run (it requires
+        # a name on BOTH mons). Degrade gracefully, never raise (latent-bug fix:
+        # previously only the defender was checked, so an unknown attacker
+        # (my mon in a degenerate ctx) would make the calc raise).
+        return _degraded(hp, unknown_defender=not defender,
+                         unknown_attacker=not attacker)
+    calc_fn = calc_fn or _default_calc()
     dmg = calc_fn(attacker, defender, move, fmt=fmt, gen=gen)
     return ko_assessment(dmg, defender_hp_frac=hp)
 
@@ -171,19 +190,19 @@ def opp_move_ko(ctx: Dict, own_slot: str, opp_slot: str, move: Any, *,
     slots are swapped so ``own_*`` overrides apply to MY mon and ``opp_*`` to
     theirs. Lets the heuristic weigh "will I survive this turn?" when choosing.
     """
-    calc_fn = calc_fn or _default_calc()
     own = (ctx.get("own", {}) or {}).get(own_slot, {}) or {}
     opp = (ctx.get("opponent", {}) or {}).get(opp_slot, {}) or {}
     defender = block_to_calc_mon(own, ability=own_ability, item=own_item,
                                  tera_type=own_tera)
-    hp = _hp_frac(own)
-    if not defender:
-        # same degraded shape as move_ko (defender here is MY mon)
-        return {"immune": False, "min_pct": 0.0, "max_pct": 0.0, "expected_pct": 0.0,
-                "defender_hp_frac": hp,
-                "ko_threshold_pct": hp * 100.0, "can_ko": False, "guaranteed_ko": False,
-                "expected_ko": False, "unknown_defender": True}
     attacker = block_to_calc_mon(opp, ability=opp_ability, item=opp_item,
                                  tera_type=opp_tera)
+    hp = _hp_frac(own)
+    if not attacker or not defender:
+        # the REAL case here: the ATTACKER is the opponent, whose species is
+        # inferred and may be unknown. Degrade gracefully instead of letting the
+        # calc raise on an empty attacker dict (the latent bug this fixes).
+        return _degraded(hp, unknown_defender=not defender,
+                         unknown_attacker=not attacker)
+    calc_fn = calc_fn or _default_calc()
     dmg = calc_fn(attacker, defender, move, fmt=fmt, gen=gen)
     return ko_assessment(dmg, defender_hp_frac=hp)
