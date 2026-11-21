@@ -1260,3 +1260,16 @@ bit-identical).
   (makes NO OC-9 decision). Wiring `_flip_pov` into `_orient(ctx,"p2")` + the
   OC-9 refinement is the last structural M2b step, then `step` (OC-6) completes
   the engine. `_orient` still raises for p2 (M2a boundary held).
+
+**Single-source-of-truth fix (this pass — decision-independent, no OC impact):**
+Self-review traced the p2-POV flip's per-side field list against the encoder's
+actual field reads and found them to be TWO hardcoded copies of the same 8 names
+(`reflect/lightscreen/auroraveil/stealthrock/stickyweb/safeguard` +
+`spikes/toxicspikes`). They match today (verified — no active bug), but a
+hand-maintained parallel list is exactly how the flip would silently keep one
+field in p1-POV once the encoder grows. Now `encoder.SIDE_KEYED_FIELDS` /
+`HAZARD_FIELDS` / `ALL_SIDE_KEYED_FIELDS` are the single source of truth; the
+encoder's global reads AND `world_model._flip_field` both derive from them.
+Behavior-preserving (the refactored loop writes identical slots/values); pinned
+by `test_flip_field_covers_every_side_keyed_field_the_encoder_reads`. Net suite
+now **135 passed / 1 skipped / 2 deselected** (was 134, +1 the new test).

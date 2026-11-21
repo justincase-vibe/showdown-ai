@@ -17,7 +17,8 @@ import os
 import pytest
 
 from net import make_random_net, PokeAgent, encode_context
-from net.world_model import PokeWorldModel, State, _map_value, flip_decider, _flip_pov
+from net.world_model import (PokeWorldModel, State, _map_value, flip_decider,
+                            _flip_pov, _flip_field)
 from net.tests.test_s41 import make_ctx, make_vocabs
 
 
@@ -293,3 +294,17 @@ def test_flip_pov_maps_sides_fields_and_slots():
     # fainted + active swapped (active slots remapped across the axis)
     assert p2["fainted"] == {"p1": 1, "p2": 0}
     assert p2["active"] == {"p1": "p1b", "p2": "p2a"}
+
+
+def test_flip_field_covers_every_side_keyed_field_the_encoder_reads():
+    """The p2-POV flip must swap EVERY per-side field the observation reads, or
+    the flipped POV would silently read one field from the wrong side. Both the
+    flip and the encoder now derive from ``encoder.ALL_SIDE_KEYED_FIELDS``
+    (single source of truth), so this pins the coupling: add a per-side field to
+    the encoder and the flip automatically covers it — and this test verifies it.
+    (Catches the exact drift a hand-maintained parallel list would invite.)"""
+    from net.encoder import ALL_SIDE_KEYED_FIELDS
+    # non-empty and the known screens/guards + hazards are all present
+    assert {"reflect", "spikes", "toxicspikes"} <= set(ALL_SIDE_KEYED_FIELDS)
+    for name in ALL_SIDE_KEYED_FIELDS:
+        assert _flip_field({name: {"p1": 1, "p2": 0}})[name] == {"p1": 0, "p2": 1}, name

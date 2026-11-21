@@ -63,7 +63,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from .agent import PokeAgent
-from .encoder import encode_context
+from .encoder import ALL_SIDE_KEYED_FIELDS, encode_context
 
 
 def flip_decider(decider: str) -> str:
@@ -121,15 +121,19 @@ def _flip_field(field: Dict) -> Dict:
     """Flip the side-keyed field state across p1<->p2. Weather / terrain /
     trickroom / wonderroom are side-NEUTRAL and pass through untouched.
     ``tailwind_side`` swaps p1<->p2; each ``{p1, p2}`` screen/hazard dict has
-    its two side entries swapped (any other key, e.g. a turn-counter, is kept)."""
+    its two side entries swapped (any other key, e.g. a turn-counter, is kept).
+
+    The set of per-side fields is :data:`encoder.ALL_SIDE_KEYED_FIELDS` — the
+    SAME tuples the encoder reads — so the flip covers exactly the fields the
+    net observes and can never silently drop one (single source of truth; pinned
+    by ``test_flip_field_covers_every_side_keyed_field``)."""
     f = dict(field or {})
     tw = f.get("tailwind_side", "")
     if tw == "p1":
         f["tailwind_side"] = "p2"
     elif tw == "p2":
         f["tailwind_side"] = "p1"
-    for name in ("reflect", "lightscreen", "auroraveil", "stealthrock",
-                 "stickyweb", "safeguard", "spikes", "toxicspikes"):
+    for name in ALL_SIDE_KEYED_FIELDS:
         d = f.get(name)
         if isinstance(d, dict):
             f[name] = {("p2" if k == "p1" else "p1" if k == "p2" else k): v

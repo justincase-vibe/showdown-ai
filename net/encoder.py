@@ -39,7 +39,7 @@ Still NOT done (deliberately, flagged for the user):
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import re
 
@@ -65,6 +65,22 @@ ACTION_KIND_IDX: Dict[str, int] = {"move": 1, "switch": 2, "tera": 3, "transform
 
 STATUS_COL: Dict[str, int] = {s: SLOT_INDEX[f"st_{s}"] for s in STATUS_FLAGS}
 BOOST_COL: Dict[str, int] = {b: SLOT_INDEX[f"boost_{b}"] for b in BOOSTS}
+
+#: The SIDE-KEYED field states the observation reads as ``{p1, p2}`` — the single
+#: source of truth for "which field states are per-side." BOTH the encoder's
+#: global reads AND the M2b p2-POV flip (``world_model._flip_field``) derive
+#: from these, so the flip can never silently miss a field the net observes
+#: (a hand-maintained parallel list inside the flip is the drift bug this kills).
+SIDE_KEYED_FIELDS: Tuple[str, ...] = (
+    "reflect", "lightscreen", "auroraveil", "stealthrock", "stickyweb", "safeguard",
+)
+#: Hazard layers carry a per-side COUNT (capped), not a 0/1 flag — same per-side
+#: shape, different normalization. Named separately so the caps stay with the names.
+HAZARD_FIELDS: Tuple[Tuple[str, float], ...] = (("spikes", 3.0), ("toxicspikes", 2.0))
+#: Every per-side field name (screens/guards + hazards) — the exact set the flip swaps.
+ALL_SIDE_KEYED_FIELDS: Tuple[str, ...] = (
+    SIDE_KEYED_FIELDS + tuple(n for n, _ in HAZARD_FIELDS)
+)
 
 
 def _to_id(name) -> str:
@@ -188,15 +204,14 @@ def encode_context(ctx: Dict, vocabs: Vocabs,
     tw = field.get("tailwind_side", "") or ""
     g[GLOBAL_INDEX["tailwind_p1"]] = 1.0 if tw == "p1" else 0.0
     g[GLOBAL_INDEX["tailwind_p2"]] = 1.0 if tw == "p2" else 0.0
-    for name, side in (("reflect", "p1"), ("reflect", "p2"),
-                       ("lightscreen", "p1"), ("lightscreen", "p2"),
-                       ("auroraveil", "p1"), ("auroraveil", "p2"),
-                       ("stealthrock", "p1"), ("stealthrock", "p2"),
-                       ("stickyweb", "p1"), ("stickyweb", "p2"),
-                       ("safeguard", "p1"), ("safeguard", "p2")):
-        d = field.get(name, {}) or {}
-        g[GLOBAL_INDEX[f"{name}_{side}"]] = 1.0 if d.get(side) else 0.0
-    for name, cap in (("spikes", 3.0), ("toxicspikes", 2.0)):
+    # Single source of truth for the per-side field set (see SIDE_KEYED_FIELDS /
+    # HAZARD_FIELDS above) — the M2b POV flip (world_model._flip_field) uses the
+    # SAME tuples, so the two cannot drift apart.
+    for name in SIDE_KEYED_FIELDS:
+        for side in ("p1", "p2"):
+            d = field.get(name, {}) or {}
+            g[GLOBAL_INDEX[f"{name}_{side}"]] = 1.0 if d.get(side) else 0.0
+    for name, cap in HAZARD_FIELDS:
         d = field.get(name, {}) or {}
         for side in ("p1", "p2"):
             g[GLOBAL_INDEX[f"{name}_{side}"]] = _clamp01(float(d.get(side, 0) or 0) / cap)
