@@ -35,3 +35,9 @@ legality/data/
 belief/artifacts/
 # P4.3 training runs (user's GPU checkpoints + logs — runtime artifacts, never commit)
 runs/
+# Local experiment scratch (NN checkpoints ~28MB each, debug runs, probes) — never commit
+scratch/
+# League runtime state (elo / ckpt bookkeeping — regenerated each run)
+league/bots.json
+# Windows junk artifact (breaks ripgrep + git -A)
+nul
