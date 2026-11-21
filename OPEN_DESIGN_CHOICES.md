@@ -1041,3 +1041,88 @@ enrichments.**
 - **OC-5 — scenario priority.** I'm sequencing M1->M5 (search first). If you'd
   rather start with #2 (value surface) or #4 (hazards) or #6 (belief) first, tell
   me and I'll re-order — the phases are independent enough to swap.
+
+---
+
+## 2026-11-21 — M2 design decision (the sim-branching crux) — DECIDED, M2a next
+
+> The previous agent was mid-investigation of the single hardest M2 sub-problem:
+> **how MCTS branches a live poke-env battle to search futures.** Decided this
+> session (evidence-based), and split M2 into a safe non-controversial part
+> (M2a, next) and the controversial part (M2b, needs your OK).
+
+### The decision: approach (b) — the MCTS `state` is the belief `get_context()`
+
+**Why not (a) clone the live poke-env `battle`:** it owns a `PSClient` + an
+event-loop thread + websocket sockets; poke-env reaps them only at `atexit`
+(the teardown-leak fix proved `PokeEnv.close()` never stops them). It is NOT
+`deepcopy`-able, and replaying a move through it needs **network round-trips**
+— which defeats the whole point of *fast local* search (your "the calc needs to
+be quick and api reachable"). **Why not (c) serialize + re-replay:** same
+network cost, strictly more moving parts. **(b) keeps the state pure data**
+(cloneable via `copy.deepcopy`) and reuses the ONE damage pipeline — so MCTS can
+branch a state with **zero** live-sim dependency.
+
+### Two crux subtleties (found by reading the net, NOT assumed)
+
+1. **The context alone does NOT say whose turn it is.** The net is a
+   **P1-decider** (it always acts for the player whose POV the obs is in —
+   verified: `build_obs` swaps to p1-POV; the value head is trained on
+   deciding-player-POV states). So the MCTS **state must carry a `decider`**
+   ("p1"/"p2"): the context (canonical, always p1-POV) + who moves next. The
+   root is `decider="p1"`; `step` flips it each ply.
+2. **Every value-head call must stay IN-dISTRIBUTION.** The value head learned
+   "deciding player's win prob" (p1-POV in training). So at a P2-turn node the
+   value is read from P2's POV (swap) = P2's win prob, then mapped to the ROOT
+   player's (P1's) perspective for the MCTS `_backup` (`1 − P2win`, i.e. `−(2V−1)`
+   in reward space). Feeding a "P2-turn, p1-POV" state to the head would be
+   out-of-distribution. **Policy is the same:** it always runs on the *decider's*
+   POV. Both heads therefore always see a deciding-player-POV obs — in-distribution.
+
+### M2a vs M2b (the split that lets us keep tests green + avoid a new source of truth)
+
+- **M2a (NEXT, safe, non-controversial):** the **non-branching** WorldModel
+  adapters over the REAL `PokeNet` + a real belief context:
+  `actions(state)` (legal moves + bench switches, decider-aware),
+  `value(state)` (value head → decider POV → mapped to root perspective),
+  `policy(state, actions)` (policy head → priors over the decider's legal set).
+  `step` raises `NotImplementedError` (M2b). **Tested with a random-init net,
+  CPU-only** — no live battle, no effect bookkeeping, no second source of truth.
+  This is a real, verifiable slice: it makes `MCTS.best_action` drive the ACTUAL
+  net end-to-end (it can't produce a real tree without `step`, but each adapter
+  is independently testable + the value/policy perspective contract is pinned).
+- **M2b (AFTER your OK — this is the "new source of truth" the handoff warned
+  about):** `step(state, action)` = apply the decider's move to a copied context:
+  damage via the **ONE** `damage/calc` (never re-derived), plus minimal
+  HP/status/switch/faint bookkeeping. **Risk:** it can drift from the sim. The
+  mitigation is a **"world-model-vs-sim" agreement test** (CPU): for a set of
+  (context, action) pairs, the context `step` predicts must match what the real
+  Showdown sim produces for the same action. If it drifts, we trust the sim and
+  fix the bookkeeping — the sim stays the ground truth (per your "smogon calc is
+  the source of truth" rule).
+
+### New open choices (need your call — nothing in M2b is built until you pick)
+- **OC-6 — M2b world-model fidelity.** (a) minimal bookkeeping (HP + switch +
+  faint only; status/boosts via the calc where the calc knows them) + a
+  world-model-vs-sim agreement gate (my lean — smallest second source of truth);
+  (b) richer bookkeeping (track volatiles/stockpile/PP) for a more faithful tree;
+  (c) hybrid: use the sim for the FIRST ply (real) and (a) for deeper plies
+  (approximate — the leaves are where the value head lives anyway). *My lean: (a)
+  first (correct + fast), upgrade to (c) if the agreement test shows drift.*
+- **OC-7 — the `decider`-in-state design.** I've recorded the design (context +
+  decider; heads always run on the decider's POV; value mapped to root view).
+  *Do you want M2a to implement exactly this, or do you'd rather I keep the root
+  as the ONLY decider for now and treat the opponent's reply with a fixed
+  opponent-policy (e.g. the net on its own POV)? The former is the real engine;
+  the latter is a weaker but simpler v1. My lean: full decider-aware (it's the
+  double-switch scenario #3 you asked for).*
+- **OC-8 — tera in the world model.** `build_action_list` offers a one-shot `tera`
+  variant per move (only when `can_tera`). The context does NOT track
+  "tera-used," so a multi-ply search would illegally tera repeatedly. M2a
+  **omits tera** (moves + switches only). *Do you want tera bookkeeping added to
+  the context for M2b, or leave it out (rare in the formats we target)?*
+
+### Gate status
+M1 committed + green. **M2a is the next step and is NOT yet built** (this
+session = the decision + this documentation, per "decide before building").
+No GPU touched; no `git add -A`; only the two M1 files are committed.
