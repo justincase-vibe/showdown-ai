@@ -490,6 +490,9 @@ not just relative ELO. Reuse what exists (D100, no code twice):
 heuristic = mid-range. Gives Option B (strategy blending) a way to rank
 \u201cwinning\u201d strategies, and gives the league a per-round learning curve.
 
+> **STATUS (2026-11-21): A1 ✅ done (commit `b303812`) · A2 ✅ done (this change) · A3–A5 pending.**
+> The package landed as `fitness/` (not `eval/`) — `eval` shadows a Python builtin, so the real dir is `fitness/`.
+
 **Build order (one reviewable step each):**
 1. **A1** `eval/ladder.py` \u2014 `random` reference + ladder container. (small)
 2. **A2** `eval/harness.py::evaluate` against `[random]` + hermetic test. (core)
