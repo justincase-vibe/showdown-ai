@@ -294,8 +294,11 @@ def choose_action(
     own_slot = (ctx.get("active") or {}).get("p1")
     opp_slot = (ctx.get("active") or {}).get("p2")
 
-    # can't resolve the actives (degenerate ctx) -> a safe, legal move (A3.1)
-    if not own_slot or not opp_slot:
+    # can't resolve the actives (degenerate ctx) -> a safe, legal move (A3.1).
+    # ``is None`` (NOT truthiness): real get_context() slots are "p1a"-style
+    # strings, but a falsy-yet-valid key (e.g. an int slot of 0) must NOT be
+    # mistaken for "missing" — that would silently bail to the first move.
+    if own_slot is None or opp_slot is None:
         return moves[0][0]
 
     own_hp = _ko._hp_frac((ctx.get("own") or {}).get(own_slot))

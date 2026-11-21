@@ -152,6 +152,28 @@ def test_choose_degenerate_ctx_first_move():
         {"kind": "move", "move": "ember"}
 
 
+def test_choose_int_slot_zero_is_not_treated_as_missing():
+    # Regression for the `is None` (not truthiness) active guard: slot keys here
+    # are INTS (0/1). Slot 0 is falsy, so the old `not own_slot` guard would have
+    # bailed to the FIRST move. The hardened guard engages the brain instead: the
+    # 30%-HP opponent is guaranteed-KO'd by "hammer", so it must beat the weak
+    # "tackle" that happens to sit first in `acts`.
+    calc, _ = fake_calc({"hammer": (85, 95, 90), "tackle": (5, 10, 7)})
+    ctx = {
+        "active": {"p1": 0, "p2": 1},
+        "own": {0: {"name": "charizard", "hp_frac": 1.0, "ability": "",
+                   "item": "", "statuses": [], "boosts": {},
+                   "moves": ["tackle", "hammer"]}},
+        "opponent": {1: {"species": "venusaur", "hp_frac": 0.3, "ability": "",
+                         "item": "", "statuses": [], "boosts": {},
+                         "top_moves": []}},
+        "field": {},
+    }
+    acts = _acts(["tackle", "hammer"])  # tackle first = the degenerate bail target
+    assert S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc) == \
+        {"kind": "move", "move": "hammer"}
+
+
 # ── ko_ladder_score: the pure (tier, magnitude) mapping ──────────────────────
 def test_ko_ladder_score_tiers():
     assert S.ko_ladder_score({"guaranteed_ko": True, "expected_pct": 90})[0] == 3
