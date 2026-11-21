@@ -954,3 +954,90 @@ including the bench) to the agent so the brain (`fitness/strategy.py::choose_act
 can use it. **Step 3** (bench-aware heuristic: among moves that all KO the active,
 prefers the one with best coverage on the likely switch-in). **Step 4** (training;
 GPU, last, you-run).
+
+---
+
+## 2026-11-21 — The six long-term scenarios -> ONE architecture (the real gap is LOOKAHEAD)
+
+> The user gave six scenarios the net must eventually do (recognize win
+> conditions, evaluate expected-WR, weigh both players' switches, value
+> setup/screens/hazards over the match, spot the opponent's win condition, and
+> update its belief from moveset changes). I grounded these in the actual code
+> (not assumption) and they collapse into ONE gap + a few signal gaps.
+
+### What already exists (verified in code, not assumed)
+- **The net ALREADY has a value head** (`value (B,T,1)` in (0,1) = expected win
+  probability) alongside the policy head (`net/model.py`). So scenario #2 (state
+  -> preferred/bad/losing by expected WR) is **architecturally already built**.
+- **PPO + GAE ALREADY trains that value head** (`net/ppo.py`: clipped policy +
+  value-MSE + entropy, sparse terminal ±1). The agent *reports* the value but
+  does not *use* it for decisions yet (`net/agent.py`).
+- **The belief state** infers hidden info (EVs, moves, items, team comp, field
+  state) and now sees the bench. **The only "reasoning" today** is the hand-coded
+  `fitness/strategy.py::choose_action` (KO ladder + hazard-aware switch + threat)
+  — single-step, no lookahead, on the heuristic path (not the NN).
+
+### The real gap (all six point at this)
+The net is **single-step** (state -> one action + one value). It cannot **look
+ahead** — so it can't "realize a win condition" (multi-turn conditional),
+"evaluate a double switch" (my move + their reply), or "spot the opponent's
+setup line." That is a **SEARCH** problem. The long-term engine is **MCTS
+(AlphaZero-style)**: search the tree using the Showdown sim + damage-calc as the
+world model and the value head as the leaf. **One engine serves #1, #3, #5;**
+**#2 is already built (becomes the leaf);** **#4/#6 are belief/observation
+enrichments.**
+
+### Scenario -> mechanism map
+| # | Scenario | Served by |
+|---|---|---|
+| 1 | Multiple win conditions (Dragonite sweep when X and Y hold) | MCTS lookahead (value head ranks the setup line) |
+| 2 | Expected-WR state eval (preferred/bad/losing) | **value head (built)** — surface it; MCTS uses it as leaf |
+| 3 | Both players' switches (double switch) | MCTS searches the opponent's reply |
+| 4 | Value setup/screens/hazards across the match | belief field-state (present) + a few derived signals + value training |
+| 5 | Spot the opponent's win condition (free SD) | MCTS sees their setup line + belief opponent posterior |
+| 6 | Update belief from moveset changes (Wish->Protect, Scarf KO'd) | belief `moves_used` + posterior (mostly present) + surface in obs |
+
+### Phase plan (each = one tested step; NOT all-at-once)
+- **M1 — MCTS core (BUILT this step, `net/mcts.py`):** PUCT search over a
+  pluggable `WorldModel` (`actions`/`step`/`value`/`policy`). Net-agnostic,
+  deterministic, reward space = (−1,+1) (the same as `ppo.py`, so no second
+  convention). **7 tests pass**, incl. "lookahead beats 1-step-greedy on a trap"
+  (the Dragonite analog) and "searches the opponent's reply" (the double-switch
+  analog). Bug caught + fixed by testing: the PUCT backup was anchored at the
+  root instead of the leaf (values never propagated) — now walks up from the leaf.
+- **M2 — real WorldModel:** wrap the Showdown sim + damage-calc + `PokeNet`
+  (`actions`=legal list, `step`=apply action->next belief ctx, `value`=2V−1,
+  `policy`=policy-head priors). The bridge that makes MCTS play real Pokémon.
+- **M3 — value-head surface:** `evaluate_state(ctx) -> {win_prob, label}`
+  (preferred/even/bad/losing) for interpretation + as the MCTS leaf; ensure
+  self-play trains it well.
+- **M4 — derived observation signals** (belief-derived, NOT hand-maintained):
+  win-condition readiness, opposing-setup threat, double-switch availability,
+  hazard value. Gives the net explicit handles to learn #1/#4/#5 faster.
+- **M5 — training (GPU, you-run):** MCTS-guided policy+value (AlphaZero loop:
+  MCTS -> better targets -> better net -> better MCTS), or value-head self-play.
+
+### Open choices (need your call)
+- **OC-1 — MCTS vs pure value-learning.** MCTS (explicit search, uses the sim as
+  world model) is more powerful + interpretable for #1/#3/#5 but is per-decision
+  compute at inference. A value-only net (deeper self-play) is cheaper but
+  learns these only implicitly and slower. *My lean: MCTS — it is the direct,
+  verifiable engine for the win-condition/double-switch/threat scenarios, and the
+  value head (already trained by self-play) is its leaf. Cost is a later
+  optimization (budget the iterations).*
+- **OC-2 — does the value head need RE-BASELINing before MCTS uses it as the
+  leaf?** A weak value leaf makes MCTS weaker. We have BC + PPO checkpoints
+  (value head trained on self-play). *Do you want to re-verify the best
+  checkpoint's value head is sane (M3) before wiring M2, or wire M2 first and
+  let M5 (training) improve the leaf?*
+- **OC-3 — inference budget.** MCTS iterations per decision (e.g. 200 vs 2000)
+  trade strength vs latency. The league/GPU training can afford more; live play
+  less. *Do you have a latency target for live play?*
+- **OC-4 — the hand-coded `choose_action` brain.** It's a single-step heuristic
+  (KO/hazard). With MCTS + value, is it (a) retired, (b) kept as a prior/sanity
+  floor, or (c) its signals folded into M4 derived observations? *My lean: (c) —
+  keep the reasoning, but as LEARNED signals, not a separate decision path (avoids
+  two workflows).*
+- **OC-5 — scenario priority.** I'm sequencing M1->M5 (search first). If you'd
+  rather start with #2 (value surface) or #4 (hazards) or #6 (belief) first, tell
+  me and I'll re-order — the phases are independent enough to swap.
