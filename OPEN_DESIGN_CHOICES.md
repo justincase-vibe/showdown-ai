@@ -562,8 +562,13 @@ sequential-first OK for v1 (a 20-battle eval \u2248 6\u20138 min on CPU) vs conc
 > * `fitness/strategy.py::threat_assessment` — DEFENSIVE: "will the opponent's
 >   likely move KO me?" -> `guaranteed_ko > can_ko > expected_ko > safe > unknown`
 >   (lets an agent switch/protect PROACTIVELY, not just on a fixed HP threshold).
+> * `fitness/strategy.py::choose_action` — THE COMPLETE DECISION (committed
+>   A3.3d): ties it together — (1) no acts -> pass; (2) force-switch; (3)
+>   threatened (`guaranteed_ko`/`can_ko`) OR HP<=0.30 with a legal switch ->
+>   switch (hazard-aware); (4) else the best damaging move. Deterministic,
+>   degrades safely on a partial belief state, never raises.
 > All torch-free at import, one damage model, hermetic (fake-calc) + real-calc
-> tests, full suite **649 passed / 1 skipped / 8 deselected** (CPU-only).
+> tests, full suite **658 passed / 1 skipped / 8 deselected** (CPU-only).
 > **The ONLY remaining step is the fork-dependent SEAM** — HOW the context is
 > handed to the agent. Under (a) the brain is simply unused; under (b)/(c) it is
 > the core logic (a `build_obs_and_ctx()` enabler + a driver opt-in call). Pick
