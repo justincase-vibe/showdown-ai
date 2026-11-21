@@ -1220,6 +1220,20 @@ bit-identical).
   (HP+switch+faint; status/boosts via the calc where it knows them) + a
   world-model-vs-sim agreement gate [my lean]; (b) richer; (c) full sim
   replay per node (rejected — network round-trips defeat fast local search).
+  **Concrete sub-finding (this pass — decision-independent, informs the choice):**
+  `step` can reuse the ONE damage pipeline cleanly: it is snapshot-pure (JSON
+  in/out), runs on a long-lived Node worker POOL (no per-call spawn), and already
+  has a BATCH API — `calc_damage_many` ("24+ calcs per decision in one round-
+  trip"). So branch all child damages in ONE batch call, not N sequential ones.
+  Two data-flow facts to decide *within* OC-6: (1) the context
+  (`get_context()`) exposes `hp_frac` but NOT `maxhp`/a spread, yet `step` needs
+  `maxhp` to turn predicted damage into an HP-fraction delta; the belief STATE
+  already tracks `Facts.maxhp` (int) per mon — so extending `get_context()` to
+  carry `maxhp` (public info, no leak) is the concrete step, vs. assuming a
+  spread; (2) the calc needs a spread (evs/ivs/nature): own side has the full
+  team spec, opponent only a posterior (→ OC-9 top-1). Net: OC-6(a) "minimal"
+  = HP/switch/faint + `maxhp` in the context + assumed/posterior spread for the
+  calc, batched via `calc_damage_many`.
 * **OC-7 — decider-in-state:** the decider-aware design I built M2a on
   (context + `decider`; heads on the decider's POV; value mapped to root) vs a
   simpler "root-only decider" stub. M2a + the `_map_value` de-risk assume the
