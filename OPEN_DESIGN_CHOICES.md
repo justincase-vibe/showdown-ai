@@ -547,6 +547,24 @@ sequential-first OK for v1 (a 20-battle eval \u2248 6\u20138 min on CPU) vs conc
     `get_context()` + run the damage calc (stronger, touches the driver path);
     (c) give the heuristic a SEPARATE `act_with_context(...)` the driver calls
     when present (opt-in, backward-compatible). My lean: **(c)**.
+
+    **EXECUTION BRIEF (pick one → I wire it as the NEXT small step, no re-plan).**
+    The brain (`fitness.strategy.choose_action`) is built, interface-agnostic,
+    and integration-tested on a real `get_context()`; ONLY the seam (how the
+    context reaches the agent) is left. All three finish with the SAME live gate:
+    the KO-aware heuristic beats random **>70%** (A3 self-check).
+    * **(a) obs-only** — zero code change; the heuristic keeps `power*eff*STAB`.
+      Cheapest, but A3.3's KO-awareness + proactive threat-switching go unused.
+    * **(b) extend `act()`** — add an OPTIONAL `ctx` kwarg to the shared agent
+      contract; the driver passes `get_context()` to every agent. Touches the
+      net's `act` signature (all implementers must tolerate the new kwarg) —
+      medium risk (shared path).
+    * **(c) opt-in `act_with_context`** — driver: `if hasattr(agent,
+      "act_with_context"): ... else: agent.act(...)`. Isolated, the torch-net
+      `PokeAgent` is untouched — **low risk, recommended** (also your lean).
+    Shared first step under (b)/(c): a `build_obs_and_ctx()` in `net/env.py`
+    returning `(obs, ctx)` (single belief-build; `build_obs` becomes a thin
+    wrapper, obs stays byte-identical) so the context is available exactly once.
 * Self-check gate (A3 done): heuristic beats random **>70%** (the plan's target).
 
 > **PROGRESS (2026-11-21): the crux BRAIN is now BUILT and is interface-AGNOSTIC.**
