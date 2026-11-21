@@ -11,6 +11,9 @@ on the identical obs — so they verify the bridge, not the net. The perspective
 contract (value mapped to the root player's view) is pinned by the exact
 ``2V−1`` mapping.
 """
+import math
+import os
+
 import pytest
 
 from net import make_random_net, PokeAgent, encode_context
@@ -116,6 +119,32 @@ def test_policy_is_position_identity_not_index():
     assert set(p1) == set(p2)  # same action identities, no collisions
     for k in p1:
         assert p1[k] == pytest.approx(p2[k], abs=1e-6)
+
+
+# ── integration: a REAL trained checkpoint (not the random proxy) ────────────
+def test_real_checkpoint_bridge_is_sane():
+    """Run the bridge on a REAL trained net. A random-init net is only a proxy:
+    this catches real-artifact bridge bugs (NaN/shape, an OOV action id that
+    silently resolves to <pad>, a degenerate head) that a random net cannot
+    reveal. Verifies value is finite + in reward space and policy is a valid
+    distribution over the legal set. Skips if the scratch checkpoint is absent
+    (it is a scratch artifact, not a guaranteed fixture)."""
+    from net import PokeNet, build_vocabs
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    ckpt = os.path.join(root, "scratch", "s43_bc_n2000.pt")
+    if not os.path.exists(ckpt):
+        pytest.skip("real checkpoint not present (scratch artifact)")
+    vocabs = build_vocabs()
+    net = PokeNet.load_file(ckpt, vocabs, device="cpu")
+    wm = PokeWorldModel(PokeAgent(net, seed=1, device="cpu"), vocabs)
+    st = State(make_ctx(), "p1")
+    val = wm.value(st)
+    acts = wm.actions(st)
+    priors = wm.policy(st, acts)
+    assert math.isfinite(val) and -1.0 <= val <= 1.0
+    assert len(priors) == len(acts) and acts
+    assert all(math.isfinite(p) and p >= 0.0 for p in priors)
+    assert sum(priors) == pytest.approx(1.0, abs=1e-3)
 
 
 # ── the M2b boundary (not built yet) ─────────────────────────────────────────
