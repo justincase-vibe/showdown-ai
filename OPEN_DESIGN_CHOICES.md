@@ -573,6 +573,26 @@ sequential-first OK for v1 (a 20-battle eval \u2248 6\u20138 min on CPU) vs conc
 > handed to the agent. Under (a) the brain is simply unused; under (b)/(c) it is
 > the core logic (a `build_obs_and_ctx()` enabler + a driver opt-in call). Pick
 > (a)/(b)/(c) and I wire it as the next small step.
+>
+> **PROGRESS (2026-11-21, continued) — full ladder reviewed + one latent issue
+> hardened.** Bug-hunt over `ladder` / `harness` / `ko` / `strategy` / `heuristic`:
+> * `choose_action`'s active-slot guard hardened to `is None` (NOT truthiness) so
+>   a falsy-yet-valid slot key (e.g. an int slot of 0) is not mistaken for
+>   "missing" (which would silently bail to the first move). Real `get_context()`
+>   slots are "p1a"-style strings so this was latent, not manifest; a regression
+>   test pins it (`test_choose_int_slot_zero_is_not_treated_as_missing`, fails
+>   under the old guard). Full suite **659 passed / 1 skipped / 8 deselected**
+>   (CPU-only).
+> * Observation (NOT a bug for the A3 gate): `evaluate()` seeds the bot AND the
+>   reference with the SAME per-battle seed (`b_seed`). Fine when the bot is a
+>   checkpoint / deterministic policy, but a **random-vs-random** ref-vs-ref run
+>   would build the SAME net on both sides (degenerate, ~turn-order-biased). If
+>   we ever score random-vs-random, give the two sides distinct seeds.
+> * Confirmed sound: the two `_pick_switch` variants (obs-based vs ctx-based)
+>   agree on hazard sets/penalties; KO boundary `pct >= hp_frac*100 - 1e-3`
+>   (`_EPS` absorbs the 2dp rounding without crossing a quantum); attacker-
+>   unknown degrades in BOTH `move_ko` and `opp_move_ko`; "unknown" threat does
+>   NOT trigger a panic switch.
 
 ---
 
