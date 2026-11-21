@@ -549,6 +549,26 @@ sequential-first OK for v1 (a 20-battle eval \u2248 6\u20138 min on CPU) vs conc
     when present (opt-in, backward-compatible). My lean: **(c)**.
 * Self-check gate (A3 done): heuristic beats random **>70%** (the plan's target).
 
+> **PROGRESS (2026-11-21): the crux BRAIN is now BUILT and is interface-AGNOSTIC.**
+> I did NOT pick (a)/(b)/(c) — instead I built the decision logic as PURE
+> functions over the `get_context()` snapshot, so it is reusable under ALL THREE
+> options and commits to none (the same discipline as the KO core):
+> * `fitness/ko.py` — the KO assessment core (`move_ko` / `opp_move_ko` /
+>   `ko_assessment`). **Bug fixed:** it now degrades gracefully when the
+>   ATTACKER species is unknown (previously only the defender was checked, so an
+>   unknown opponent would make the calc raise — a latent crash).
+> * `fitness/strategy.py::rank_moves` — OFFENSIVE: rank my moves by
+>   `guaranteed_ko > can_ko > expected_ko > damage` (status moves sort last).
+> * `fitness/strategy.py::threat_assessment` — DEFENSIVE: "will the opponent's
+>   likely move KO me?" -> `guaranteed_ko > can_ko > expected_ko > safe > unknown`
+>   (lets an agent switch/protect PROACTIVELY, not just on a fixed HP threshold).
+> All torch-free at import, one damage model, hermetic (fake-calc) + real-calc
+> tests, full suite **649 passed / 1 skipped / 8 deselected** (CPU-only).
+> **The ONLY remaining step is the fork-dependent SEAM** — HOW the context is
+> handed to the agent. Under (a) the brain is simply unused; under (b)/(c) it is
+> the core logic (a `build_obs_and_ctx()` enabler + a driver opt-in call). Pick
+> (a)/(b)/(c) and I wire it as the next small step.
+
 ---
 
 ## 2026-11-21 — HP>1.0 blind-play bug: ROOT-CAUSED + FIXED (the "unwanted outcome")
