@@ -581,8 +581,15 @@ sequential-first OK for v1 (a 20-battle eval \u2248 6\u20138 min on CPU) vs conc
 >   "missing" (which would silently bail to the first move). Real `get_context()`
 >   slots are "p1a"-style strings so this was latent, not manifest; a regression
 >   test pins it (`test_choose_int_slot_zero_is_not_treated_as_missing`, fails
->   under the old guard). Full suite **659 passed / 1 skipped / 8 deselected**
+>   under the old guard). Full suite **660 passed / 1 skipped / 8 deselected**
 >   (CPU-only).
+> * Closed the **hermetic-only gap**: added `test_real_get_context_feeds_the_brain
+>   _end_to_end` — a REAL `BeliefState` -> REAL `get_context()` -> the brain with
+>   the REAL shared calc. Every prior brain test used a hand-crafted ctx; this
+>   pins the integration against field-name drift (a missing field would silently
+>   degrade the brain, invisible to hermetic tests). Verified live: 252-Atk
+>   Garchomp earthquake ranks first (58-70% of max HP, guaranteed KO) vs a 1-HP
+>   Blastoise; `choose_action` picks earthquake.
 > * Observation (NOT a bug for the A3 gate): `evaluate()` seeds the bot AND the
 >   reference with the SAME per-battle seed (`b_seed`). Fine when the bot is a
 >   checkpoint / deterministic policy, but a **random-vs-random** ref-vs-ref run
