@@ -110,3 +110,87 @@ def test_my_side_defaults_to_p1_when_team_unknown():
 def test_my_side_never_raises_on_malformed_lines():
     assert my_side(_FakeBattle(team={"p1a": _FakeMon("garchomp")}),
                    ["|poke|malformed", "|nonsense|line|"]) == "p1"
+
+
+# ── _stop_ps_client: clean per-battle websocket teardown ────────────────────
+# Each PokeEnv spins up its OWN event-loop thread, and each of its two agents
+# owns a PSClient whose listen() coroutine runs on it; poke-env only reaps
+# those at atexit. Without a per-battle stop each battle leaks a socket +
+# coroutine (and, when a server is killed first, the ConnectionResetError
+# teardown noise). These pin the best-effort helper ShowdownEnv.close() calls.
+
+class _FakeWS:
+    def __init__(self, raise_on_close: bool = False):
+        self.closed = False
+        self._raise = raise_on_close
+
+    async def close(self):
+        if self._raise:
+            raise RuntimeError("boom")
+        self.closed = True
+
+
+class _FakeClient:
+    """Mimic the poke-env PSClient surface _stop_ps_client uses:
+    websocket, loop, and the async stop_listening() (which closes the
+    websocket)."""
+    def __init__(self, ws, loop):
+        self.websocket = ws
+        self.loop = loop
+
+    async def stop_listening(self):
+        # mirrors PSClient.stop_listening -> _stop_listening -> websocket.close()
+        await self.websocket.close()
+
+
+def _running_loop():
+    import asyncio
+    import threading
+    loop = asyncio.new_event_loop()
+    t = threading.Thread(target=loop.run_forever, daemon=True)
+    t.start()
+    return loop, t
+
+
+def test_stop_ps_client_closes_the_websocket():
+    from net.env import _stop_ps_client
+    loop, t = _running_loop()
+    try:
+        ws = _FakeWS()
+        assert _stop_ps_client(_FakeClient(ws, loop)) is True
+        assert ws.closed is True
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        t.join(timeout=5)
+
+
+def test_stop_ps_client_none_is_a_noop():
+    from net.env import _stop_ps_client
+    assert _stop_ps_client(None) is False
+
+
+def test_stop_ps_client_missing_websocket_is_a_noop():
+    from net.env import _stop_ps_client
+
+    class _NoWS:
+        websocket = None
+        loop = None
+
+    assert _stop_ps_client(_NoWS()) is False
+
+
+def test_stop_ps_client_missing_loop_is_a_noop():
+    from net.env import _stop_ps_client
+    assert _stop_ps_client(_FakeClient(_FakeWS(), None)) is False
+
+
+def test_stop_ps_client_swallows_a_close_error():
+    """A failing close must NOT raise into the caller (teardown must never fail
+    the battle it is tearing down)."""
+    from net.env import _stop_ps_client
+    loop, t = _running_loop()
+    try:
+        assert _stop_ps_client(_FakeClient(_FakeWS(raise_on_close=True), loop)) is False
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        t.join(timeout=5)

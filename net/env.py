@@ -389,6 +389,50 @@ def my_side(battle: Any, lines: List[str]) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  the environment
 # ═══════════════════════════════════════════════════════════════════════════════
+def _stop_ps_client(client: Any, timeout: float = 5.0) -> bool:
+    """Stop a poke-env ``PSClient``'s websocket listener cleanly (best-effort).
+
+    Why this exists: each ``PokeEnv`` spins up its OWN event-loop thread
+    (``env._loop``), and BOTH of its ``_EnvPlayer`` agents own a ``PSClient``
+    whose ``listen()`` coroutine runs on that loop. poke-env only reaps those
+    at ``atexit`` (``poke_env.concurrency.__clear_loop``) — neither
+    ``PokeEnv.close()`` nor ours ever stops them. So every self-play battle
+    leaks a websocket + a coroutine until the process exits. If a Showdown
+    server is killed FIRST, the still-live ``listen()`` dies as a raw
+    ``ConnectionResetError`` (poke-env's ``listen()`` only treats a clean
+    ``ConnectionClosedOK`` as non-exceptional) and logs it as a full
+    traceback — that is the teardown noise.
+
+    Calling poke-env's own ``PSClient.stop_listening()`` (which closes the
+    websocket) while the server is still up lets ``listen()`` exit through the
+    ``ConnectionClosedOK`` path (a one-line warning, no traceback) and frees
+    the socket immediately (no accumulation over a long run).
+
+    The clients live on the AGENTS (``agent1.ps_client`` / ``agent2.ps_client``),
+    NOT on the env — ``env.ps_client`` does not exist (verified live). This
+    helper takes one client and is safe to call on ``None``.
+
+    Best-effort: returns ``True`` if a live client was asked to stop, ``False``
+    if there was nothing to stop, and NEVER raises (teardown must not fail the
+    battle that is being torn down).
+    """
+    import asyncio
+    if client is None:
+        return False
+    if getattr(client, "websocket", None) is None:
+        return False                    # never connected; nothing to close
+    loop = getattr(client, "loop", None)
+    stop = getattr(client, "stop_listening", None)
+    if loop is None or stop is None:
+        return False
+    try:
+        future = asyncio.run_coroutine_threadsafe(stop(), loop)
+        future.result(timeout=timeout)
+        return True
+    except Exception:  # noqa: BLE001 — cleanup must never raise into the caller
+        return False
+
+
 class ShowdownEnv(SinglesEnv):
     """A concrete, instantiable singles self-play environment.
 
@@ -510,6 +554,14 @@ class ShowdownEnv(SinglesEnv):
                     q.get()
             except Exception:
                 pass
+        # stop EACH agent's websocket listener cleanly (see _stop_ps_client):
+        # poke-env never does this (each PokeEnv spins its own loop thread and
+        # only reaps it at atexit), so without it every battle leaks a socket +
+        # a coroutine (and, when a server is killed first, the
+        # ConnectionResetError teardown noise). The clients live on the agents,
+        # not on the env — self.ps_client does not exist (verified live).
+        for agent in (getattr(self, "agent1", None), getattr(self, "agent2", None)):
+            _stop_ps_client(getattr(agent, "ps_client", None))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
