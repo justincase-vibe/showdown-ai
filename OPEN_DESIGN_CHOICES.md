@@ -1227,6 +1227,56 @@ Net suite 143 passed / 0 failed (CPU). So when OC-6 + OC-9 are picked, `step`
 WIREs these in + the batched calc + the posterior refinement — it does NOT
 re-derive the structural mechanics.
 
+**M2b BUILD PLAN — mechanical checklist (execute on OC-6 + OC-9 pick).**
+Everything below is ALREADY committed + green (verified this session):
+`maxhp` in `get_context` (`ef86f08`); the transform primitives (`bad2cf7`);
+`State.copy` (`dfa7753`); `_map_value` both-decider (`8286b35`); `_flip_pov`
+round-trip (`fc1a2d7`); the field-set single-source-of-truth (`3987c1e`); the
+M1 length guard (`02f3a9b`); the ONE damage pipeline + `calc_damage_many` batch.
+So this is a WIRING pass, not a re-derivation. Steps, in order (each ships with
+a test; `live` deselected; CPU-only; no GPU):
+
+1. **Wire `_flip_pov` into `_orient(ctx, "p2")`** — replace the
+   `NotImplementedError` with `return _flip_pov(ctx)` + the OC-9 posterior
+   refinement (branch below). *Test:* `test_orient_p2_round_trips_to_identity`
+   (orient p1→p2→p1 == identity) + the OC-9-refinement test.
+2. **Implement `step(state, action)`** in `PokeWorldModel`:
+   * `child = state.copy(decider=flip_decider(state.decider))` (the safe deep-copy);
+   * branch the action's effect via the transforms — `apply_switch` (a switch
+     action) / `apply_hp_delta` + `apply_faint` (a move action: damage from the
+     batched calc; faint if the victim's hp_frac hits 0);
+   * the damage number comes from the **ONE** pipeline: `calc_damage_many` (batch
+     every child damage in one round-trip) — own spread = team spec, opp spread =
+     posterior top-1 (OC-9(a)) or carried (OC-9(b));
+   * OC-6 branch: **(a) minimal** = HP/switch/faint only (no status/boost
+     tracking); **(b) richer** = + status/boost updates (the calc knows them);
+   * `reward = _map_value(leaf_win_prob, child.decider, self.root_decider)`;
+     `done = (either side is 0-6 / 6-0)`.
+   * *Test:* `test_step_move_produces_p2_child` (a move -> a p2-turn child, the
+     victim's hp_frac drops by damage/maxhp, the decider flipped, the parent's
+     ctx provably unchanged).
+3. **World-model-vs-sim agreement test** (the OC-6 gate): a scripted sequence
+   through the real sim vs. the world model's predicted outcomes (hp_frac /
+     fainted / active) — they must AGREE (the sim is ground truth). *Test:* the
+   CPU `live`-deselected agreement test.
+4. **MCTS 2-ply smoke:** `MCTS.best_action` now runs a real 2-ply tree (root p1
+   + reply p2). *Test:* `test_mcts_two_ply_tree_is_nontrivial_and_legal`.
+5. **Efficiency (the flagged landmine):** cache the forward result per state so
+   one `forward_obs` feeds BOTH value + policy (do this inside `step`'s child
+   eval). Not a correctness bug — a latency win once the tree is real.
+
+**OC-6 BRANCH:** (a) minimal [lean] = HP/switch/faint + batched calc (own
+spec / opp posterior-top-1 spread). (b) richer = + status/boost. (c) full sim
+= REJECTED (round-trips defeat fast local search).
+
+**OC-9 BRANCH:** (a) top-1 [lean] = `_orient(ctx,"p2")` replaces the posterior
+with the argmax candidate (p2's "own" becomes fully known). (b) carry-opaque =
+the posterior rides along (p2's "own" stays a posterior).
+
+**On pick:** I execute steps 1-5 in ONE short, tested pass (each step green
+before the next), then report the gate result. No GPU, no `git add -A`, commit
+per sub-step.
+
 **Your call still needed to unblock M2b (re-stated for a fast decision):**
 * **OC-6 — world-model fidelity of `step`:** (a) minimal bookkeeping
   (HP+switch+faint; status/boosts via the calc where it knows them) + a
