@@ -8,8 +8,8 @@ Design:
   * One JSON file per league (default: ``league/bots.json``)
   * Each bot: ``{name, ckpt_path, elo, wins, losses, draws, last_fought}``
   * ELO: standard K=32, initial 1500 (the Smogon / chess convention)
-  * Thread-safe: the league engine is single-threaded (one battle at a time
-    per pairing), so no locking is needed
+  * Thread-safe: the league runs CONCURRENT battles (worker threads), so the
+    mutating methods serialize under an internal reentrant lock
   * The registry is framework-agnostic (no torch import)
 
 Usage:
@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -62,14 +63,20 @@ class BotRegistry:
     and how well are they doing." The league engine reads the roster,
     pairs bots, runs battles, and writes results back.
 
-    Thread-safety: the league engine is single-threaded (one battle at a
-    time per pairing), so no locking is needed. If a future version runs
-    concurrent battles, wrap the mutating methods in a lock.
+    Thread-safety: the league runs CONCURRENT battles (SelfPlayRun worker
+    threads), so the mutating methods (``update_result`` / ``add`` / ``remove``
+    / ``save``) serialize under an internal reentrant lock — a concurrent
+    battle's read-mutate-persist can no longer interleave with another's.
     """
 
     def __init__(self, path: Optional[Path] = None):
         self.path = Path(path) if path is not None else DEFAULT_REGISTRY
         self._bots: Dict[str, Bot] = {}
+        # The league runs CONCURRENT battles (SelfPlayRun worker threads all
+        # call update_result -> save), so read-mutate-persist must be atomic.
+        # RLock (reentrant): a guarded method may call save(), which also takes
+        # the lock, without deadlocking.
+        self._lock = threading.RLock()
         self._load()
 
     # ── persistence ──────────────────────────────────────────────────────
@@ -87,26 +94,29 @@ class BotRegistry:
             self._bots = {}
 
     def save(self) -> None:
-        """Write the roster to disk."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"bots": [b.to_dict() for b in self._bots.values()]}
-        self.path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        """Write the roster to disk (serialized — concurrent battles persist)."""
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            data = {"bots": [b.to_dict() for b in self._bots.values()]}
+            self.path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     # ── roster management ────────────────────────────────────────────────
 
     def add(self, name: str, ckpt_path: str, elo: int = ELO_INITIAL) -> Bot:
         """Add a bot to the roster (or update if it already exists)."""
-        bot = Bot(name=name, ckpt_path=ckpt_path, elo=elo)
-        self._bots[name] = bot
-        self.save()
+        with self._lock:
+            bot = Bot(name=name, ckpt_path=ckpt_path, elo=elo)
+            self._bots[name] = bot
+            self.save()
         return bot
 
     def remove(self, name: str) -> None:
         """Remove a bot from the roster."""
-        if name not in self._bots:
-            raise KeyError(f"bot {name!r} not in roster")
-        del self._bots[name]
-        self.save()
+        with self._lock:
+            if name not in self._bots:
+                raise KeyError(f"bot {name!r} not in roster")
+            del self._bots[name]
+            self.save()
 
     def get(self, name: str) -> Bot:
         """Look up a bot by name."""
@@ -125,39 +135,42 @@ class BotRegistry:
     # ── results ──────────────────────────────────────────────────────────
 
     def update_result(self, a: str, b: str, winner: Optional[str]) -> None:
-        """Record a battle result and update ELO.
+        """Record a battle result and update ELO (thread-safe).
 
         ``winner`` is the bot name (``a`` or ``b``), or ``None`` for a draw.
+        The league runs concurrent battles, so the read-mutate-persist is
+        serialized under the registry lock (RLock — ``save`` re-acquires it).
         """
-        ba = self.get(a)
-        bb = self.get(b)
-        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._lock:
+            ba = self.get(a)
+            bb = self.get(b)
+            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-        # ``_elo_delta(rating_a, rating_b, score)`` = K*(score - E_a) with
-        # E_a = a's expected score. So the delta is ALWAYS a's gain, computed
-        # with a's ACTUAL score (1.0 win / 0.0 loss / 0.5 draw) — the standard
-        # ELO formula. (The old code used ``-K*(1-E_a)`` for a loss, which
-        # under-rewarded upsets: an underdog win gave +K*E_a's complement
-        # instead of +K*(1-E_a). Magnitudes are pinned by
-        # tests/test_registry.py::test_elo_magnitudes_standard.)
-        if winner == a:
-            ba.wins += 1
-            bb.losses += 1
-            delta = self._elo_delta(ba.elo, bb.elo, 1.0)
-        elif winner == b:
-            bb.wins += 1
-            ba.losses += 1
-            delta = self._elo_delta(ba.elo, bb.elo, 0.0)
-        else:  # draw
-            ba.draws += 1
-            bb.draws += 1
-            delta = self._elo_delta(ba.elo, bb.elo, 0.5)
+            # ``_elo_delta(rating_a, rating_b, score)`` = K*(score - E_a) with
+            # E_a = a's expected score. So the delta is ALWAYS a's gain, computed
+            # with a's ACTUAL score (1.0 win / 0.0 loss / 0.5 draw) — the standard
+            # ELO formula. (The old code used ``-K*(1-E_a)`` for a loss, which
+            # under-rewarded upsets: an underdog win gave +K*E_a's complement
+            # instead of +K*(1-E_a). Magnitudes are pinned by
+            # tests/test_registry.py::test_elo_magnitudes_standard.)
+            if winner == a:
+                ba.wins += 1
+                bb.losses += 1
+                delta = self._elo_delta(ba.elo, bb.elo, 1.0)
+            elif winner == b:
+                bb.wins += 1
+                ba.losses += 1
+                delta = self._elo_delta(ba.elo, bb.elo, 0.0)
+            else:  # draw
+                ba.draws += 1
+                bb.draws += 1
+                delta = self._elo_delta(ba.elo, bb.elo, 0.5)
 
-        ba.elo += delta
-        bb.elo -= delta
-        ba.last_fought = now
-        bb.last_fought = now
-        self.save()
+            ba.elo += delta
+            bb.elo -= delta
+            ba.last_fought = now
+            bb.last_fought = now
+            self.save()
 
     @staticmethod
     def _elo_delta(rating_a: int, rating_b: int, score: float) -> int:

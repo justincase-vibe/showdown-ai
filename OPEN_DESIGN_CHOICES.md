@@ -385,6 +385,44 @@ tools (I kept both) or clean them up after?
 
 ---
 
+## 2026-11-21 \u2014 Registry thread-safety (concurrent-battle ELO/save race)
+
+**Bug (latent, caught in self-review \u2014 NOT an occurring symptom yet).**
+`league/registry.py::BotRegistry` had **no lock**, yet its docstring claimed
+"the league engine is single-threaded\u2026 no locking needed." That assumption is
+**false**: `control/selfplay.py::SelfPlayRun.start()` spawns **N worker
+threads** (one per slot) that all concurrently call `on_battle` \u2192 `_record`
+\u2192 `registry.update_result()` \u2192 `save()`. Concurrent read-mutate-persist on the
+shared in-memory roster + a shared `write_text` could interleave \u2192 a lost ELO
+update and/or a torn/partial `bots.json`. Low-probability (within a single
+round each bot is in only one battle, so the main risk was concurrent
+`save()` file-write interleaving), and the smoke run passed by luck.
+
+**Fix (chosen \u2014 make the registry itself thread-safe).** Added a
+`threading.RLock` in `BotRegistry.__init__` and guarded `save()` / `add()` /
+`remove()` / `update_result()` with `with self._lock:`. RLock (reentrant) so a
+guarded method can call `save()` (which also takes the lock) without
+deadlocking. Updated the stale "single-threaded" docstrings (module + class)
+to reflect the concurrent league.
+
+**Regression test.** `league/tests/test_registry.py::test_concurrent_updates_consistent`
+hammers the registry from 8 threads (overlapping bot pairs, barrier-started to
+maximize contention) and asserts the invariants a race would break: ELO
+zero-sum conserved, every battle counted exactly once (W/L balanced, draws in
+pairs), and the persisted file is valid JSON matching in-memory state. Stable
+across 5 repeated runs.
+
+**Gate:** registry suite **15 passed**; full suite **277 passed / 1 skipped**
+(CPU-only; +1 the new test).
+
+**Note for you:** this is a *correctness* hardening, not a behavior change \u2014
+the ELO math and roster semantics are identical; only the concurrency is now
+safe. If you'd rather the thread-safety live on the *engine* (a single
+serialized results queue) instead of the registry, that's a bigger change and
+I'd flag it \u2014 but the registry lock is the smaller, more contained fix.
+
+---
+
 ## A. Workflow errors found
 
 ### Fixed this pass

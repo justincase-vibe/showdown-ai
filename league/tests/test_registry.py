@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -168,3 +169,90 @@ def test_names(reg):
     reg.add("alice", "a.pt")
     reg.add("bob", "b.pt")
     assert set(reg.names()) == {"alice", "bob"}
+
+
+def test_concurrent_updates_consistent(tmp_path):
+    """Concurrent update_result must not lose updates or corrupt the file.
+
+    The league runs battles on multiple worker threads (see
+    ``control/selfplay.py::SelfPlayRun.start``), all of which call
+    ``update_result -> save`` concurrently on the shared registry. This hammers
+    the registry from several threads — with OVERLAPPING bot pairs, so the
+    read-moduate-persist must be atomic — and asserts the invariants a race
+    would break:
+      * ELO is zero-sum conserved (sum == N * initial) — a lost update breaks it
+      * every battle is counted exactly once (W/L balanced, draws in pairs)
+      * the persisted file is valid JSON and matches the in-memory state
+    """
+    path = tmp_path / "bots.json"
+    reg = BotRegistry(path=path)
+
+    n_bots = 6
+    names = [f"bot{i}" for i in range(n_bots)]
+    for n in names:
+        reg.add(n, f"{n}.pt")
+    total_initial_elo = n_bots * ELO_INITIAL
+
+    n_threads = 8
+    per_thread = 30
+    total_battles = n_threads * per_thread
+    barrier = threading.Barrier(n_threads)
+    errors: list = []
+
+    def worker(tid: int) -> None:
+        try:
+            barrier.wait()  # start all threads together to maximize contention
+        except Exception as e:  # pragma: no cover - barrier only fails on teardown
+            errors.append(e)
+            return
+        try:
+            for i in range(per_thread):
+                a = names[(tid + i) % n_bots]
+                b = names[(tid + i + 1) % n_bots]  # always distinct (n_bots > 1)
+                r = (tid * per_thread + i) % 3      # exercise win / loss / draw
+                winner = a if r == 0 else (b if r == 1 else None)
+                reg.update_result(a, b, winner=winner)
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(t,)) for t in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"worker errors: {errors}"
+
+    # Zero-sum ELO conserved (a lost-update race breaks this).
+    total_elo = sum(reg.get(n).elo for n in names)
+    assert total_elo == total_initial_elo, (
+        f"ELO not conserved: {total_elo} != {total_initial_elo} (a lost update)"
+    )
+
+    # Every battle counted exactly once (a dropped battle breaks this).
+    total_wins = sum(reg.get(n).wins for n in names)
+    total_losses = sum(reg.get(n).losses for n in names)
+    total_draws = sum(reg.get(n).draws for n in names)
+    assert total_wins == total_losses, f"win/loss imbalance: {total_wins} vs {total_losses}"
+    assert total_draws % 2 == 0, f"draws not in pairs: {total_draws}"
+    n_won = total_wins
+    n_draw = total_draws // 2
+    assert n_won + n_draw == total_battles, (
+        f"battle count mismatch: {n_won} W/L + {n_draw} draws != {total_battles} total"
+    )
+
+    # The persisted file is valid JSON and matches in-memory state (a torn
+    # concurrent write breaks this).
+    data = json.loads(path.read_text(encoding="utf-8"))
+    persisted = {b["name"]: b for b in data["bots"]}
+    assert set(persisted) == set(names), "persisted roster names mismatch"
+    for n in names:
+        m, p = reg.get(n), persisted[n]
+        assert p["elo"] == m.elo, f"{n}: file elo {p['elo']} != memory {m.elo}"
+        assert p["wins"] == m.wins and p["losses"] == m.losses and p["draws"] == m.draws
+
+    # A fresh registry reloads the exact same state.
+    reg2 = BotRegistry(path=path)
+    for n in names:
+        assert reg2.get(n).elo == reg.get(n).elo
+        assert reg2.get(n).wins == reg.get(n).wins
