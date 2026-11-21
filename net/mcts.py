@@ -133,7 +133,17 @@ class MCTS:
         if not acts:
             node.terminal = True
             return
-        priors = self.wm.policy(node.state, acts) or [1.0] * len(acts)
+        priors = self.wm.policy(node.state, acts)
+        if not priors:
+            priors = [1.0] * len(acts)      # null prior -> uniform over the legal set
+        if len(priors) != len(acts):
+            # A mismatched prior list would silently DROP legal actions via the
+            # zip below (a silent-failure mode) — fail LOUDLY instead. This also
+            # guards the real M2b world model: its policy must match its actions,
+            # so a slip corrupts the search visibly, not by quietly losing moves.
+            raise ValueError(
+                f"WorldModel.policy returned {len(priors)} priors for {len(acts)} "
+                f"actions (the prior list must match the action list)")
         total = float(sum(priors)) or 1.0
         for a, p in zip(acts, priors):
             nxt, reward, done = self.wm.step(node.state, a)

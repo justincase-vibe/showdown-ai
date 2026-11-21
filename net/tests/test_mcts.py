@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Sequence, Tuple
 
+import pytest
+
 from net.mcts import MCTS
 
 
@@ -198,3 +200,21 @@ def test_mcts_never_returns_an_illegal_action():
                        prior={"A": 0.6, "B": 0.2, "C": 0.2})
     got = MCTS(wm, iterations=300).best_action("root")
     assert got in set(wm.actions("root")), f"{got!r} is not a legal root action"
+
+
+def test_policy_length_mismatch_fails_loudly_not_silently_drops_actions():
+    """A WorldModel whose policy returns the WRONG number of priors must fail
+    LOUDLY (ValueError), not silently drop legal actions via the expand zip.
+    This is the 'no silent failures' guard on the search core, and it protects
+    the real M2b world model (its policy must match its action list)."""
+    class BadPriorWorld:
+        def actions(self, state):
+            return ["a", "b", "c"]
+        def step(self, state, action):
+            return "term", 0.0, True
+        def value(self, state):
+            return 0.0
+        def policy(self, state, actions):
+            return [0.5, 0.5]  # 2 priors for 3 actions -> contract violation
+    with pytest.raises(ValueError, match="priors"):
+        MCTS(BadPriorWorld(), iterations=4).best_action("root")
