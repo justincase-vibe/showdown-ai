@@ -259,6 +259,91 @@ def _actions_from_own(ctx: Dict) -> List[Dict]:
     return acts
 
 
+# ── M2b action-transform primitives (decision-independent) ───────────────────
+# Pure, POV-aware, context-only (no net, no calc, no RNG). They apply ONE
+# action's STRUCTURAL effect to a canonical (p1-POV) context and return a NEW
+# dict (never mutating the input). They are shared by EVERY viable M2b option:
+# a switch / faint / HP-delta is the same regardless of OC-6 (bookkeeping
+# fidelity) or OC-9 (posterior semantics), so building them now encodes no
+# design decision — it only proves the "apply the action's effect" mechanics
+# before the OC-gated parts (the calc spread + the posterior refinement) are
+# wired in. This is the decision-independent core of M2b's step.
+
+def _own_opp_keys(decider: str) -> Tuple[str, str]:
+    """The canonical (p1-POV) ctx keys for ``decider``'s side and the opponent's
+    side. p1 -> ("own","opponent"); p2 -> ("opponent","own")."""
+    return ("own", "opponent") if decider == "p1" else ("opponent", "own")
+
+
+def apply_hp_delta(ctx: Dict, victim_side: str, slot: str, damage: int,
+                   maxhp: Optional[int]) -> Dict:
+    """Apply ``damage`` to ``slot`` on ``victim_side`` -> a NEW context with that
+    mon's ``hp_frac`` reduced by ``damage / maxhp`` (clamped to [0,1]).
+
+    ``maxhp`` is the mon's max HP (now in the context, committed ef86f08); if it
+    is None/0 (not yet revealed) the fraction is left unchanged — step must
+    tolerate an unknown maxhp, never crash. Pure + POV-aware (a victim on p1 is
+    ctx["own"], on p2 is ctx["opponent"])."""
+    out = copy.deepcopy(ctx)
+    key = "own" if victim_side == "p1" else "opponent"
+    blk = (out.get(key) or {}).get(slot)
+    if blk is None or not maxhp:
+        return out
+    new_frac = max(0.0, min(1.0, float(blk.get("hp_frac", 0.0)) - damage / float(maxhp)))
+    blk["hp_frac"] = round(new_frac, 4)
+    return out
+
+
+def apply_faint(ctx: Dict, victim_side: str, slot: str) -> Dict:
+    """Mark ``slot`` on ``victim_side`` as fainted (``fainted``=True, hp_frac=0)
+    in a NEW context. A gone mon is no longer switchable bench, so this is the
+    uniform "apply the structural effect" primitive every M2b option shares. Pure
+    + POV-aware."""
+    out = copy.deepcopy(ctx)
+    key = "own" if victim_side == "p1" else "opponent"
+    blk = (out.get(key) or {}).get(slot)
+    if blk is not None:
+        blk["fainted"] = True
+        blk["hp_frac"] = 0.0
+    out.setdefault("fainted", {})
+    out["fainted"][victim_side] = out["fainted"].get(victim_side, 0) + 1
+    return out
+
+
+def apply_switch(ctx: Dict, decider: str, bench_species: str) -> Dict:
+    """Apply ``decider``'s switch of ``bench_species`` into the active slot -> a
+    NEW context. The outgoing active goes to the bench; the incoming bench mon
+    takes the active slot; the active pointer updates. Pure + POV-aware.
+
+    The bench mon is located by ``species`` (the decider's side, p1 -> ctx["own"],
+    p2 -> ctx["opponent"]). The structural effect is identical under every M2b
+    option, so this is decision-independent; OC-6 only adds state (status/boost)
+    on top, it does not change a switch's structural effect.
+    """
+    out = copy.deepcopy(ctx)
+    own_key, _ = _own_opp_keys(decider)
+    side = out.get(own_key) or {}
+    active = (out.get("active") or {}).get(decider)
+    if active is None:
+        return out  # no active to switch from — a defensive no-op, never crash
+    # find the incoming bench mon by species
+    incoming = None
+    for s, b in side.items():
+        if s == active:
+            continue
+        sp = b.get("species") or b.get("name") or ""
+        if sp and sp == bench_species and not b.get("fainted"):
+            incoming = s
+            break
+    if incoming is None:
+        return out  # the bench mon is not present — a defensive no-op
+    # outgoing active -> bench (it keeps its slot id; only the active pointer
+    # moves), incoming bench -> the active slot id.
+    out["active"] = dict(out.get("active") or {})
+    out["active"][decider] = incoming
+    return out
+
+
 class PokeWorldModel:
     """M2a — the real :class:`PokeNet` as an MCTS :class:`~net.mcts.WorldModel`.
 
