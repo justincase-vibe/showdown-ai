@@ -508,6 +508,32 @@ should we pull an existing open-source P\u00f4kemon bot as the top reference? (2
 fitness weights (1/2/3) reasonable, or do you want a different aggregation? (3)
 sequential-first OK for v1 (a 20-battle eval \u2248 6\u20138 min on CPU) vs concurrent now?
 
+**A3 — the `HeuristicAgent` (the mid-ladder reference):**
+* Contract: a `PokeAgent`-compatible policy — `.act(obs, acts, deterministic)`
+  returning a `Decision`-shaped object (`action`/`action_index`/`logprob`/
+  `value`/`entropy`/`prob`). DROP-IN opponent: the SAME driver `policy_action`
+  path the net uses, so the harness plays exactly what it does.
+* Torch-free (CPU-first, like the rest of `fitness/`): decodes structured state
+  from `obs` (registry channels: `own_slot` hp_frac/active, status, boosts,
+  hazards) + the legal `acts`; static move data via the belief state's own
+  lookup `legality.lookup.get_move(name, gen)` — no code twice.
+* Sub-steps (one reviewable commit each):
+  * **A3.1 (this change)** legal + sensible baseline: pass on empty `acts`;
+    forced-switch -> pick a switch; own active HP <= 0.30 + a switch is legal ->
+    switch to the healthiest bench; else play the highest-base-power damaging
+    move (status moves ranked last). Hermetic: legality, switch-when-low,
+    best-power move, pass, determinism.
+  * **A3.2** type-effectiveness + STAB scoring (`get_type_chart` + own type),
+    hazard-aware switch target.
+  * **A3.3 (the crux)** damage-calc "will-this-KO / will-I-KO". **OPEN for you
+    (interface decision):** `.act(obs, acts)` does NOT expose the belief state /
+    calc. Options: (a) keep the heuristic **obs-only** (contract-stable, weaker);
+    (b) **extend the agent seam** so a policy may also receive the structured
+    `get_context()` + run the damage calc (stronger, touches the driver path);
+    (c) give the heuristic a SEPARATE `act_with_context(...)` the driver calls
+    when present (opt-in, backward-compatible). My lean: **(c)**.
+* Self-check gate (A3 done): heuristic beats random **>70%** (the plan's target).
+
 ---
 
 ## 2026-11-21 — HP>1.0 blind-play bug: ROOT-CAUSED + FIXED (the "unwanted outcome")
