@@ -1,0 +1,119 @@
+"""A3.3b — the KO-aware move-ranking "brain" (PURE + interface-agnostic).
+
+This is the decision logic an agent uses to prefer moves that KO the opponent,
+once it has the structured belief context (``get_context()``). It is a **pure
+function over the context snapshot + the candidate moves**, so it is
+INDEPENDENT of the a/b/c interface decision (HOW that context is delivered to
+the agent): whichever way the context is passed in, the ranking logic is the
+SAME. That keeps this step safe under all three options — it commits to none.
+
+One-workflow: reuses the SINGLE KO core (``fitness.ko``) -> the ONE damage
+model (``damage.calc``). No second move table, no second damage pipeline.
+Torch-free at import (``fitness.ko`` is torch-free; the damage calc is imported
+lazily inside the KO core only when a real calc is actually run).
+
+Ranking (best-first):
+  1. KO ladder — ``guaranteed_ko`` > ``can_ko`` > ``expected_ko`` > none.
+  2. within a tier — more expected damage (higher ``expected_pct``) wins, so a
+     bigger kill / bigger chip is preferred (a sane tie-break; it also means a
+     status move, which deals 0, sorts below every damaging move).
+The raw damage pct comes straight from the shared calc, so this is at least as
+accurate as the obs-only heuristic's ``power * effectiveness * STAB`` and
+strictly better when the opponent is below full HP (where "will it KO" matters).
+
+Degraded, never crashes: an unknown opponent (the KO core degrades) simply puts
+every move in tier 0 and the sort is stable (original order) — a partial belief
+state must not kill a decision.
+"""
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+from . import ko as _ko
+
+__all__ = ["ko_ladder_score", "rank_moves"]
+
+
+def _move_key(move: Any) -> str:
+    """A stable identity for a move spec (str or ``{'name': ...}``) — used to
+    memoise the per-move KO assessment so each distinct move is calc'd once."""
+    if isinstance(move, str):
+        return move
+    if isinstance(move, dict):
+        return str(move.get("name") or move)
+    return repr(move)
+
+
+def ko_ladder_score(assessment: Optional[Dict]) -> tuple:
+    """A sortable ``(tier, magnitude)`` for one :func:`fitness.ko` assessment.
+
+    ``tier`` is the KO ladder (3 guaranteed > 2 can > 1 expected > 0 none);
+    ``magnitude`` is the expected damage pct (a within-tier tie-break: more
+    damage is better). Pure — no I/O. A ``None`` / empty assessment degrades to
+    the bottom tier (no KO signal, no damage).
+    """
+    a = assessment or {}
+    if a.get("guaranteed_ko"):
+        tier = 3
+    elif a.get("can_ko"):
+        tier = 2
+    elif a.get("expected_ko"):
+        tier = 1
+    else:
+        tier = 0
+    mag = float(a.get("expected_pct", 0.0) or 0.0)
+    return (tier, mag)
+
+
+def rank_moves(
+    ctx: Dict,
+    own_slot: str,
+    opp_slot: str,
+    moves: List[Any],
+    *,
+    fmt: str,
+    gen: int = 9,
+    calc_fn: Optional[Any] = None,
+    own_ability: Optional[str] = None,
+    own_item: Optional[str] = None,
+    opp_ability: Optional[str] = None,
+    opp_item: Optional[str] = None,
+    own_tera: Optional[str] = None,
+    opp_tera: Optional[str] = None,
+) -> Dict:
+    """Rank ``moves`` best-first by KO likelihood, then raw damage.
+
+    :param ctx: the ``belief.state.BeliefState.get_context()`` snapshot.
+    :param own_slot / opp_slot: the active mon's slot keys in ``ctx['own']`` /
+                ``ctx['opponent']`` (``ctx['active']['p1']`` / ``['p2']``).
+    :param moves: candidate move specs (a name string or ``{'name': ...}``).
+    :param fmt / gen: the format id (wins) / engine key for the shared calc.
+    :param calc_fn: injectable (tests) — defaults to the shared damage calc.
+    :param own_* / opp_* / *_tera: optional hidden-info overrides forwarded to
+                the KO core (e.g. the opponent's posterior top pick).
+    :return: ``{'order': [move, ...] best-first,
+                'best': move | None,
+                'assessments': {move_name: ko_assessment}}``.
+    Empty ``moves`` -> ``{'order': [], 'best': None, 'assessments': {}}``.
+    Never raises on a partial belief state (degrades to a stable order).
+    """
+    moves = list(moves or [])
+    if not moves:
+        return {"order": [], "best": None, "assessments": {}}
+
+    assessments: Dict[str, Dict] = {}
+
+    def assess(move: Any) -> Dict:
+        key = _move_key(move)
+        if key not in assessments:
+            assessments[key] = _ko.move_ko(
+                ctx, own_slot, opp_slot, move, fmt=fmt, gen=gen, calc_fn=calc_fn,
+                own_ability=own_ability, own_item=own_item,
+                opp_ability=opp_ability, opp_item=opp_item,
+                own_tera=own_tera, opp_tera=opp_tera)
+        return assessments[key]
+
+    # stable sort: equal (tier, magnitude) keeps the caller's order (determinism)
+    order = sorted(moves, key=lambda m: ko_ladder_score(assess(m)), reverse=True)
+    return {"order": order, "best": order[0] if order else None,
+            "assessments": assessments}
