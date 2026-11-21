@@ -1225,15 +1225,17 @@ bit-identical).
   in/out), runs on a long-lived Node worker POOL (no per-call spawn), and already
   has a BATCH API — `calc_damage_many` ("24+ calcs per decision in one round-
   trip"). So branch all child damages in ONE batch call, not N sequential ones.
-  Two data-flow facts to decide *within* OC-6: (1) the context
-  (`get_context()`) exposes `hp_frac` but NOT `maxhp`/a spread, yet `step` needs
-  `maxhp` to turn predicted damage into an HP-fraction delta; the belief STATE
-  already tracks `Facts.maxhp` (int) per mon — so extending `get_context()` to
-  carry `maxhp` (public info, no leak) is the concrete step, vs. assuming a
-  spread; (2) the calc needs a spread (evs/ivs/nature): own side has the full
-  team spec, opponent only a posterior (→ OC-9 top-1). Net: OC-6(a) "minimal"
-  = HP/switch/faint + `maxhp` in the context + assumed/posterior spread for the
-  calc, batched via `calc_damage_many`.
+  Two data-flow facts to decide *within* OC-6: (1) `maxhp` — **NOW EXPOSED**
+  (`get_context()` carries `maxhp` per mon block; committed `ef86f08`): the
+  belief already tracked `Facts.maxhp` (int) per mon; I added it to the context
+  (public, additive, encoder-ignored, so the registry checksum is unchanged and
+  checkpoints stay loadable). Bench placeholders carry `maxhp=None` (uniform
+  schema, no KeyError). This closes the `maxhp` data-flow sub-gap —
+  decision-independent, needed by every viable OC-6 option. The OPEN part of
+  (1) is the calc SPREAD: (2) the calc needs a spread (evs/ivs/nature): own
+  side has the full team spec, opponent only a posterior (→ OC-9 top-1). Net:
+  OC-6(a) "minimal" = HP/switch/faint + `maxhp` in the context [DONE] +
+  assumed/posterior spread for the calc [OPEN], batched via `calc_damage_many`.
 * **OC-7 — decider-in-state:** the decider-aware design I built M2a on
   (context + `decider`; heads on the decider's POV; value mapped to root) vs a
   simpler "root-only decider" stub. M2a + the `_map_value` de-risk assume the
