@@ -1011,5 +1011,90 @@ def test_live_log_belief_pipeline():
     json.dumps(bs.slot(active).candidates, default=list)  # candidates stay JSON-safe
 
 
+# ══════════════════ regression: the hp > maxhp blind-play bug (1000-battle) ══
+#
+# In the full validation run, build_obs degraded to a BLIND zero-observation
+# 15x because the belief held hp > maxhp in a slot (a stale maxhp / inconsistent
+# reading) and the damage-evidence path computed d_frac = prev/maxhp > 1.0 and
+# handed it to the calc, which THROWS on hp > 1 (node_calc.js) -> the catch-all
+# in build_obs returned a zero obs (the bot played blind). The fix: clamp the HP
+# fraction into [0,1] at every belief->calc/obs boundary AND enforce the belief
+# invariant 0 <= hp <= maxhp at the source. A mon's HP can never exceed its max
+# HP, so clamping is always correct and never masks a real value.
+
+
+def test_clamp_hp_helper():
+    """The belief invariant helper: hp is always clamped into [0, maxhp]."""
+    from belief.state import BeliefState
+    ch = BeliefState._clamp_hp
+    assert ch(None, 100) is None            # HP unknown -> stays unknown
+    assert ch(None, None) is None
+    assert ch(150, 100) == 100              # hp > maxhp -> clamped down
+    assert ch(192, 183) == 183              # the 1000-battle value (1.049x)
+    assert ch(-5, 100) == 0                 # hp < 0 -> clamped up to 0
+    assert ch(60, 100) == 60                # in-range -> unchanged
+    assert ch(60, None) == 60               # no maxhp yet -> clamp lower bound only
+    assert ch(0, 100) == 0
+
+
+def test_damage_evidence_with_hp_gt_maxhp_does_not_throw():
+    """The EXACT blind-play path: opponent slot with hp > maxhp + a damage event
+    on it. Before the fix this raised 'hp must be a 0.0-1.0 fraction' and
+    build_obs degraded to a zero obs. Now the belief update completes and the
+    calc receives a clamped (valid) fraction."""
+    own = {"p1a": {"name": "charizard", "nature": "Modest", "evs": {"spa": 252},
+             "item": "lifeorb", "ability": "solarpower"}}
+    bs = BeliefState("gen9ou", own_team=own)
+    sb = install(bs, "p2a", "blastoise", [cand(evs={"spd": 0}), cand(evs={"spd": 252})])
+    # White-box: force the inconsistent belief state the run hit (hp > maxhp).
+    sb.facts.hp = 192
+    sb.facts.maxhp = 183
+    # This used to raise RuntimeError('hp must be a 0.0-1.0 fraction (got 1.049...)')
+    applied = bs.update(E.DamageObserved(
+        target_side="p2", target_slot="p2a", hp_after=150, maxhp=183,
+        ko=False, source_kind="move", move="flamethrower",
+        source_side="p1", source_slot="p1a"))
+    assert applied is True
+    # the posterior is still a valid, non-empty distribution (no silent corruption)
+    assert sb.candidates
+    assert sum(sb.posterior) == pytest.approx(1.0, abs=1e-9)
+
+
+def test_observation_hp_frac_never_exceeds_one():
+    """get_context's per-mon hp_frac is clamped into [0,1] even when the belief
+    holds an inconsistent hp > maxhp (the observation must never be out of range)."""
+    bs = BeliefState("gen9ou", own_team={})
+    sb = install(bs, "p2a", "blastoise", [cand()])
+    sb.facts.hp = 192      # inconsistent: > maxhp
+    sb.facts.maxhp = 183
+    ctx = bs.get_context()
+    frac = ctx["opponent"]["p2a"]["hp_frac"]
+    assert 0.0 <= frac <= 1.0
+    assert frac == 1.0     # clamped to full-HP (the closest valid reading)
+
+
+def test_heal_refreshes_maxhp_and_keeps_invariant():
+    """The natural trigger: a stale maxhp + a heal. The heal line is `hp/maxhp`
+    and now refreshes maxhp (never shrinking a known one) so hp stays <= maxhp."""
+    bs = BeliefState("gen9ou", own_team={})
+    sb = install(bs, "p2a", "blastoise", [cand()])
+    # start with a stale, smaller maxhp (the bug's precondition)
+    sb.facts.maxhp = 183
+    sb.facts.hp = 150
+    # a heal to 180/190: the true maxhp is 190, so refresh it and keep hp in range
+    bs.update(E.HealObserved(target_side="p2", target_slot="p2a",
+                             hp_after=180, maxhp=190, source_kind="move"))
+    assert sb.facts.maxhp == 190           # refreshed to the true maxhp
+    assert sb.facts.hp == 180             # in [0, maxhp]
+    assert 0 <= sb.facts.hp <= sb.facts.maxhp
+    # and a heal can never push hp above maxhp, even with a stale small maxhp
+    sb2 = install(bs, "p2b", "garchomp", [cand()])
+    sb2.facts.maxhp = 183
+    sb2.facts.hp = 183
+    bs.update(E.HealObserved(target_side="p2", target_slot="p2b",
+                             hp_after=195, maxhp=0, source_kind="move"))  # no maxhp in line
+    assert 0 <= sb2.facts.hp <= sb2.facts.maxhp   # invariant holds (hp clamped to 183)
+
+
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(pytest.main([__file__, "-v"]))

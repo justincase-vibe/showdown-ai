@@ -460,6 +460,109 @@ That's the gap.** Options for the next build step:
 then B once we have trained bots + a fitness measure. Doubles/6v6 stays later
 as agreed. Your call when you're back.
 
+### Option A \u2014 fitness/eval harness: concrete plan (build order, small steps)
+
+**Goal:** answer \u201chow good is this bot at P\u00f4kemon?\u201d with an ABSOLUTE number,
+not just relative ELO. Reuse what exists (D100, no code twice):
+`pool.ResourcePool.battle_slot()` (reserve a server) +
+`league.driver.play_agent_battle_on` (one battle). The harness is just
+\u201cplay bot vs reference N times, count wins.\u201d
+
+**New package `eval/` (torch-free at import, like the rest):**
+* `eval/ladder.py` \u2014 the reference ladder. Each reference = `(name, agent_factory)`.
+  * `random` \u2014 `PokeAgent(make_random_net(vocabs))`. The FLOOR (a competent bot
+    beats this >50%). Trivial, builds first.
+  * `heuristic` \u2014 the \u201creasonably strong model out there\u201d you asked for. A
+    rule-based `PokeAgent`-compatible policy: attack with the strongest safe/
+    STAB move, target the weakest opponent, switch when low HP, use recovery
+    \u2014 and USE THE DAMAGE CALC (the belief-state foundation) for \u201cwill this K.O./
+    will I K.O.?\u201d decisions. This is the crux and the natural showcase for the calc.
+  * `champion` (later) \u2014 the best league bot frozen, so the ladder's top rises
+    as the league improves.
+* `eval/harness.py` \u2014 `evaluate(bot_ckpt, refs, n_battles, fmt, ...) -> EvalResult`
+  (`{ref: {wins,losses,draws,win_rate}}` + `fitness_score`); CPU-only; sequential
+  first (simple), concurrent later.
+* `eval/tests/` \u2014 hermetic (fake-env) win-rate/fitness tests + one `live`-marked
+  self-check (deselected by default).
+
+**Fitness score:** weighted win-rate across the ladder, normalized to [0,1]
+(e.g. random=1x, heuristic=2x, champion=3x). Beating random but losing to
+heuristic = mid-range. Gives Option B (strategy blending) a way to rank
+\u201cwinning\u201d strategies, and gives the league a per-round learning curve.
+
+**Build order (one reviewable step each):**
+1. **A1** `eval/ladder.py` \u2014 `random` reference + ladder container. (small)
+2. **A2** `eval/harness.py::evaluate` against `[random]` + hermetic test. (core)
+3. **A3** `HeuristicAgent` \u2014 the strong rule-based reference (the crux; may be
+   2\u20133 sub-steps: move selection, then switching/recovery, then damage-calc use).
+   Self-check: heuristic beats random >70%.
+4. **A4** `fitness_score` (weighted aggregate) + test.
+5. **A5** integration \u2014 evaluate the league's top-1 bot after each round (log the
+   curve) + a GUI \u201cevaluate this checkpoint\u201d button.
+
+**Open for you:** (1) is the heuristic reference the right \u201cstrong model,\u201d or
+should we pull an existing open-source P\u00f4kemon bot as the top reference? (2)
+fitness weights (1/2/3) reasonable, or do you want a different aggregation? (3)
+sequential-first OK for v1 (a 20-battle eval \u2248 6\u20138 min on CPU) vs concurrent now?
+
+---
+
+## 2026-11-21 — HP>1.0 blind-play bug: ROOT-CAUSED + FIXED (the "unwanted outcome")
+
+**Symptom (the real bug in the 1000-battle run, `scratch/_full_validate.log`):**
+`build_obs` degraded to a **BLIND zero-observation 15x** — 8x
+`RuntimeError: hp must be a 0.0-1.0 fraction (got 1.0484…)` + 7x `(…1.0671…)`.
+On each of those turns the bot played **blind** (a zero obs), and the belief state
+was internally inconsistent. This is an "unwanted outcome," not a cosmetic issue.
+
+**Root cause (traced + reproduced):** the belief held **`hp > maxhp`** in a slot
+(a stale `maxhp` / an inconsistent reading — a mon's HP can *never* exceed its max
+HP, so this is always a data bug, never a real state). The damage-evidence path
+(`state.py::_damage_evidence`) then computed the *unclamped*
+`d_frac = prev/maxhp > 1.0` and handed it to the calc via `evidence.mon_options`.
+`node_calc.js` **throws** on `hp > 1` (the guard is correct and intentional —
+`damage/tests/test_curhp_abilities.py::test_hp_out_of_range_raises` pins it for
+direct callers), and `net/env.py::build_obs`'s catch-all returned a **zero obs**.
+Reproduced exactly: `facts.hp=192 / maxhp=183` + a damage event on that slot
+→ `RuntimeError: …got 1.049…`.
+
+**Fix (four layers, all strict-safe because a HP fraction > 1.0 is always
+invalid, so clamping never masks a real value): the belief invariant is now
+enforced at the source AND clamped at every belief→calc/obs boundary:**
+1. **`evidence.mon_options` (the belief→calc boundary, the backstop):**
+   `mon["hp"] = clamp(hp_fraction, 0, 1)`. A stale/inconsistent reading can no
+   longer reach the calc, so it can no longer throw → no more blind zero-obs.
+2. **`state._damage_evidence`:** `d_frac = clamp(prev/maxhp, 0, 1)` (the one path
+   that bypassed the clamped helper).
+3. **`state.get_context` (`_mon_block`):** `hp_frac = self._hp_fraction(facts) or
+   0.0` — the observation reuses the clamped helper (was an unclamped inline).
+4. **Belief invariant (root cause):** new `BeliefState._clamp_hp(hp, maxhp)`
+   (`0 <= hp <= maxhp`, `None`-safe) applied in `_set_hp` (damage/heal/faint),
+   both `_set_switch_facts` branches (maxhp set first, then hp clamped to it),
+   and the **HealObserved** dispatch now refreshes `maxhp` from the line first
+   (`max(old, line)` — a heal can only reveal the same mon's true maxhp, never a
+   smaller one; never shrinks a known maxhp) before clamping hp.
+
+**Regression tests (4 new, `belief/tests/test_step3_4.py`):** `_clamp_hp`
+helper; the EXACT blind-play path (hp>maxhp + damage event → no throw, valid
+posterior); `get_context` `hp_frac ≤ 1`; the natural trigger (stale maxhp + heal
+→ maxhp refreshed, invariant holds).
+
+**Verification (CPU-only, `CUDA_VISIBLE_DEVICES=-1`):** belief+damage **352
+passed / 3 deselected**; net+league+control+fitness **231 passed / 1 skipped**.
+All green. The raw-calc guard is **unchanged** (direct `hp>1` still throws — the
+test still passes); only the belief bridge is now clamped.
+
+**Flagged (NOT changed unilaterally — needs your call):** `build_obs`'s
+**catch-all degrades to a ZERO obs on ANY exception.** That is aggressive: a
+blind decision is worse than a slightly-wrong one. Now that the HP path (the
+only throw we've seen) is clamped at the boundary, the remaining question is
+what a *genuine* unexpected data gap should do — options: (a) keep zero-obs
+(simplest, but blind); (b) a **last-known-good** obs (carry the previous turn's
+obs — a slightly-stale-but-real state beats a blind one); (c) a targeted partial
+obs (fill only the failed field). **My lean: (b) last-known-good**, with (a) as
+the very-first-turn fallback. Not built until you pick.
+
 ---
 
 ## A. Workflow errors found

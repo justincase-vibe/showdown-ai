@@ -267,7 +267,14 @@ def mon_options(spec: Dict, status: Optional[str] = None, boosts: Optional[Dict]
     if b:
         mon["boosts"] = b
     if hp_fraction is not None:
-        mon["hp"] = hp_fraction
+        # A mon's current HP can NEVER exceed its max HP, so a fraction > 1.0 is
+        # always a data inconsistency in the belief (a stale maxhp or a
+        # malformed line), never a real state. Clamp into [0, 1] at this
+        # belief->calc boundary: the raw calc throws on hp > 1 (node_calc.js),
+        # and that throw is what degrades a live observation to a blind
+        # zero-obs. Clamping (a HP fraction > 1 is invalid -> full-HP is the
+        # closest valid reading) keeps the calc reachable and the obs sane.
+        mon["hp"] = max(0.0, min(1.0, hp_fraction))
     return mon
 
 

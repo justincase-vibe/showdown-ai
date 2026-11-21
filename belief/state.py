@@ -580,7 +580,7 @@ class BeliefState:
                         "moves": [], "last_hit": 0, "hit_this_turn": False,
                         "last_move_failed": False, "stockpile": 0,
                         "used_protect": False, "volatiles": []}
-            hp_frac = (facts.hp / facts.maxhp) if (facts.hp is not None and facts.maxhp) else 0.0
+            hp_frac = self._hp_fraction(facts) or 0.0
             return {
                 "hp_frac": round(hp_frac, 4),
                 "statuses": sorted(facts.statuses),
@@ -809,7 +809,18 @@ class BeliefState:
         if isinstance(event, E.DamageObserved):
             return self._apply_damage(event)
         if isinstance(event, E.HealObserved):
-            self._set_hp(event.target_side, event.target_slot, event.hp_after)
+            # The heal line is `hp/maxhp`: refresh maxhp FIRST (a heal can only
+            # reveal the SAME mon's true maxhp — never a smaller one — so take
+            # the max, never shrink a known maxhp), THEN _set_hp clamps hp into
+            # [0, maxhp]. Without this, a stale maxhp + a heal could leave
+            # hp > maxhp in the belief (the blind-play root cause).
+            h_side, h_slot = event.target_side, event.target_slot
+            h_facts = self._facts_for(h_side, h_slot)
+            if h_facts is None and h_side != "p2":
+                h_facts = self.own_facts.setdefault(h_slot, Facts())
+            if h_facts is not None and event.maxhp:
+                h_facts.maxhp = max(h_facts.maxhp or 0, event.maxhp)
+            self._set_hp(h_side, h_slot, event.hp_after)
             return False
         if isinstance(event, (E.StatusApplied, E.StatusCured)):
             self._apply_status(event)
@@ -875,7 +886,7 @@ class BeliefState:
         if facts is None and side != "p2":
             facts = self.own_facts.setdefault(slot, Facts())
         if facts is not None:
-            facts.hp = hp
+            facts.hp = self._clamp_hp(hp, facts.maxhp)
 
     def _set_switch_facts(self, ev: E.SwitchIn) -> None:
         """Switch-in line is `hp/maxhp`: set (or refresh) the slot's HP facts.
@@ -898,10 +909,10 @@ class BeliefState:
             known = self.own_active_species.get(ev.slot)
         same_mon = known is not None and lookup.to_id(ev.species) == known and facts.hp is not None
         if same_mon:
-            if ev.hp:
-                facts.hp = ev.hp
             if ev.maxhp:
                 facts.maxhp = ev.maxhp
+            if ev.hp:
+                facts.hp = self._clamp_hp(ev.hp, facts.maxhp)
             facts.boosts = {}
             # switch-out cleared the mon's volatiles (fork clearVolatiles):
             # Stockpile layers are gone even for a re-entering mon
@@ -909,7 +920,7 @@ class BeliefState:
             return
         facts.reset()
         facts.maxhp = ev.maxhp or None
-        facts.hp = ev.hp or ev.maxhp or None
+        facts.hp = self._clamp_hp(ev.hp or ev.maxhp or None, facts.maxhp)
         # 3.6 — the switch-in line reveals the mon's max HP: apply it as EV
         # evidence on the p2 slot (one-sided, IV-safe, no false rule-outs).
         if ev.side == "p2" and facts.maxhp:
@@ -1048,7 +1059,7 @@ class BeliefState:
                                   hp_fraction=self._hp_fraction(a_facts))
             d_status = ev.status_of(target_facts.statuses) if target_facts else None
             d_boosts = target_facts.boosts if target_facts else {}
-            d_frac = (prev / maxhp) if maxhp else None
+            d_frac = max(0.0, min(1.0, prev / maxhp)) if maxhp else None
             # The attacker (p1) is the one who took the prior hit (reflector source).
             # defender = the mon being hit (dmg.target_*); the per-source avalanche
             # gate checks whether THAT mon hit the attacker this turn.
@@ -1099,6 +1110,21 @@ class BeliefState:
         if facts is not None and facts.hp is not None and facts.maxhp:
             return max(0.0, min(1.0, facts.hp / facts.maxhp))
         return None
+
+    @staticmethod
+    def _clamp_hp(hp: Optional[int], maxhp: Optional[int]) -> Optional[int]:
+        """Clamp an observed HP into ``[0, maxhp]``. A mon's current HP can never
+        exceed its max HP, so ``hp > maxhp`` is always a data inconsistency (a
+        stale ``maxhp`` or a malformed line), never a real state — clamp it down.
+        ``None`` stays ``None`` (HP not yet known); a ``None`` maxhp clamps only
+        the lower bound. This enforces the belief invariant ``0 <= hp <= maxhp``
+        so the HP fraction handed to the calc and the observation is always in
+        [0, 1] (no blind-play, no false EV/max-HP deduction)."""
+        if hp is None:
+            return None
+        if maxhp:
+            return max(0, min(hp, maxhp))
+        return max(0, hp)
 
     # ══════════════════ 3.6 SOFT evidence: max-HP consistency ══════════════════
 
