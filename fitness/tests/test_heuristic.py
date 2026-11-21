@@ -145,6 +145,53 @@ def test_type_scoring_degrades_to_power_when_types_unknown():
     assert d.action is acts[1]                         # earthquake (100) > tackle (40)
 
 
+def _obs_switch_hazards(stealthrock_opp: bool = False,
+                        toxic_opp: bool = False, low_hp: float = 0.05) -> dict:
+    """A low-HP obs with hazards up on the OPPONENT's side (p2)."""
+    from net.registry import (MAX_SLOTS, SLOT_DIM, SLOT_INDEX, GLOBAL_INDEX,
+                              GLOBAL_DIM)
+    own_slot = np.zeros((MAX_SLOTS, SLOT_DIM), dtype=np.float32)
+    own_slot[0, SLOT_INDEX["active"]] = 1.0
+    own_slot[0, SLOT_INDEX["present"]] = 1.0
+    own_slot[0, SLOT_INDEX["hp_frac"]] = float(low_hp)
+    g = np.zeros(GLOBAL_DIM, dtype=np.float32)
+    if stealthrock_opp:
+        g[GLOBAL_INDEX["stealthrock_p2"]] = 1.0
+    if toxic_opp:
+        g[GLOBAL_INDEX["toxicspikes_p2"]] = 1.0
+    return {"own_slot": own_slot, "global": g}
+
+
+# ── A3.2b: hazard-aware switch target ──────────────────────────────────────
+def test_switch_avoids_a_mon_weak_to_stealth_rock():
+    # SR up on the opponent's side -> my switch-ins take Rock damage.
+    # tyranitar (Rock) is weak; garchomp (Ground) is safe -> pick garchomp.
+    o = _obs_switch_hazards(stealthrock_opp=True)
+    acts = [{"kind": "switch", "species": "tyranitar"},
+            {"kind": "switch", "species": "garchomp"}]
+    d = HeuristicAgent(gen=9).act(o, acts)
+    assert d.action is acts[1]                          # garchomp (not weak to SR)
+
+
+def test_switch_avoids_a_poison_mon_under_toxic_spikes():
+    o = _obs_switch_hazards(toxic_opp=True)
+    acts = [{"kind": "switch", "species": "muk"},         # Poison -> takes spikes
+            {"kind": "switch", "species": "garchomp"}]     # Ground -> safe
+    d = HeuristicAgent(gen=9).act(o, acts)
+    assert d.action is acts[1]                          # garchomp
+
+
+def test_switch_is_first_when_no_hazards_are_up():
+    # no hazards -> the A3.1 behaviour (first legal switch), still a switch.
+    o = _obs(own_hp=0.05)                               # low HP, forces a switch
+    acts = [{"kind": "switch", "species": "tyranitar"},
+            {"kind": "switch", "species": "garchomp"},
+            {"kind": "move", "move": "tackle"}]
+    d = HeuristicAgent(gen=9).act(o, acts)
+    assert d.action is acts[0]
+    assert d.action["kind"] == "switch"
+
+
 # ── determinism + decision shape (the strong-reference contract) ───────────
 def test_deterministic():
     acts = [{"kind": "move", "move": "tackle"},

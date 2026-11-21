@@ -193,6 +193,63 @@ class HeuristicAgent:
         stab = 1.5 if (mt and mt in own_types) else 1.0
         return power * eff * stab
 
+    # ── A3.2b: hazard-aware switch target ─────────────────────────────
+    def _threatening_hazards(self, obs: Any) -> Dict[str, bool]:
+        """Hazards on the OPPONENT's side (p2) that hit MY switch-ins.
+
+        The obs is always built for the acting agent, so p1 = me and p2 = the
+        opponent; hazards the opponent set (p2-side) damage my switch-ins. Only
+        type-interacting hazards are scored (Spikes/Sticky Web don't depend on
+        type, so they're intentionally ignored here)."""
+        g = obs.get("global") if isinstance(obs, dict) else None
+        if g is None:
+            return {}
+        g = np.asarray(g)
+        if g.ndim != 1:
+            return {}
+        try:
+            from net.registry import GLOBAL_INDEX
+            sr = GLOBAL_INDEX["stealthrock_p2"]
+            ts = GLOBAL_INDEX["toxicspikes_p2"]
+        except Exception:
+            return {}
+        if g.shape[0] <= max(sr, ts):
+            return {}
+        return {"stealthrock": bool(float(g[sr]) > 0.0),
+                "toxicspikes": bool(float(g[ts]) > 0.0)}
+
+    def _switch_score(self, act: Dict, hazards: Dict[str, bool]) -> float:
+        """A switch-in's hazard safety: 0.0 if safe, <0 if weak to an active
+        hazard. Higher is better."""
+        if not hazards:
+            return 0.0
+        sp = act.get("species")
+        if not sp:
+            return 0.0
+        try:
+            from legality.lookup import get_species
+            types = set(get_species(sp, self.gen).get("types") or ())
+        except Exception:
+            return 0.0
+        penalty = 0.0
+        if hazards.get("stealthrock") and (types & {"Rock", "Steel", "Flying", "Bug"}):
+            penalty += 2.0
+        if hazards.get("toxicspikes") and (types & {"Poison", "Flying"}):
+            penalty += 1.0
+        return -penalty
+
+    def _pick_switch(self, acts: List[Dict], switches: List[Dict],
+                     obs: Any) -> Dict:
+        """The best legal switch (hazard-aware when hazards threaten my
+        switch-ins). Falls back to the first legal switch when there's only one
+        or no hazards are up (the A3.1 behaviour)."""
+        if len(switches) == 1:
+            return switches[0]
+        hazards = self._threatening_hazards(obs)
+        if not hazards:
+            return switches[0]
+        return max(switches, key=lambda a: self._switch_score(a, hazards))
+
     # ── the policy ─────────────────────────────────────────────────────
     def act(self, obs: Any, action_list: Optional[List[Dict]],
             deterministic: bool = False) -> Decision:
@@ -207,12 +264,13 @@ class HeuristicAgent:
 
         # 1) force-switch: only switches are legal.
         if not moves:
-            return self._decision(acts, acts.index(switches[0]))
+            return self._decision(acts, acts.index(self._pick_switch(acts, switches, obs)))
 
-        # 2) critically low + can switch -> bail before we faint for nothing.
+        # 2) critically low + can switch -> bail before we faint for nothing
+        #    (A3.2b: pick the switch-in least hurt by the opponent's hazards).
         hp = self._my_active_hp(obs)
         if switches and hp is not None and hp <= self.switch_threshold:
-            return self._decision(acts, acts.index(switches[0]))
+            return self._decision(acts, acts.index(self._pick_switch(acts, switches, obs)))
 
         # 3) play the best damaging move (A3.2: power * effectiveness * STAB).
         try:

@@ -490,7 +490,7 @@ not just relative ELO. Reuse what exists (D100, no code twice):
 heuristic = mid-range. Gives Option B (strategy blending) a way to rank
 \u201cwinning\u201d strategies, and gives the league a per-round learning curve.
 
-> **STATUS (2026-11-21): A1 ✅ done (commit `b303812`) · A2 ✅ done · A3.1 + A3.2 ✅ done · A4 ✅ done · A3.3/A3.2b/A5 pending.**
+> **STATUS (2026-11-21): A1 ✅ done (commit `b303812`) · A2 ✅ done · A3.1/A3.2/A3.2b ✅ done · A4 ✅ done · A3.3/A5 pending.**
 > The package landed as `fitness/` (not `eval/`) — `eval` shadows a Python builtin, so the real dir is `fitness/`.
 
 **Build order (one reviewable step each):**
@@ -531,8 +531,14 @@ sequential-first OK for v1 (a 20-battle eval \u2248 6\u20138 min on CPU) vs conc
     degrade to pure power). Decodes active own/opp species via the shared
     `net.vocab` + `get_species` types; per-gen chart cached; torch-free at import.
     3 hermetic tests (STAB, immune-avoidance, unknown-type degradation).
-  * **A3.2b** hazard-aware switch target (prefer a switch-in mon not weak to
-    Stealth Rock when SR is up on the opponent's side).
+  * **A3.2b ✅** hazard-aware switch target: when switching, prefer the switch-in
+    NOT weak to the opponent's type-interacting hazards (Stealth Rock -> avoid
+    Rock/Steel/Flying/Bug; Toxic Spikes -> avoid Poison/Flying). Reads p2-side
+    hazards from `obs['global']` (the obs is always the agent's POV, so p2 = the
+    opponent's hazards threaten my switch-ins). Falls back to the first legal
+    switch when there's only one or no hazards (A3.1). 3 hermetic tests.
+    (Spikes / Sticky Web don't interact with type, so they're intentionally
+    not scored here.)
   * **A3.3 (the crux)** damage-calc "will-this-KO / will-I-KO". **OPEN for you
     (interface decision):** `.act(obs, acts)` does NOT expose the belief state /
     calc. Options: (a) keep the heuristic **obs-only** (contract-stable, weaker);
