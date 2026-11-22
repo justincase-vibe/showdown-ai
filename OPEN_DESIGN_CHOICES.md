@@ -81,11 +81,11 @@ OC-6/7/8/9 rulings still stand.
 **SMALL ADDITIONS (CPU-light, parallel):**
 1. Regression test over EVERY format in `legality.formats`: `engine_key`
    resolves + calc-vs-sim agree on a few reference damages; WARN on silent
-   fallback. *(B1 — pending.)*
+   fallback. *(B1 — DONE, committed d606e4e.)*
 2. `tools/decision_view.py`: print every legal action with policy %, expected
-   damage, KO flag, value estimate; run on scenario states. *(B2 — pending.)*
+   damage, KO flag, value estimate; run on scenario states. *(B2 — DONE, committed 65ff50a.)*
 3. Report the exact "~1–1.5 s/turn" sim-clone cost: time for ONE clone+advance,
-   + parallelism feasibility. *(B3 — pending.)*
+   + parallelism feasibility. *(B3 — DONE, measured 2026-11-22; numbers in §2.)*
 
 ---
 
@@ -2036,6 +2036,21 @@ External review of the current position; decisions recorded:
 - The "1.0-1.5 s/turn" figure is the **entire search** (36 cells x 20 belief
   samples ~ 720 forward evals), NOT per clone. Search is feasible; re-measure
   on GPU before Step 5 impl.
+- **B3 re-measured (2026-11-22, belief-side pipeline, CPU, `tools/bench_forward_eval.py`)** —
+  the CURRENT unit M2b `step` will repeat, on a real league replay (gen9ou, turn 3, ×100 medians):
+  - clone (`State.copy` deepcopy): **0.052 ms**
+  - advance (feed one real turn's 8 log lines + `get_context`): **0.714 ms**
+  - encode (`encode_context` ctx→tensors): **0.068 ms**
+  - forward (`PokeAgent.forward_obs`, B=1 CPU): **0.721 ms**
+  - **ONE clone+advance+encode+forward ≈ 1.555 ms** (well under the 50 ms/clone target)
+  - **SEARCH BUDGET 36 cells × 20 samples = 720 evals ≈ 1.12 s/turn** (single process, CPU, this machine's load).
+    Confirms the "1.0–1.5 s/turn" = the WHOLE search, NOT per-clone.
+  - **Parallelism (120 evals, `spawn`):** 1 proc 0.096 s → 4 procs 0.047 s wall = **2.03×** speedup.
+    Parallel works but does not reach 4× at this small workload (per-worker torch import + spawn
+    overhead dominate); expect better scaling at the full 720-eval/cell budget.
+  - Answer to the review's cost question: per-clone+advance unit ≈ 1.6 ms (sub-ms clone, ~0.7 ms
+    belief-advance, ~0.7 ms B=1 CPU forward); it CAN run across worker processes (module-level
+    worker + `spawn`), ~2× wall-time at 4 workers for the measured size.
 
 ### 3. Format strategy (AGREED — one format first)
 - Current: gen9ou/3v3 pool is the ONLY training format. Keep it.
