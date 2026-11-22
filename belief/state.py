@@ -699,7 +699,10 @@ class BeliefState:
             sorted_cands = sorted(enumerate(sb.candidates), key=lambda x: -x[1]["weight"])
             top_k = 5
             block["posterior"] = [
-                {"ability": c["ability"], "moves": c["moves"], "weight": round(w, 4)}
+                {"ability": c["ability"], "moves": c["moves"],
+                 "evs": c.get("evs", {}), "nature": c.get("nature", "Hardy"),
+                 "tera": c.get("tera") or "",
+                 "weight": round(w, 4)}
                 for _, c in sorted_cands[:top_k]
                 for w in [c["weight"]]
             ]

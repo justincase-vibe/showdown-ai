@@ -152,15 +152,24 @@ def _calc_mon(block: Dict, ability: Optional[str]) -> Dict:
     """Map a ``get_context()`` mon block to an @smogon/calc dict (no I/O).
 
     Uses ``fitness.ko.block_to_calc_mon`` (the ONE block->calc mapping) with the
-    top-1 ability override. Also passes the block's known tera type and item
-    (public info — own side always known, opponent side known once revealed).
+    top-1 ability override. Also passes the block's known tera type, item, and
+    the posterior's top-1 EV spread + nature (the suspected build — makes the
+    damage numbers accurate to the expected mon, not just base stats).
     Returns ``{}`` when no species is known (the caller skips the calc for
     that mon).
     """
     from fitness.ko import block_to_calc_mon
     tera = (block.get("tera") or None) or None
     item = (block.get("item") or None) or None
-    return block_to_calc_mon(block, ability=ability, tera_type=tera, item=item)
+    evs = (block.get("evs") or None) or None
+    nature = (block.get("nature") or None) or None
+    # For opponent blocks: EVs come from the top-1 posterior candidate
+    if evs is None and block.get("posterior"):
+        best = max(block["posterior"], key=lambda c: float(c.get("weight", 0)))
+        evs = best.get("evs") or None
+        nature = nature or best.get("nature") or None
+    return block_to_calc_mon(block, ability=ability, tera_type=tera, item=item,
+                             evs=evs, nature=nature)
 
 
 def build_own_matchup(ctx: Dict, fmt: str, gen: int = 9, *,

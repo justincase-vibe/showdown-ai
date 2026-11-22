@@ -75,20 +75,26 @@ def _find_own_block(ctx: Dict, species: str) -> Dict:
     return {}
 
 
-def _top_ability(opp_block: Optional[Dict]) -> Optional[str]:
-    """The opponent's TOP-1 posterior ability (deterministic), or None.
+def _top_candidate(block: Optional[Dict]) -> Optional[Dict]:
+    """The TOP-1 posterior candidate (deterministic), or None.
 
-    The belief's per-slot posterior is a list of ``{ability, weight, ...}``; take
-    the highest-weight candidate (ties -> the first, stable). This is the
+    The belief's per-slot posterior is a list of ``{ability, weight, evs, nature, ...}``;
+    take the highest-weight candidate (ties -> the first, stable). This is the
     hidden-info override for the damage calc — the dominant pick carries the
     signal (3.3 DESIGN decision: top-1, not full posterior-weighting, for speed).
     """
     best, best_w = None, -1.0
-    for cand in ((opp_block or {}).get("posterior") or []):
+    for cand in ((block or {}).get("posterior") or []):
         w = float(cand.get("weight", 0.0) or 0.0)
         if w > best_w:
             best_w, best = w, cand
-    return (best.get("ability") or None) if best is not None else None
+    return best
+
+
+def _top_ability(opp_block: Optional[Dict]) -> Optional[str]:
+    """The opponent's TOP-1 posterior ability (deterministic), or None."""
+    c = _top_candidate(opp_block)
+    return (c.get("ability") or None) if c is not None else None
 
 
 def _active_outspeed(own: Dict, opp: Dict, opp_ability: Optional[str],
@@ -268,6 +274,16 @@ def build_action_damage(ctx: Dict, actions: Optional[List[Dict]], fmt: str,
     own_tera = (own.get("tera") or None) or None
     opp_tera = (opp.get("tera") or None) or None
 
+    # EVs/nature from the opponent's top-1 posterior candidate (the suspected
+    # EV spread). Own side: the team spec's EVs (fully known). This makes the
+    # damage numbers accurate to the suspected build, not just base stats.
+    opp_cand = _top_candidate(opp)
+    opp_evs = (opp_cand or {}).get("evs") or None
+    opp_nature = (opp_cand or {}).get("nature") or None
+    # Own mon's EVs from the team spec (public: we know our own build)
+    own_evs = own.get("evs") or None
+    own_nature = own.get("nature") or None
+
     for i, act in enumerate(acts):
         if act.get("kind") in _MOVE_KINDS and act.get("move"):
             try:
@@ -275,6 +291,8 @@ def build_action_damage(ctx: Dict, actions: Optional[List[Dict]], fmt: str,
                     ctx, own_slot, opp_slot, act["move"],
                     fmt=fmt, gen=gen, opp_ability=opp_ability,
                     own_tera=own_tera, opp_tera=opp_tera,
+                    own_evs=own_evs, own_nature=own_nature,
+                    opp_evs=opp_evs, opp_nature=opp_nature,
                     calc_fn=calc_fn)
             except Exception:  # noqa: BLE001 — a calc failure degrades to zero
                 assessment = {}

@@ -64,16 +64,18 @@ def _degraded(hp: float, *, unknown_defender: bool = False,
 def block_to_calc_mon(block: Optional[Dict], *,
                       ability: Optional[str] = None,
                       item: Optional[str] = None,
-                      tera_type: Optional[str] = None) -> Dict:
+                      tera_type: Optional[str] = None,
+                      evs: Optional[Dict] = None,
+                      nature: Optional[str] = None) -> Dict:
     """Map a ``get_context()`` mon block (own or opponent) to an @smogon/calc dict.
 
     Uses only the KNOWN fields — ``name``/``species``, ``ability``, ``item``,
     the first ``status`` condition, ``boosts`` and ``hp`` (the block's ``hp_frac``).
-    Omitted fields (EVs/IVs/nature are never observed) fall back to the calc's
-    defaults. That is an APPROXIMATION, and that is fine for a heuristic: what
-    matters is the RELATIVE KO ordering across moves, which the shared defender
-    stats preserve. ``ability`` / ``item`` / ``tera_type`` are overridable so a
-    caller can substitute the opponent's posterior's top pick (hidden info).
+    EVs/IVs/nature are optional: when provided (from the posterior's top-1
+    candidate) the calc uses them for more accurate damage; when absent it
+    falls back to the calc's defaults. ``ability`` / ``item`` / ``tera_type`` /
+    ``evs`` / ``nature`` are overridable so a caller can substitute the
+    opponent's posterior's top pick (hidden info).
     Returns ``{}`` when no species is known (the caller must skip the calc).
     """
     if not block:
@@ -100,6 +102,12 @@ def block_to_calc_mon(block: Optional[Dict], *,
         m["hp"] = max(0.0, min(1.0, float(hp)))
     if tera_type:
         m["teraType"] = tera_type
+    # EVs + nature (from the posterior's top-1 candidate; the @smogon/calc
+    # format expects a dict of 0-252 per stat and a nature string).
+    if evs:
+        m["evs"] = {k: int(v) for k, v in evs.items() if k in ("hp", "atk", "def", "spa", "spd", "spe")}
+    if nature and nature != "Hardy":
+        m["nature"] = nature
     return m
 
 
@@ -146,7 +154,9 @@ def move_ko(ctx: Dict, own_slot: str, opp_slot: str, move: Any, *,
             fmt: str, gen: int = 9, calc_fn: Optional[Any] = None,
             own_ability: Optional[str] = None, own_item: Optional[str] = None,
             opp_ability: Optional[str] = None, opp_item: Optional[str] = None,
-            own_tera: Optional[str] = None, opp_tera: Optional[str] = None) -> Dict:
+            own_tera: Optional[str] = None, opp_tera: Optional[str] = None,
+            own_evs: Optional[Dict] = None, own_nature: Optional[str] = None,
+            opp_evs: Optional[Dict] = None, opp_nature: Optional[str] = None) -> Dict:
     """"Will MY move KO the opponent?" — build the calc dicts from a
     ``get_context()`` snapshot, run the shared damage calc, interpret the result.
 
@@ -164,9 +174,9 @@ def move_ko(ctx: Dict, own_slot: str, opp_slot: str, move: Any, *,
     own = (ctx.get("own", {}) or {}).get(own_slot, {}) or {}
     opp = (ctx.get("opponent", {}) or {}).get(opp_slot, {}) or {}
     attacker = block_to_calc_mon(own, ability=own_ability, item=own_item,
-                                 tera_type=own_tera)
+                                 tera_type=own_tera, evs=own_evs, nature=own_nature)
     defender = block_to_calc_mon(opp, ability=opp_ability, item=opp_item,
-                                 tera_type=opp_tera)
+                                 tera_type=opp_tera, evs=opp_evs, nature=opp_nature)
     hp = _hp_frac(opp)
     if not attacker or not defender:
         # a party's species is unknown -> the shared calc cannot run (it requires
