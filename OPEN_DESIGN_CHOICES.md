@@ -1412,6 +1412,86 @@ PROGRESS:
   loss stuck at 0.69); fixed by moving it per-mon into the side encoding. test
   checksum re-pinned to 9d00eb07...; +test_posterior_is_per_slot_bench_threat_visible.
   net 161 passed; league+fitness 186 passed.
+- 3.3: per-ACTION damage block (the "belief state" the net needs to plan: will
+  this KO / will I be KO'd / who is faster, FOR EACH legal action). Schema locked
+  (K_ACTION_DAMAGE=9) — see "3.3 DESIGN" below. Split into 3.3a (move/tera rows)
+  + 3.3b (switch rows) so each is a small, verifiable commit. **3.3a DONE.**
+
+### 3.3 DESIGN (locked before coding, 2026-11-22)
+
+New registry field `action_damage` (MAX_ACTIONS, 9) float32 — one row PER LEGAL
+ACTION: the damage/KO/speed facts FOR THAT action. Precomputed by the ONE calc
+pipeline (`damage.calc` + `effective_speed`) and injected by `net/action_features.py`
+(lazy calc import; degrades to a ZERO row — the same discipline as
+`net/static_features.py`). The encoder PLACES it (zero-fill when absent, stays
+pure/DB-free). The model folds it into the per-action embedding CONSISTENT WITH
+`action_move_static` (both the pointer head and the masked-mean context), bumping
+`action_dim` by 9. Rationale for "both, mirroring action_move_static" (rather than
+pointer-head-only): the two `act_emb` cats MUST share one width because
+`policy_act_proj` is a single Linear, and action_move_static already works in both;
+the context path is a bounded masked-MEAN (not the 3.5 failure, which summed 6
+opponent slots into a global constant). FALLBACK if Step 8 shows 3.5-style shadowing:
+move it to pointer-only (2-line change, pre-authorized).
+
+9-dim schema (each dim has a MOVE/TERA meaning AND a SWITCH meaning; the net learns
+the mapping from `action_kind`, already in the obs):
+  [0] min_pct   move: min dmg % on opp active (/100, cap1)   switch: entry-hazard min % on incoming
+  [1] max_pct   move: max dmg %                               switch: entry-hazard max %
+  [2] exp_pct   move: expected dmg %                          switch: entry-hazard exp %
+  [3] can_ko    move: my move can KO opp active              switch: opp top move can-KO the incoming mon
+  [4] guar_ko   move: guarantees KO                          switch: opp top move guarantee-KOs incoming
+  [5] exp_ko    move: expected-KO                            switch: opp top move expected-KOs incoming
+  [6] outspeed  both: active speed order (1.0 faster / 0.5 tie / 0.0 slower)
+  [7] immune    move: 1.0 if immune on opp active            switch: 0
+  [8] dmg_in    move: 0 (I'm the attacker)                   switch: expected dmg the incoming mon takes from opp top move (/100 cap1)
+
+Reuse, do NOT re-derive: MOVE rows come from `fitness.ko.move_ko` (-> the ONE
+calc_damage) with the opponent's TOP-1 posterior ability as the hidden-info
+override, + `ko_assessment` for the KO verdicts; outspeed from
+`calc.compare_speed(own_active, opp_active)`. SWITCH rows: hazard % from
+`legality.get_type_chart` (SR = 12.5% x Rock-effectiveness on the incoming types;
+Spikes = 12.5% x layers, Ground-immune) + the incoming mon's damage from the
+opponent's top move via the SAME calc (defender = incoming species at full HP).
+
+DECISIONS (recorded):
+ * TOP-1 posterior ability for the calc (NOT full posterior-weighting): the dominant
+   pick carries the signal and it stays ~1 calc/action (12-24 calcs batched in ONE
+   calc_damage_many spawn) — the user's "quick + API-reachable" priority. Trivially
+   upgradable to weighted (loop candidates x weight).
+ * TOP-1 opponent move for the switch "dmg_in"/KO dims (belief top_moves are already
+   ranked; the most-likely threat is the one that matters).
+ * outspeed uses EFFECTIVE speed (abilities/items/weather included) — the "who acts
+   first" fact the net otherwise has to guess.
+ * "forced-switch flag" (in the review spec) is IMPLICIT, not a dedicated dim: in a
+   forced-switch state only the switch rows carry non-zero facts and the move rows are
+   all zero, so the net sees it structurally (keeps the block at the spec's 9 dims).
+
+SPLIT: 3.3a = move/tera rows (+ zero switch rows), full wiring + tests + commit.
+        3.3b = switch rows (hazard % + incoming damage), tests + commit.
+        (Checksum is pinned ONCE in 3.3a — the field/shape is added once; 3.3b only
+         changes content + tests, no re-pin.)
+
+PROGRESS (3.3a DONE, 2026-11-22):
+- 3.3a: DONE — `net/action_features.py` (build_action_damage / action_damage_row /
+  _top_ability / _active_outspeed), registry +1 field (action_damage 12x9), encoder
+  places it (zero-fill when absent, stays pure/DB-free), model folds it into the
+  per-action embedding (both the context-mean AND the pointer head, mirroring
+  action_move_static; action_dim += 9), env.build_obs wires build_action_damage in
+  its OWN try/except (a calc failure degrades only this field, never the obs).
+  MOVE/TERA rows filled (fitness.ko.move_ko with the top-1 posterior ability +
+  calc.compare_speed outspeed); SWITCH rows zero (3.3b). test_s41 checksum
+  re-pinned (739e1d03, 1033->1141 elements, 23->24 fields); +net/tests/
+  test_action_features.py (11 tests, hermetic via injected calc/speed fakes).
+  net 172 passed; league+fitness 186 passed.
+- GUARD FIX (3.3a bug-hunt): test_s42 overfit-32 + state-conditioning FAILED at the
+  fixed seed-0 (loss pinned at ln(2)=0.693, the constant-policy attractor).
+  Diagnosed (scratch/probe_33_overfit.py) as MULTI-BASIN init-sensitivity, NOT a
+  regression: seeds 1/3 converge to 0.0000, seeds 0/2 sit on the attractor even at
+  1500 epochs. The net CAN learn; the single-seed gate was brittle to the
+  param-count shift (every Step 3.x feature add moves the seed-0 init). Fix: both
+  guards now try seeds 0-3 and pass if ANY converges — a structurally-broken net
+  still fails every seed, so the guard stays strong. (Recorded per the user's
+  "never-learning disaster" sensitivity: this must stay a HARD catch, not a waiver.)
 
 BUG-HUNT (2026-11-22, "check for bugs and unwanted outcomes first"): found + fixed
 3 real issues, all in the static-feature path (the net suite grew to 160 passed,

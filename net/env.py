@@ -367,21 +367,29 @@ def build_obs(battle: Any, fmt: str, vocabs: Any, side: str = "p1") -> Dict[str,
             belief.update(ev)
         ctx = belief.get_context()
         actions = build_action_list(battle)
-        # Step 3 (review 2026-11-22): precompute the static mon/move features
-        # from the legality DB and inject them as optional arrays. The encoder
-        # stays pure/DB-free; this is the ONE place a live obs meets the DB.
-        # Guarded in its OWN try/except: a static-feature bug degrades ONLY the
-        # static fields to zero (the encoder zero-fills when None) and must never
-        # take down the whole observation (the HP/status/hazard/belief features
-        # are the more important signal and must survive).
-        static_feats = None
+        # Step 3 (review 2026-11-22): precompute the mon/move static features
+        # (legality DB) AND the per-action damage/KO/speed block (the ONE calc
+        # pipeline) and inject them as optional arrays. The encoder stays
+        # pure/DB-free; this is the ONE place a live obs meets the DB/calc. Each
+        # is guarded in its OWN try/except so a bug in one degrades ONLY that
+        # field to zero (the encoder zero-fills when absent) and must never take
+        # down the whole observation (the HP/status/hazard/belief features are
+        # the more important signal and must survive).
+        gen = _gen_from_format(fmt)
+        precomputed: Dict[str, np.ndarray] = {}
         try:
             from net.static_features import build_static_features
-            static_feats = build_static_features(ctx, actions, _gen_from_format(fmt))
+            precomputed.update(build_static_features(ctx, actions, gen))
         except Exception as sexc:  # noqa: BLE001
             log.warning("static features disabled (%s: %s)",
                         type(sexc).__name__, sexc)
-        return encode_context(ctx, vocabs, actions, static_feats=static_feats)
+        try:
+            from net.action_features import build_action_damage
+            precomputed.update(build_action_damage(ctx, actions, fmt, gen))
+        except Exception as aexc:  # noqa: BLE001
+            log.warning("action damage disabled (%s: %s)",
+                        type(aexc).__name__, aexc)
+        return encode_context(ctx, vocabs, actions, static_feats=precomputed or None)
     except Exception as exc:  # noqa: BLE001 — a live battle must never die on obs
         log.warning("build_obs degraded to zero obs (%s: %s)",
                     type(exc).__name__, exc)

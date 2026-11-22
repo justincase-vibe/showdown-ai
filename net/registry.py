@@ -78,6 +78,15 @@ N_STATS: int = len(STAT_AXES)
 #:           side_condition, is_tailwind
 K_MOVE_STATIC: int = 11
 
+#: per-ACTION DAMAGE feature width (Step 3.3): the calc-backed belief block —
+#: "will this action KO / will I be KO'd / who is faster" per legal action.
+#:   [0] min_pct  [1] max_pct  [2] exp_pct  [3] can_ko  [4] guar_ko
+#:   [5] exp_ko   [6] outspeed (1.0 faster / 0.5 tie / 0.0 slower)  [7] immune
+#:   [8] dmg_in   (switch: expected dmg the incoming mon takes from the opp top move)
+#: Move/tera rows and switch rows share these 9 dims (see OPEN_DESIGN_CHOICES.md
+#: "3.3 DESIGN"); the net learns the per-kind meaning from action_kind.
+K_ACTION_DAMAGE: int = 9
+
 
 @dataclass(frozen=True)
 class Field:
@@ -162,6 +171,10 @@ def _layout() -> List[Field]:
     # encoder zero-fills when absent — keeps the encoder pure/DB-free).
     # per-action static move data (id embeddings stay; these are ADDITIONAL)
     f.append(Field("action_move_static", (MAX_ACTIONS, K_MOVE_STATIC), "float32"))
+    # per-ACTION damage/KO/speed block (Step 3.3) — precomputed by
+    # net.action_features (the ONE calc pipeline); the encoder zero-fills when
+    # absent. The belief facts the net needs to plan, per legal action.
+    f.append(Field("action_damage", (MAX_ACTIONS, K_ACTION_DAMAGE), "float32"))
     # per-slot static mon data (dual types = 0.5/0.5; base stats /255)
     f.append(Field("own_types", (MAX_SLOTS, N_TYPES), "float32"))
     f.append(Field("opp_types", (MAX_SLOTS, N_TYPES), "float32"))

@@ -40,6 +40,7 @@ import torch.nn.functional as F
 
 from .registry import (
     GLOBAL_DIM,
+    K_ACTION_DAMAGE,
     K_MOVE_STATIC,
     LAYOUT,
     MAX_ACTIONS,
@@ -211,8 +212,9 @@ class PokeNet(nn.Module):
 
         side_dim = 2 * MON_DIM            # set-pooled (128) + active (128)
         # per-action embedding: kind(16) + move(E) + species(E)
-        #   + Step-3 static move data (K_MOVE_STATIC) — ADDITIONAL to the ids.
-        action_dim = 16 + 2 * EMBED_DIM + K_MOVE_STATIC
+        #   + Step-3 static move data (K_MOVE_STATIC) + the per-action damage
+        #   block (K_ACTION_DAMAGE) — ADDITIONAL to the ids (Step 3.3).
+        action_dim = 16 + 2 * EMBED_DIM + K_MOVE_STATIC + K_ACTION_DAMAGE
         # Step 3.5: the opponent posterior/top-moves moved OUT of the global
         # context and INTO the per-slot side encoding (each mon's own threat,
         # set-pooled) — so the context is just global + weather + terrain + the
@@ -290,6 +292,7 @@ class PokeNet(nn.Module):
             self.emb_move_g(a_move),           # (B,T,A,E)
             self.emb_species_g(a_sp),          # (B,T,A,E)
             b["action_move_static"],           # (B,T,A,K_MOVE_STATIC) Step 3
+            b["action_damage"],                # (B,T,A,K_ACTION_DAMAGE) Step 3.3
         ], dim=-1)                                                  # (B,T,A,act)
         act_w = a_mask.unsqueeze(-1)                                 # (B,T,A,1)
         act_sum = (act_emb * act_w).sum(dim=-2)                     # (B,T,act)
@@ -344,6 +347,7 @@ class PokeNet(nn.Module):
             self.emb_move_g(b["action_move"]),        # (B,T,A,E)
             self.emb_species_g(b["action_species"]),  # (B,T,A,E)
             b["action_move_static"],                  # (B,T,A,K_MOVE_STATIC) Step 3
+            b["action_damage"],                       # (B,T,A,K_ACTION_DAMAGE) Step 3.3
         ], dim=-1)                                     # (B,T,A,action_dim)
         act_p = self.policy_act_proj(act_emb)          # (B,T,A,INTENT)
         intent = self.policy_intent(h)                 # (B,T,INTENT)
