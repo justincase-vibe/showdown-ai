@@ -2105,3 +2105,52 @@ External review of the current position; decisions recorded:
   lookups to mirror production; no production code was wrong.
   **Lesson: a test double stricter than production hides real behavior —
   keep fakes faithful to the contract they stand in for.**
+
+### Step 6.5 — rule 4: resist-switch, belief-weighted (implemented, 2026-11-22)
+- `_opp_move_type_weights(ctx, gen, move_db)`: the opponent ACTIVE's
+  `top_moves` as `(attacking_type, weight)`; moves with an UNRESOLVABLE type
+  are dropped (degrade, never a wrong factor). Weights = the belief's
+  `top_move_weights` when exposed (same order as `top_moves`), else UNIFORM
+  `1/len` — the uniform path is what runs in production today (see OC-6.5b).
+- `_pick_switch(switches, ctx, gen, move_db, type_chart)`: score = −[resist
+  term + hazard term], take `max` (least negative; ties → first legal, stable).
+  Resist term = Σ w × max(1.0, ∏ over the switch's defending types of
+  chart[def][atk]) — the APPROVED 6.1 formula (weakness penalised at 2.0;
+  resist/neutral/immune clamp to 1.0). Hazard term unchanged (SR +2.0 /
+  Toxic Spikes +1.0 for type-weak switch-ins). Unknown switch types → resist
+  term 0 for that candidate (never a wrong value).
+- `type_chart` + `move_db` injectable (hermetic tests, mirrors the
+  `net.action_features` precedent); default None → the fork-verified DB (D29).
+- **Type chart ground truth (D29, verified — do NOT re-litigate):** the DB
+  `get_type_chart(gen)` encoding is raw 0=neutral(1.0), 1=weak(2.0),
+  2=resist(0.5), 3=immune(0.0) → 0/324 mismatches vs the Showdown server
+  `data/typechart.ts` (the alternate encoding gave 316/324). An earlier
+  "31 mismatches" reading was MY memory error (direction + specific
+  matchups), not a DB fault. The rule-4 code was correct; the originally
+  failing test hardcoded wrong factors from memory and was fixed by
+  injecting a fake chart instead.
+- 6 new hermetic tests (design cases a/b/c + sums-over-moves +
+  belief-weight-flips-the-pick + unknown-type degrade).
+  `fitness/tests/test_strategy.py` **71/71 green**; full `net league fitness`
+  suite **435 passed, 3 skipped, 4 deselected** (96 s, CPU-only).
+
+**Open design choices (new this step — non-blocking, your call):**
+- **OC-6.5a (resist-vs-neutral clamp).** The approved formula clamps
+  resist/immune to neutral (`max(1.0, eff)`), so a switch that RESISTS the
+  dominant opp move TIES a neutral one (tie → first legal). A human would
+  prefer the resist. Dropping the clamp (`w × eff`) ranks by EXPECTED damage
+  taken against the opponent's move distribution (resist 0.5 < neutral 1.0
+  < weak 2.0) — strictly more informative, one-line change, and all six 6.5
+  tests still pass (verified by hand: hazard-flip 2.5 vs 2.0; weight-flip
+  0.65 vs 1.85). MY LEAN: keep the clamp for the 6.6 A/B (it's the approved
+  formula and the weakness penalty — the safety-critical part — is intact),
+  then switch to `w × eff` if you agree; it's a one-line follow-up.
+- **OC-6.5b (belief-weight source).** `belief/state.py get_context()`
+  exposes `top_moves` (names) but NOT `top_move_weights` — so rule 4 runs
+  uniform-weighted in production today. Additive option: expose
+  `top_move_weights` (the marginal per-move weights, same order as
+  `top_moves`) from the existing `move_counts` — `_pick_switch` already
+  consumes it when present, and the code path is already tested
+  (`test_resist_switch_belief_weights_flip_the_pick`). MY LEAN: small
+  follow-up sub-step after 6.6 (each committed separately); additive, no
+  schema break, no observation unit removed.

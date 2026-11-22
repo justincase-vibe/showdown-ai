@@ -359,24 +359,111 @@ def _species_types(species: str, gen: int) -> tuple:
     return types
 
 
-def _pick_switch(switches: List[Dict], ctx: Dict, gen: int = 9) -> Dict:
-    """The best legal switch-in, hazard-aware from the CONTEXT (opponent-side
-    Stealth Rock / Toxic Spikes penalise type-weak switch-ins). Degrades to the
-    first legal switch when there's only one, no hazards, or no types known —
-    never raises."""
+def _move_type(name: Any, gen: int = 9,
+               move_db: Optional[Any] = None) -> Optional[str]:
+    """A move's attacking type (display name, e.g. "Fire"), or None if unknown.
+
+    Uses the injected ``move_db`` (tests) or ``legality.lookup.get_move`` (real);
+    mirrors :func:`_boosts_for` (same name-normalisation + degrade contract).
+    A None type means the move is SKIPPED in resist scoring (never a wrong value).
+    """
+    n = _norm_move(name)
+    try:
+        if move_db is not None:
+            d = move_db(n, gen) or {}
+        else:
+            from legality.lookup import get_move  # lazy: keep import cheap
+            d = get_move(n, gen) or {}
+    except Exception:  # noqa: BLE001 — an unknown move is "no type"
+        return None
+    t = d.get("type")
+    return t if isinstance(t, str) and t else None
+
+
+def _opp_move_type_weights(ctx: Dict, gen: int = 9,
+                           move_db: Optional[Any] = None) -> List[tuple]:
+    """``(attacking_type, weight)`` for the opponent ACTIVE's ``top_moves`` that
+    have a KNOWN type — the rule-4 (6.5) input to resist scoring.
+
+    Weights = the belief's per-move posterior weights when exposed
+    (``top_move_weights``, same order as ``top_moves``), else UNIFORM (the 6.5
+    degrade — the belief does not expose them yet). Moves with an unknown type
+    are dropped (degrade, never a wrong factor). Empty list -> the resist term
+    is 0 and :func:`_pick_switch` falls back to hazard-only scoring.
+    """
+    opp_slot = (ctx.get("active") or {}).get("p2")
+    opp_block = (ctx.get("opponent") or {}).get(opp_slot) or {}
+    top_moves = opp_block.get("top_moves") or []
+    if not top_moves:
+        return []
+    weights = opp_block.get("top_move_weights")
+    if not isinstance(weights, (list, tuple)) or len(weights) != len(top_moves):
+        weights = [1.0 / len(top_moves)] * len(top_moves)
+    out: List[tuple] = []
+    for name, w in zip(top_moves, weights):
+        t = _move_type(name, gen, move_db)
+        if t is not None:
+            try:
+                out.append((t, float(w)))
+            except (TypeError, ValueError):  # a non-numeric weight degrades out
+                out.append((t, 0.0))
+    return out
+
+
+def _pick_switch(switches: List[Dict], ctx: Dict, gen: int = 9,
+                 move_db: Optional[Any] = None,
+                 type_chart: Optional[Dict] = None) -> Dict:
+    """The best legal switch-in, RESIST-AWARE + HAZARD-AWARE (rule 4, 6.5).
+
+    Score (lower = better; we take ``max`` of the negated penalty):
+      - **resist term** (6.5): Σ weight × max(1.0, effectiveness) over the
+        opponent's likely ``top_moves`` — a switch-in that is weak to what the
+        opponent will probably do is penalized more; resists/immunes cost the
+        same as neutral (max(1.0, ·) clamps them to 1.0). Weights are the
+        belief's per-move posterior weights when exposed, else uniform.
+      - **hazard term** (existing): opponent-side Stealth Rock / Toxic Spikes
+        penalise type-weak switch-ins (a hazard ≈ a move the opponent always uses).
+
+    :param move_db: injectable move->type source (tests) — default the real DB.
+    :param type_chart: injectable ``{defending: {attacking: factor}}`` (tests);
+        default None -> the fork-verified DB chart (D29: fork = ground truth).
+        Kept injectable (like ``net.action_features``) so tests are hermetic and
+        never assert a memorised chart value.
+
+    Degrades to the FIRST legal switch when there is only one, or when neither
+    resist info (no known opp move types) nor hazards apply — never raises.
+    """
     if len(switches) == 1:
         return switches[0]
     field = ctx.get("field", {}) or {}
     stealthrock = bool((field.get("stealthrock") or {}).get("p2"))
     toxicspikes = bool((field.get("toxicspikes") or {}).get("p2"))
-    if not (stealthrock or toxicspikes):
-        return switches[0]
+
+    # rule 4 (6.5): opponent's likely moves as (attacking_type, weight); empty
+    # -> the resist term is 0 and scoring is hazard-only (the 6.5 degrade).
+    move_type_weights = _opp_move_type_weights(ctx, gen, move_db)
+    if type_chart is None:
+        type_chart = {}
+        if move_type_weights:
+            try:
+                from legality.lookup import get_type_chart  # lazy import
+                type_chart = get_type_chart(gen) or {}
+            except Exception:  # noqa: BLE001 — no chart -> neutral effectiveness
+                type_chart = {}
+    chart = type_chart
 
     def score(act: Dict) -> float:
         types = set(_species_types(str(act.get("species") or ""), gen))
-        if not types:
-            return 0.0
         penalty = 0.0
+        # resist term (only when the switch's types are known — otherwise the
+        # design degrade: hazard-only, so an unknown-type mon isn't penalised).
+        if types and move_type_weights:
+            for atk_type, w in move_type_weights:
+                eff = 1.0
+                for dt in types:
+                    eff *= float(chart.get(dt, {}).get(atk_type, 1.0))
+                penalty += w * max(1.0, eff)
+        # existing hazard penalties (unchanged semantics)
         if stealthrock and (types & {"Rock", "Steel", "Flying", "Bug"}):
             penalty += 2.0
         if toxicspikes and (types & {"Poison", "Flying"}):
@@ -603,7 +690,7 @@ def choose_action(
 
     # 1) force-switch: only switches are legal.
     if not moves:
-        return _pick_switch(switches, ctx, gen) if switches else acts[0]
+        return _pick_switch(switches, ctx, gen, move_db=move_db) if switches else acts[0]
 
     own_slot = (ctx.get("active") or {}).get("p1")
     opp_slot = (ctx.get("active") or {}).get("p2")
@@ -627,7 +714,7 @@ def choose_action(
     # 3) switch when threatened or low-HP, if a switch is legal.
     if switches and (threat in ("guaranteed_ko", "can_ko")
                      or own_hp <= switch_threshold):
-        return _pick_switch(switches, ctx, gen)
+        return _pick_switch(switches, ctx, gen, move_db=move_db)
 
     # 3.5) hazard setup (Step 6.2, rule 1): free match-long value — set rocks/
     # spikes/toxic spikes when legal, our field is clean, the known opponent

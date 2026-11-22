@@ -649,6 +649,130 @@ def test_setup_rule_default_db_path():
     assert a["move"] == "Swords Dance"
 
 
+# ══ Step 6.5 — rule 4: resist-switch, belief-weighted (hermetic) ══
+# PURE-LOGIC tests: the type chart + the opponent move's type are BOTH injected
+# (fakes), so the tests verify the SCORING (sum, max(1,eff) clamp, weights,
+# hazard add) and NEVER assert a memorised real-chart value. Per D29 the fork's
+# DB chart is the ground truth (verified 0/324 vs the server typechart.ts), so
+# we do not hardcode chart factors here — we define them to isolate the logic.
+# Species (Metagross=Steel/Psychic, Garchomp=Dragon/Ground) are resolved from
+# the real DB (stable typing, confirmed); the fake chart is keyed to them.
+
+def _type_db(table):
+    """move_db stub: name -> {'type': ...} (None when the name is absent)."""
+    def _db(name, gen):
+        return {"type": table.get(name)}
+    return _db
+
+
+#: fake chart — values chosen to isolate the scoring logic (not real factors).
+_FAKE_CHART = {
+    "Steel":   {"Electric": 0.5, "Fire": 0.5},  # resists both
+    "Psychic": {"Electric": 1.0, "Fire": 1.0},  # neutral to both
+    "Dragon":  {"Electric": 1.0, "Fire": 1.0},  # neutral to both
+    "Ground":  {"Electric": 2.0, "Fire": 0.5},  # weak to Electric, resists Fire
+}
+
+
+def test_resist_switch_prefers_resist_over_weak():
+    # (a) opponent's likely move is Electric. Both switches hazard-safe:
+    # Metagross (Steel 0.5 x Psychic 1.0 = 0.5 -> clamped 1.0) resists;
+    # Garchomp (Dragon 1.0 x Ground 2.0 = 2.0) is weak. The resist wins.
+    ctx = _full_ctx(opp_moves=("thunderbolt",))
+    sw = [{"kind": "switch", "species": s} for s in ("Metagross", "Garchomp")]
+    a = S._pick_switch(sw, ctx, gen=9,
+                       move_db=_type_db({"thunderbolt": "Electric"}),
+                       type_chart=_FAKE_CHART)
+    assert a["species"] == "Metagross"
+
+
+def test_resist_switch_hazard_can_flip_choice():
+    # (b) WITHOUT Stealth Rock: Metagross (resists Electric) beats Garchomp
+    # (weak to Electric). WITH SR on the opponent's side, Metagross (Steel ->
+    # +2.0) is penalised hard and the SR-safe Garchomp wins — the hazard
+    # penalty outweighs the resist advantage.
+    sw = [{"kind": "switch", "species": s} for s in ("Metagross", "Garchomp")]
+    db = _type_db({"thunderbolt": "Electric"})
+    ctx_no = _full_ctx(opp_moves=("thunderbolt",), stealthrock=False)
+    a_no = S._pick_switch(sw, ctx_no, gen=9, move_db=db, type_chart=_FAKE_CHART)
+    assert a_no["species"] == "Metagross"
+    ctx_yes = _full_ctx(opp_moves=("thunderbolt",), stealthrock=True)
+    a_yes = S._pick_switch(sw, ctx_yes, gen=9, move_db=db, type_chart=_FAKE_CHART)
+    assert a_yes["species"] == "Garchomp"
+
+
+def test_resist_switch_sums_over_multiple_moves():
+    # two opponent moves, uniform weights (0.5 each) — resist penalties SUM.
+    # Metagross resists BOTH (Electric 0.5, Fire 0.5):
+    #   0.5*max(1,0.5) + 0.5*max(1,0.5) = 1.0.
+    # Garchomp weak to Electric (2.0), resists Fire (0.5):
+    #   0.5*max(1,2.0) + 0.5*max(1,0.5) = 1.0 + 0.5 = 1.5.
+    # Metagross (1.0) < Garchomp (1.5) -> Metagross wins.
+    ctx = _full_ctx(opp_moves=("thunderbolt", "flamethrower"))
+    sw = [{"kind": "switch", "species": s} for s in ("Metagross", "Garchomp")]
+    db = _type_db({"thunderbolt": "Electric", "flamethrower": "Fire"})
+    a = S._pick_switch(sw, ctx, gen=9, move_db=db, type_chart=_FAKE_CHART)
+    assert a["species"] == "Metagross"
+
+
+def test_resist_switch_belief_weights_flip_the_pick():
+    # belief-weighted: each switch resists ONE opp move and is weak to the other.
+    #   flip chart: Metagross resists Electric (0.5), weak to Fire (2.0);
+    #               Garchomp weak to Electric (2.0), resists Fire (0.5).
+    # Penalties: Metagross  Electric=1.0, Fire=2.0
+    #            Garchomp   Electric=2.0, Fire=1.0
+    # When the DOMINANT (high-weight) move is Electric -> Metagross wins.
+    # When the DOMINANT move is Fire -> Garchomp wins. Uniform (0.5/0.5) is a
+    # tie (both 1.5) -> first legal. So the WEIGHT is exactly what breaks the
+    # tie and flips the pick — proving the posterior weights are used, not just
+    # move presence.
+    flip = {
+        "Steel":   {"Electric": 0.5, "Fire": 2.0},  # resists Electric, weak to Fire
+        "Psychic": {"Electric": 1.0, "Fire": 1.0},
+        "Dragon":  {"Electric": 1.0, "Fire": 1.0},
+        "Ground":  {"Electric": 2.0, "Fire": 0.5},  # weak to Electric, resists Fire
+    }
+    sw = [{"kind": "switch", "species": s} for s in ("Metagross", "Garchomp")]
+    db = _type_db({"thunderbolt": "Electric", "flamethrower": "Fire"})
+
+    def with_weights(w_elec, w_fire):
+        c = _full_ctx(opp_moves=("thunderbolt", "flamethrower"))
+        c["opponent"]["p2a"]["top_move_weights"] = [w_elec, w_fire]
+        return c
+
+    # dominant = Electric (0.9/0.1) -> Metagross (resists Electric):
+    #   Metagross 0.9*1.0 + 0.1*2.0 = 1.1 ; Garchomp 0.9*2.0 + 0.1*1.0 = 1.9
+    assert S._pick_switch(sw, with_weights(0.9, 0.1), gen=9,
+                          move_db=db, type_chart=flip)["species"] == "Metagross"
+    # dominant = Fire (0.1/0.9) -> Garchomp (resists Fire):
+    #   Metagross 0.1*1.0 + 0.9*2.0 = 1.9 ; Garchomp 0.1*2.0 + 0.9*1.0 = 1.1
+    assert S._pick_switch(sw, with_weights(0.1, 0.9), gen=9,
+                          move_db=db, type_chart=flip)["species"] == "Garchomp"
+
+
+def test_resist_switch_no_move_info_degrades_to_hazard_only():
+    # (c) NO opponent move info (top_moves empty) -> the resist term is 0 and
+    # the choice is hazard-driven only: with SR up, the SR-safe Garchomp beats
+    # the SR-weak Metagross even though there is no resist signal at all.
+    # (through choose_action -> pins the wiring; no chart values involved)
+    ctx = _full_ctx(opp_moves=(), stealthrock=True)
+    a = S.choose_action(
+        ctx, _acts([], ["Metagross", "Garchomp"]),
+        fmt="gen9ou", calc_fn=lambda *x, **k: _dmg(0, 0, 0))
+    assert a["species"] == "Garchomp"
+
+
+def test_resist_switch_unknown_move_type_degrades():
+    # an opponent move whose type is UNRESOLVABLE (no move_db, fake name) is
+    # skipped -> resist term 0 -> hazard-only. With SR up the SR-safe switch
+    # wins (through choose_action -> pins the wiring).
+    ctx = _full_ctx(opp_moves=("somefakemove",), stealthrock=True)
+    a = S.choose_action(
+        ctx, _acts([], ["Metagross", "Garchomp"]),
+        fmt="gen9ou", calc_fn=lambda *x, **k: _dmg(0, 0, 0))
+    assert a["species"] == "Garchomp"
+
+
 def test_rank_empty_moves():
     r = S.rank_moves(_ctx(), "p1a", "p2a", [], fmt="gen9ou",
                      calc_fn=lambda *a, **k: _dmg(0, 0, 0))
