@@ -1809,3 +1809,21 @@ Script: `scratch/step5_spike/roundtrip.js` (node, uses fork `dist/sim`).
   bench) — do not assume both sides always have a 'move' request simultaneously.
 - `commitChoices()` throws "Not all choices done" if a side's request is empty —
   guard with `requestState` checks.
+
+### Step 4 smoke + argmax investigation (2026-11-22)
+- Smoke (n=10, step4_round8.pt): sampled 1.000 vs random, 0.900 vs heuristic;
+  **argmax 0.500 vs random (FAIL), 0.900 vs heuristic**. Full n=50 gate launched
+  (label `step4-vs-pool`, log `scratch/step4/eval_n50.log`).
+- Argmax trace (scratch/step4/argmax_trace.py, 3 battles vs random, seed 777):
+  **no degenerate fixed top-1** — picks are context-dependent, top1-top2 gap small
+  (median 0.072), bot won 3/3. => the 0.50 is likely variance + a behavioral bias.
+- **Behavioral bias observed:** greedy top picks skew to setup/support
+  (Rapid Spin x64, Swords Dance x32, Calm Mind x32, Stealth Rock/Spikes) over
+  attacks. Greedy = slow utility play. Watch the n=50 heuristic column; if greedy
+  stays weak vs random but strong vs heuristic, the fix is training-side (reward
+  pacing / opponent pressure), not a code bug.
+- OPEN: if n=50 confirms argmax-vs-random < 0.6, decide: (a) accept greedy as a
+  weak mode (we play sampled in training and can play sampled in league), or
+  (b) investigate the policy head's top-1 (e.g. entropy coefficient is keeping the
+  distribution flat — median gap 0.072 — which is fine for PPO but makes argmax
+  nearly a coin-flip among 3-4 moves).
