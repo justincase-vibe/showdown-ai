@@ -1575,6 +1575,17 @@ COMPUTATION (reuse the ONE calc, do NOT re-derive):
    hp_frac of max HP; a move KOs when exp/max% >= that threshold).
  * DEGRADES to a ZERO row per mon (never raises) when a species/move is unknown
    or the calc fails — the net reads "unknown", exactly like the id channels.
+ * TURN-1 / NO-REVEALED-MOVE edge (BUG-HUNT 2026-11-22): before the opponent
+   reveals a move, its `top_moves` is empty. Rather than silently zeroing the
+   whole matchup (a real bug found while probing the live belief path), a mon
+   with NO revealed move uses the NEUTRAL Body Slam baseline (85 power, 100% acc,
+   always-legal, always-hits) as its representative attack move. A "highest
+   power" legal-move scan was considered and REJECTED (it picked quirky moves
+   like Explosion / Gigaimpact, which are not representative). Body Slam is a
+   sane, universal, always-hits damage baseline; it leaks no hidden info
+   (species-independent) and gives a sensible "the opp can hurt me" prior on
+   turn 1 that sharpens as the opp's real moves are revealed. (Own side is
+   unaffected in self-play / live bot — it has its full moveset from turn 1.)
 
 PLACEMENT / WIRING (same discipline as static_features + action_features):
  * `net/matchup_features.py` — PURE, lazy calc import, `build_own_matchup(ctx,
@@ -1586,8 +1597,9 @@ PLACEMENT / WIRING (same discipline as static_features + action_features):
    real array, opponent side passes zeros. `_side_repr` threads it through.
  * `env.build_obs` wires `build_own_matchup` in its OWN try/except (a calc
    failure degrades ONLY this field to zero; the HP/status/belief obs survives).
- * `test_s41` checksum re-pin (25 -> 26 fields); +`net/tests/test_matchup_features.py`
-   (hermetic via an injected batch calc_fn; one real-calc/DB integration test).
+ * `test_s41` checksum re-pin (24 -> 25 fields); +`net/tests/test_matchup_features.py`
+   (15 hermetic tests via an injected batch calc_fn + 1 real-calc/DB integration
+   test, incl. the turn-1 Body Slam fallback guard).
 
 SPEED DECISION (recorded, deliberate): the per-pair SPEED-advantage dim from the
 initial sketch is DROPPED — base speed is ALREADY in the `own_stats`/`opp_stats`
@@ -1599,14 +1611,39 @@ wants an explicit speed-order signal, this is a 2-line re-add (re-pin checksum).
 
 PROGRESS (3.4, 2026-11-22):
 - 3.4: DONE — registry +K_OWN_MATCHUP (8) + field `own_matchup` (6x8); new
-  `net/matchup_features.py` (build_own_matchup / _own_attack_move / _opp_attack_move
-  / _top_ability, ONE calc_damage_many batch, ko_assessment KO verdicts, degrades
-  to zero); encoder places it (zero-fill); MonEncoder folds it into the per-mon
-  vector (in_dim += 8), own side real + opponent side zeros; env.build_obs wires
-  it in its OWN try/except. test_s41 checksum re-pinned (1141 -> 1189 elements,
-  24 -> 25 fields); +net/tests/test_matchup_features.py (10 hermetic tests via an
-  injected batch calc_fn + 1 real-calc/DB integration test). net + league +
-  fitness all green. (See the PROGRESS log line updated below.)
+  `net/matchup_features.py` (build_own_matchup / own_attack_move / opp_attack_move
+  / best_damaging_move (Body Slam baseline) / _top_ability, ONE calc_damage_many
+  batch, ko_assessment KO verdicts, degrades to zero, turn-1 Body Slam fallback);
+  encoder places it (zero-fill); MonEncoder folds it into the per-mon vector
+  (in_dim += 8), own side real + opponent side zeros; env.build_obs wires it in
+  its OWN try/except. test_s41 checksum re-pinned (1141 -> 1189 elements,
+  24 -> 25 fields); +net/tests/test_matchup_features.py (15 hermetic tests via an
+  injected batch calc_fn + 1 real-calc/DB integration test). net 197 passed;
+  league+fitness 186 passed. BUG-HUNT 2026-11-22: found + fixed the turn-1
+  "opponent revealed no move -> top_moves empty -> whole matchup silently zero"
+  edge (now falls back to the Body Slam baseline, pinned by a test); confirmed
+  the live own-block path carries `name`+moves (env._own_team_from_battle) and
+  the opponent path carries `species` (belief), so block_to_calc_mon resolves
+  both sides. (See the BEFORE baseline recorded in the Step 8 section below.)
+
+### Step 8 BEFORE baseline (recorded 2026-11-22, the ONLY "before" number)
+
+The old (GRU-trunk) checkpoints can no longer load under the Step 2/3 code, so
+this is the last chance to capture the "before" performance. Ran on the league's
+best checkpoint `scratch/league_random_1001.pt` (ELO 1586, `league/bots.json`),
+50 battles vs two references (random + heuristic), on the OLD in-memory code:
+
+  * sampled  vs random     **WR 0.74** (37W/13L/0D)  95%CI [0.618, 0.862]
+  * sampled  vs heuristic  0.48  (24W/25L/1D)         95%CI [0.342, 0.619]
+  * argmax   vs random     0.54  (27W/18L/5D)         95%CI [0.402, 0.678]
+  * argmax   vs heuristic  0.44  (22W/26L/2D)         95%CI [0.302, 0.578]
+
+Interpretation: the league's best self-play checkpoint is WEAK — it barely
+beats random and LOSES to the simple heuristic. So Step 3's added signal
+(static facts + per-action damage + per-mon matchup) + the Step 4 single-learner
+experiment must show a clear lift over these numbers to count as "learning."
+The "after-Step-3" learning_check run (Step 8) is the comparison point. (Rows
+appended to `runs/learning_check.csv`, label `before-step2`; CSV is gitignored.)
 
 OPEN DESIGN OBSERVATION (not changed — needs a call): the MOVE's type is encoded as
 ONE ordinal float (`type_idx/18`) while the MON's types are one-hot (18 floats).

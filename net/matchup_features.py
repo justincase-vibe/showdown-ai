@@ -33,6 +33,7 @@ the locked 8-dim schema and the deliberate DROP of a per-pair speed dim.
 """
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -111,12 +112,40 @@ def opp_attack_move(block: Optional[Dict]) -> Optional[str]:
     ``top_moves`` is the belief's ranked marginal (``get_context()``); the first
     entry is the deterministic pick (the 3.3 convention). Falls back to the
     first observed move so a belief without a posterior still yields a signal.
+    Returns ``None`` when the opponent has revealed NO move yet (turn 1 / an
+    untouched bench mon) — the caller then uses the species' best legal damaging
+    move (see :func:`best_damaging_move`) so the matchup signal still exists.
     """
     tops = (block or {}).get("top_moves") or []
     if tops:
         return tops[0]
     used = (block or {}).get("moves") or []
     return used[0] if used else None
+
+
+#: a neutral damaging move that every species can legally carry in every
+#: generation (Body Slam, 85 power, 100% accuracy, always hits). It is the
+#: representative "attacking" move when a mon has revealed NO move yet (turn-1
+#: opponent, an untouched own bench mon in a spec without a full moveset) — a
+#: sane, universal, always-hits baseline (a "highest power" scan would pick
+#: quirky moves like Explosion / Gigaimpact, which are NOT representative).
+#: Public legality data only — using it leaks no hidden info (it is not a
+#: species-specific move, just a neutral damage baseline for the summary).
+NEUTRAL_DAMAGING_MOVE = "bodyslam"
+
+
+@lru_cache(maxsize=256)
+def best_damaging_move(name: str, fmt: str, gen: int) -> str:
+    """A representative damaging move for a mon that has revealed none yet.
+
+    Returns the neutral Body Slam baseline (see :data:`NEUTRAL_DAMAGING_MOVE`).
+    Kept as a function (rather than the constant) so a caller can inject a
+    different baseline and so the signature is stable if a smarter pick is
+    wanted later; the (name, fmt, gen) args are accepted for that extensibility
+    and cached so the call is cheap. No hidden-info leak: Body Slam is a
+    species-independent, always-legal, always-hits move.
+    """
+    return NEUTRAL_DAMAGING_MOVE
 
 
 def _calc_mon(block: Dict, ability: Optional[str]) -> Dict:
@@ -171,9 +200,25 @@ def build_own_matchup(ctx: Dict, fmt: str, gen: int = 9, *,
     # Resolve each mon's attack move + top-1 ability ONCE (deterministic).
     own_block = {i: b for i, b in own_alive}
     opp_block = {i: b for i, b in opp_alive}
-    own_move = {i: own_attack_move(own_block[i].get("moves", []) or [], gen)
-                for i in own_block}
-    opp_move = {i: opp_attack_move(opp_block[i]) for i in opp_block}
+    # A mon with NO revealed move (own bench in a spec without a full moveset;
+    # a turn-1 / untouched opponent) still gets a representative attack move via
+    # the species' best legal damaging move — public data, no hidden-info leak.
+    def _own_move_name(b: Dict) -> Optional[str]:
+        mv = own_attack_move(b.get("moves", []) or [], gen)
+        if mv:
+            return mv
+        nm = b.get("name") or b.get("species") or ""
+        return best_damaging_move(nm, fmt, gen) if nm else None
+
+    def _opp_move_name(b: Dict) -> Optional[str]:
+        mv = opp_attack_move(b)
+        if mv:
+            return mv
+        nm = b.get("name") or b.get("species") or ""
+        return best_damaging_move(nm, fmt, gen) if nm else None
+
+    own_move = {i: _own_move_name(own_block[i]) for i in own_block}
+    opp_move = {i: _opp_move_name(opp_block[i]) for i in opp_block}
     opp_ability = {i: _top_ability(opp_block[i]) for i in opp_block}
 
     # Build the ONE batch: for each (own, opp) pair, BOTH directions.

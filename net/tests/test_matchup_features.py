@@ -26,6 +26,7 @@ from net.matchup_features import (
     build_own_matchup,
     own_attack_move,
     opp_attack_move,
+    NEUTRAL_DAMAGING_MOVE,
 )
 from net.registry import K_OWN_MATCHUP, MAX_SLOTS
 
@@ -233,6 +234,22 @@ def test_opp_attack_move_falls_back_to_first_observed():
     assert opp_attack_move(blk) == "shadowball"
     blk2 = {"name": "gengar", "top_moves": ["focusbolt", "shadowball"]}
     assert opp_attack_move(blk2) == "focusbolt"
+
+
+def test_turn1_opp_no_revealed_move_uses_neutral_baseline():
+    # opponent revealed NO move (top_moves empty, moves empty) but its species is
+    # known -> the module must still produce a signal (Body Slam baseline), not
+    # silently degrade to zero (the "turn-1 matchup unknown" edge).
+    ctx = {"own": {"p1a": {"name": "garchomp", "hp_frac": 1.0,
+                           "moves": ["earthquake"]}},
+           "opponent": {"p2a": {"name": "blastoise", "hp_frac": 1.0,
+                                "top_moves": [], "moves": []}}}
+    table = {("garchomp", "blastoise", "earthquake"): (0.0, 0.0, 0.0),
+             ("blastoise", "garchomp", NEUTRAL_DAMAGING_MOVE): (40.0, 45.0, 45.0)}
+    out = build_own_matchup(ctx, "gen9bss3v3", calc_fn=_fake_calc(table))
+    v = out["own_matchup"][0]
+    # the opponent's neutral-baseline move (45% exp) is the worst_hit -> nonzero
+    assert v[1] == pytest.approx(0.45)
 
 
 # ── one real-calc / DB integration test (skips without Node) ───────────
