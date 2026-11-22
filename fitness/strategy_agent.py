@@ -19,10 +19,9 @@ imported lazily inside ``decide`` — the same discipline as ``fitness.heuristic
 """
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, Optional
 
-__all__ = ["StrategyAgent", "strategy_reference"]
+__all__ = ["StrategyAgent", "strategy_reference", "strategy_posterior_reference"]
 
 
 def _gen_from_format(fmt: str) -> int:
@@ -31,16 +30,13 @@ def _gen_from_format(fmt: str) -> int:
     The ONE source of truth is ``legality.formats.engine_key`` (D32):
     champions formats map to **0, NOT 9** — mapping them to 9 would
     silently mis-calc ~25 moves (champions Slash BP=80 vs gen-9 70). The
-    regex fallback covers format ids OUTSIDE the registry (custom formats);
+    fallback covers format ids OUTSIDE the registry (custom formats);
     unrecognised -> 9 (the primary format). Lazy import keeps this module
-    cheap at import time.
+    cheap at import time. B1: the fallback is LOUD (a warning) via
+    ``engine_key_or_warn`` — no silent mis-keying.
     """
-    try:
-        from legality.formats import engine_key
-        return int(engine_key(fmt))
-    except Exception:  # noqa: BLE001 — unknown id / unmappable mod -> fallback
-        m = re.match(r"gen(\d+)", fmt or "")
-        return int(m.group(1)) if m else 9
+    from legality.formats import engine_key_or_warn
+    return int(engine_key_or_warn(fmt, default=9))
 
 
 class StrategyAgent:

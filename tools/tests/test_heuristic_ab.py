@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from tools.heuristic_ab import _gen_from_format, matrix  # noqa: E402
+from tools.heuristic_ab import _gen_from_format, matrix, parse_only  # noqa: E402
 
 
 def test_matrix_pairs_in_order():
@@ -36,6 +36,26 @@ def test_matrix_names_match_the_refs_dict():
     # drift on either side would KeyError mid-run; pin the set.
     assert {n for pair in matrix() for n in pair} == \
         {"strategy", "strategy_posterior", "heuristic", "random"}
+
+
+def test_parse_only_none_and_empty():
+    # no --only flag -> full matrix (pairs=None is the run_ab default).
+    assert parse_only(None) is None
+    assert parse_only("") is None
+
+
+def test_parse_only_valid_pair():
+    # the 6.6a baseline flag: single pair, whitespace-tolerant, order preserved.
+    assert parse_only("strategy_posterior,heuristic") == \
+        [("strategy_posterior", "heuristic")]
+    assert parse_only(" strategy , random ") == [("strategy", "random")]
+
+
+def test_parse_only_rejects_unknown_pair():
+    # a typo must fail loudly BEFORE any battle is started (not mid-run).
+    import pytest
+    with pytest.raises(ValueError):
+        parse_only("strategy_posterior, random_init")
 
 
 def test_gen_from_format():

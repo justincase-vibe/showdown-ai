@@ -19,8 +19,11 @@ defaultLevel.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Dict, List, Optional
+
+_log = logging.getLogger("legality.formats")
 
 
 def _f(id: str, name: str, gen: int, tier: str, game_type: str = "singles",
@@ -174,6 +177,27 @@ _MOD_ENGINE_KEYS: Dict[str, int] = {
     "champions": 0,
 }
 _GEN_MOD = re.compile(r"^gen(\d+)$")
+
+
+def engine_key_or_warn(fmt: str, default: int = 9) -> int:
+    """``engine_key`` with a LOUD fallback (B1: no silent engine-key fallbacks).
+
+    The registry is the source of truth; when a call site passes an id the
+    registry does not know (e.g. a bare ``"champions"`` or a non-target format
+    label), the old code swallowed the error and fell back to a regex guess
+    SILENTLY — exactly the class of bug that made champions map to gen 9
+    (D32). Same fallback semantics (regex ``genN`` on the id, then ``default``)
+    so existing behaviour and tests are unchanged, but every fallback now
+    emits a WARNING so it is visible in logs instead of hiding in the numbers.
+    """
+    try:
+        return engine_key(fmt)
+    except Exception as exc:  # noqa: BLE001 — documented fallback contract
+        m = re.match(r"gen(\d+)", fmt or "")
+        fb = int(m.group(1)) if m else default
+        _log.warning("engine key fallback for format %r (%s: %s) -> %d", fmt,
+                     type(exc).__name__, exc, fb)
+        return fb
 
 
 def engine_key(fmt: str) -> int:

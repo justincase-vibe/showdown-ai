@@ -60,14 +60,10 @@ def _gen_from_format(fmt: str) -> int:
     """The @smogon/calc engine key for a format id — the ONE source of truth
     is ``legality.formats.engine_key`` (D32: champions = 0, NOT 9; mapping to
     9 would silently mis-calc ~25 moves). Regex fallback for ids outside the
-    registry; unrecognised -> 9 (the primary format)."""
-    import re
-    try:
-        from legality.formats import engine_key
-        return int(engine_key(fmt))
-    except Exception:  # noqa: BLE001 — unknown id / unmappable mod -> fallback
-        m = re.match(r"gen(\d+)", fmt or "")
-        return int(m.group(1)) if m else 9
+    registry; unrecognised -> 9 (the primary format). B1: the fallback is
+    LOUD (a warning) via ``engine_key_or_warn`` — no silent mis-keying."""
+    from legality.formats import engine_key_or_warn
+    return int(engine_key_or_warn(fmt, default=9))
 
 
 def run_check(

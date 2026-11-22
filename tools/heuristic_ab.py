@@ -45,14 +45,10 @@ def _gen_from_format(fmt: str) -> int:
     """@smogon/calc engine key for a format id — the ONE source of truth is
     ``legality.formats.engine_key`` (D32: champions = 0, NOT 9; mapping to 9
     would silently mis-calc ~25 moves). Regex fallback for ids outside the
-    registry; unrecognised -> 9 (the primary format)."""
-    import re
-    try:
-        from legality.formats import engine_key
-        return int(engine_key(fmt))
-    except Exception:  # noqa: BLE001 — unknown id / unmappable mod -> fallback
-        m = re.match(r"gen(\d+)", fmt or "")
-        return int(m.group(1)) if m else 9
+    registry; unrecognised -> 9 (the primary format). B1: the fallback is
+    LOUD (a warning) via ``engine_key_or_warn`` — no silent mis-keying."""
+    from legality.formats import engine_key_or_warn
+    return int(engine_key_or_warn(fmt, default=9))
 
 
 def matrix() -> List[Tuple[str, str]]:
@@ -80,8 +76,10 @@ def run_ab(
     port_base: int = 49970,
     max_steps: int = 200,
     csv_path: str = DEFAULT_CSV,
+    pairs: Optional[List[Tuple[str, str]]] = None,
 ) -> Dict[str, Any]:
-    """Play the A/B matrix and record (printed PASS/FAIL + CSV append)."""
+    """Play the A/B matrix (or a ``pairs`` subset for the fast 6.6a baseline)
+    and record (printed PASS/FAIL + CSV append)."""
     from net.vocab_db import build_vocabs
     from pool import PoolConfig, ResourcePool
     from fitness.ladder import random_reference
@@ -113,7 +111,7 @@ def run_ab(
         print(f"[heuristic_ab] WARNING: pool not fully healthy: {status}")
     try:
         records: List[Dict[str, Any]] = []
-        for bot_name, ref_name in matrix():
+        for bot_name, ref_name in (pairs if pairs is not None else matrix()):
             res = evaluate(
                 bot=refs[bot_name], refs=[refs[ref_name]],
                 n_battles=n_battles, fmt=fmt, vocabs=vocabs, device="cpu",
@@ -146,6 +144,24 @@ def run_ab(
         pool.shutdown()
 
 
+def parse_only(spec: Optional[str]) -> Optional[List[Tuple[str, str]]]:
+    """Parse the ``--only 'bot,ref'`` flag into a ``pairs`` list (pure/testable).
+
+    The OLD code monkey-patched ``matrix`` after import, which silently failed
+    under ``python -m tools.heuristic_ab`` (the module loads as ``__main__``,
+    so the patch hit a separate module instance and the FULL matrix ran).
+    Threading ``pairs`` through ``run_ab`` avoids the class of bug entirely;
+    this helper pins the parsing so it stays a one-liner to test.
+    """
+    if not spec:
+        return None
+    bot, ref = [x.strip() for x in spec.split(",")]
+    if (bot, ref) not in matrix():
+        raise ValueError(f"--only pair {bot!r},{ref!r} is not in the matrix "
+                         f"{matrix()}")
+    return [(bot, ref)]
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--n", type=int, default=20,
@@ -157,13 +173,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--per-server", type=int, default=2)
     ap.add_argument("--port-base", type=int, default=49970)
     ap.add_argument("--max-steps", type=int, default=200)
+    ap.add_argument("--only", default=None,
+                    help="run a SINGLE pair 'bot,ref' (e.g. strategy_posterior,"
+                         "heuristic) instead of the full matrix — the fast "
+                         "6.6a baseline")
     ap.add_argument("--csv", default=DEFAULT_CSV)
     args = ap.parse_args(argv)
+
+    try:
+        pairs = parse_only(args.only)
+    except ValueError as exc:
+        raise SystemExit(str(exc))
 
     out = run_ab(
         n_battles=args.n, fmt=args.format, label=args.label, seed=args.seed,
         n_servers=args.n_servers, per_server=args.per_server,
-        port_base=args.port_base, max_steps=args.max_steps, csv_path=args.csv)
+        port_base=args.port_base, max_steps=args.max_steps, csv_path=args.csv,
+        pairs=pairs)
     from tools.learning_check import append_csv
     append_csv(out["records"], args.csv)
     return 0
