@@ -54,6 +54,25 @@ _HAZARD_FIELD = {
     "stickyweb": ("stickyweb", "bool"),  # belief DOES track it (per-side bool)
 }
 
+#: Step 6.3 — rule 2: status moves. move name (normalized) -> (status code
+#: as the belief records it — raw Showdown codes brn/par/slp/tox, or
+#: "leechseed" when it's a volatile), opponent TYPES immune to the status.
+#: Deliberately EXCLUDED: Leech Seed — the belief does NOT track it (not a
+#: status, not in the 7 curated volatiles), so an "already seeded" check is
+#: impossible and the rule would re-pick it every turn (the sticky-web bug
+#: class). Adding it back requires the belief to track it first.
+_STATUS_MOVES = {
+    "willowisp":    ("brn", frozenset({"Fire", "Water"})),
+    "thunderwave":  ("par", frozenset({"Electric"})),
+    "glare":        ("par", frozenset({"Electric"})),
+    "toxic":        ("tox", frozenset({"Poison", "Steel"})),
+    "toxin":        ("tox", frozenset({"Poison", "Steel"})),
+    "sleeppowder":  ("slp", frozenset({"Psychic"})),
+    "spore":        ("slp", frozenset({"Psychic"})),
+    "hypnosis":     ("slp", frozenset({"Psychic"})),
+}
+
+
 #: field-setup id -> opponent TYPES immune / not-affected (type-based only;
 #: ability immunities like Levitate are not in the ctx — degrade: attempt
 #: anyway). Empty set = universally applicable (tailwind / terrain / screens
@@ -192,6 +211,46 @@ def _hazard_broadly_effective(fid: str, ctx: Dict, gen: int) -> bool:
     if not known:
         return True
     return (sum(known) / len(known)) <= 0.5
+
+
+def _status_already_on(block: Optional[Dict], code: str) -> bool:
+    """Does the mon already have this status? Raw Showdown codes (brn/par/
+    slp/tox) from the belief; "leechseed" would check the volatiles list
+    (currently no map entry needs it — see _STATUS_MOVES)."""
+    b = block or {}
+    if code == "leechseed":
+        return "leechseed" in (b.get("volatiles") or [])
+    return code in (b.get("statuses") or [])
+
+
+def _pick_status(moves: List, ctx: Dict, opp_slot: Optional[str], threat: str,
+                 gen: int = 9) -> Optional[Dict]:
+    """Rule 2 (Step 6.3): the best legal STATUS action, or None.
+
+    Chosen when: a status move is legal, the OPPONENT ACTIVE does not already
+    have that status, the opponent's types are not immune (unknown types ->
+    attempt anyway: a teacher should show the behavior), and I am NOT
+    guaranteed-KO'd / can-KO'd this turn (paralysis/sleep is not worth the bad
+    roll; burn is not either — conservative per the 6.1 design note).
+    Priority sits BELOW field setup (hazards) and (when 6.4 lands) setup
+    boosts, ABOVE plain attacks. Pure + degrading; never raises.
+    """
+    if threat in ("guaranteed_ko", "can_ko"):
+        return None
+    opp_block = (ctx.get("opponent") or {}).get(opp_slot) or {}
+    opp_types = set(_species_types(
+        opp_block.get("species") or opp_block.get("name"), gen))
+    for act, name in moves:
+        spec = _STATUS_MOVES.get(_norm_move(name))
+        if spec is None:
+            continue
+        code, immune_to = spec
+        if _status_already_on(opp_block, code):
+            continue
+        if immune_to and opp_types and (opp_types & immune_to):
+            continue
+        return act
+    return None
 
 
 def _pick_hazard(moves: List, ctx: Dict, threat: str,
@@ -462,6 +521,10 @@ def choose_action(
          already up on our side, the known opponent is not majority-immune,
          and I am not guaranteed-KO'd -> set the hazard (free match-long value;
          the concept the net must learn to value).
+      3.6 (Step 6.3) status — a status move (Wisp/Thunder Wave/Toxic/sleep
+         moves/Glare) is legal, the opponent active lacks that status and is
+         not type-immune, and I am not guaranteed/can-KO'd -> apply the status
+         (match-long damage/pace value; the concept the net must learn to value).
       4. otherwise -> the best damaging move (``rank_moves``: KO ladder, then
          damage; a status move sorts last).
 
@@ -520,6 +583,14 @@ def choose_action(
     hazard = _pick_hazard(moves, ctx, threat, gen, move_db=move_db)
     if hazard is not None:
         return hazard
+
+    # 3.6) status (Step 6.3, rule 2): burn/paralyze/sleep/toxify when legal,
+    # the opponent active lacks it, isn't type-immune, and I am not in
+    # guaranteed/can-KO range. (Rule 3 — setup boosts — lands here in 6.4,
+    # BETWEEN hazards and status, per the 6.1 priority.)
+    status = _pick_status(moves, ctx, opp_slot, threat, gen)
+    if status is not None:
+        return status
 
     # 4) offensive: the best damaging move (KO ladder, then damage).
     names = [name for _a, name in moves]

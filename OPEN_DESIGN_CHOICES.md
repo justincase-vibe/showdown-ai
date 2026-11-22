@@ -2066,3 +2066,21 @@ External review of the current position; decisions recorded:
   schedule with the damage-calc work, not the teacher rules. Low blast radius
   today: TR is rare in OU, and the rule above only makes the TEACHER set TR
   when nothing else is legal.
+
+### Step 6.3 — rule 2: status moves (implemented, 2026-11-22)
+- Status codes: the belief records RAW Showdown codes (brn/par/slp/tox) —
+  verified in belief/events.py; the `_STATUS_MOVES` map matches them exactly.
+- **Leech Seed EXCLUDED (recorded decision):** not a status and not in the 7
+  curated volatiles, so the belief can't tell "already seeded" — including it
+  would recreate the sticky-web re-pick bug. Re-add only after the belief
+  tracks it.
+- Gate: `threat in (guaranteed_ko, can_ko)` -> skip (stricter than rule 1's
+  guaranteed-only, per the 6.1 note: paralysis/sleep aren't worth a bad roll).
+- Unknown opponent types -> ATTEMPT (the 6.1 open item, resolved "yes":
+  teacher should show the behavior) — now pinned by a test.
+- Only the OPPONENT ACTIVE's statuses/types matter (bench statuses ignored —
+  pinned by a test).
+- **Test-contract update:** `test_real_get_context_feeds_the_brain_end_to_end`
+  asserted "never the status toxic" (pre-6.3 intent); under rule 2 the correct
+  pick in that scenario IS toxic — the assertion was updated to the new
+  design intent (the test still proves real ctx + real calc feed the brain).

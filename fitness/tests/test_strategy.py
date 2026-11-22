@@ -436,6 +436,107 @@ def test_hazard_rule_rooms_rank_below_hazards_and_terrain():
     assert b["move"] == "Psychic Terrain"
 
 
+# ══ Step 6.3 — rule 2: status moves (hermetic; fake calc, no Node/GPU) ══
+
+def test_status_rule_wisp_over_weak_attack_when_safe():
+    # venusaur (Grass/Poison) not burn-immune, no status, safe -> Wisp over 15%
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    a = S.choose_action(ctx, _acts(["Will-O-Wisp", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Will-O-Wisp"
+
+
+def test_status_rule_skips_when_opp_already_burned():
+    # belief records raw Showdown codes ("brn") — the map must match them
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    ctx["opponent"]["p2a"]["statuses"] = ["brn"]
+    a = S.choose_action(ctx, _acts(["Will-O-Wisp", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_status_rule_skips_wisp_vs_fire_type():
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp="charizard", opp_moves=())
+    a = S.choose_action(ctx, _acts(["Will-O-Wisp", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_status_rule_skips_thunder_wave_vs_electric():
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp="magnezone", opp_moves=())
+    a = S.choose_action(ctx, _acts(["Thunder Wave", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_status_rule_thunder_wave_vs_non_electric():
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp="venusaur", opp_moves=())
+    a = S.choose_action(ctx, _acts(["Thunder Wave", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Thunder Wave"
+
+
+def test_status_rule_skips_toxic_vs_steel():
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp="magnezone", opp_moves=())
+    a = S.choose_action(ctx, _acts(["Toxic", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_status_rule_skips_when_guaranteed_ko_threat():
+    # guaranteed_ko -> attack, not status (design test case d)
+    calc, _ = fake_calc({"hammer": (85, 95, 90), "ember": (10, 20, 15)})
+    ctx = _full_ctx(own_hp=0.8, opp_moves=("hammer",))
+    a = S.choose_action(ctx, _acts(["Will-O-Wisp", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_status_rule_skips_when_can_ko_threat():
+    # can_ko (max 85 >= 80 threshold, min 30 < it) -> status NOT worth the roll
+    calc, _ = fake_calc({"hammer": (30, 85, 55), "ember": (10, 20, 15)})
+    ctx = _full_ctx(own_hp=0.8, opp_moves=("hammer",))
+    a = S.choose_action(ctx, _acts(["Will-O-Wisp", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_status_rule_attempts_on_unknown_types():
+    # teacher-behavior decision (6.1 open item, resolved yes): unknown
+    # opponent types -> the status attempt is a coin flip, still show it
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp="zzzunknownmon", opp_moves=())
+    a = S.choose_action(ctx, _acts(["Will-O-Wisp", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Will-O-Wisp"
+
+
+def test_status_rule_ranks_below_hazards():
+    # priority: a legal hazard beats a legal status (6.1 design order)
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    a = S.choose_action(ctx, _acts(["Will-O-Wisp", "Stealth Rock", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Stealth Rock"
+
+
+def test_status_rule_ignores_bench_statuses():
+    # a BURNED BENCH mon must not block Wisp on the unburned ACTIVE
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    ctx["opponent"]["p2b"] = {"species": "venusaur", "hp_frac": 0.0,
+                               "statuses": ["brn"], "boosts": {}, "moves": []}
+    a = S.choose_action(ctx, _acts(["Will-O-Wisp", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Will-O-Wisp"
+
+
 def test_rank_empty_moves():
     r = S.rank_moves(_ctx(), "p1a", "p2a", [], fmt="gen9ou",
                      calc_fn=lambda *a, **k: _dmg(0, 0, 0))
@@ -563,10 +664,13 @@ def test_real_get_context_feeds_the_brain_end_to_end():
     # 3) at 1 HP the top move is a genuine KO (calc + interpretation agree).
     assert (r["assessments"][r["best"]]["guaranteed_ko"]
             or r["assessments"][r["best"]]["can_ko"])
-    # 4) choose_action returns a legal DAMAGING move (never the status 'toxic').
+    # 4) choose_action returns a LEGAL move. Under Step 6.3 rule 2 the CORRECT
+    # pick here is 'toxic' (legal, safe-ish, Blastoise not immune, opponent not
+    # guaranteed/can-KO'ing us) — the old assertion ("never the status toxic")
+    # pinned the PRE-6.3 behavior and was updated to the new design intent.
     chosen = S.choose_action(ctx, acts, fmt="gen9ou")
     assert chosen is not None and chosen.get("move") in moves
-    assert chosen.get("move") != "toxic"
+    assert chosen.get("move") == "toxic"
 
 
 if __name__ == "__main__":  # pragma: no cover
