@@ -2010,3 +2010,15 @@ External review of the current position; decisions recorded:
   scenario battles.
 - **M3** search beats policy-only by a measured margin (Step 5, after M1/M2).
 - **M4** second format, evaluated on UNSEEN teams (after M1).
+
+### Step 6.2 implementation decisions (recorded as made)
+- Classification source FLIPPED vs the 6.1 note: the canonical NAME SET is
+  primary (hermetic, covers the toxicspikes DB gap, stable across gens); the
+  injectable `move_db` flag is the generic fallback. Rationale: hazards are a
+  closed set; a name set is testable without any DB and can't drift per-gen.
+- Sticky Web: untracked in the belief field -> always "clean" (free value).
+- Gate is `threat == guaranteed_ko` ONLY (a can_ko risk is accepted for free
+  hazard value — matches the 6.1 note test case c).
+- Bug caught by tests (fixed pre-commit): `_species_types` returns a TUPLE;
+  `tuple & frozenset` raises TypeError -> wrap in `set()`. The "degrade, never
+  raise" contract needs type discipline, not just try/except.
