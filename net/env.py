@@ -432,27 +432,40 @@ def my_side(battle: Any, lines: List[str]) -> str:
     on? The belief pipeline is p1-POV, so a bot that is really on p2 must swap.
 
     Detected by matching this player's team species against the ``|poke|``
-    preview lines of each side — the side sharing more species is ours. Defaults
-    to "p1", which is correct for the challenger (the human-vs-bot case and the
-    training POV). Never raises — a detection failure must not break play.
+    preview lines of each side — the side sharing more species is ours.
+
+    Species are compared as CANONICAL IDS on both sides (``legality.lookup.
+    to_id``): ``battle.team`` carries ids ("garchomp") while the fork's preview
+    lines carry display names + gender ("Garchomp, M"). The pre-fix raw
+    string compare matched NOTHING against real fork logs and silently
+    defaulted every p2 player to "p1" — the 2026-11-23 draw-bug root cause
+    (a p2 bot saw the opponent's team as its own, its active resolved to 0 HP,
+    and it switched every turn into a 200-step stall). The old unit tests
+    masked this because their fake log lines had no gender suffix.
+
+    Defaults to "p1" (the challenger / training POV). Never raises — a
+    detection failure must not break play.
     """
     try:
+        from legality.lookup import to_id
         mine = set()
         for mon in (getattr(battle, "team", None) or {}).values():
             sp = getattr(mon, "species", None) or getattr(mon, "base_species", None)
             if sp:
-                mine.add(sp.lower())
+                mine.add(to_id(str(sp)))
         if not mine:
             return "p1"
         p1_sp, p2_sp = set(), set()
         for ln in lines:
             if not ln.startswith("|poke|"):
                 continue
-            # ``|poke|p1a|Garchomp|M|`` splits to ['', 'poke', 'p1a', 'Garchomp', ...]
-            # so the side+slot token is parts[2] and the species is parts[3].
+            # ``|poke|p1a|Garchomp, M|`` splits to ['', 'poke', 'p1a', 'Garchomp, M', ...]
+            # so the side+slot token is parts[2] and the display name is parts[3]
+            # (strip the gender/forme suffix before canonicalizing).
             parts = ln.split("|")
             if len(parts) >= 4 and parts[3]:
-                (p1_sp if parts[2][:2] == "p1" else p2_sp).add(parts[3].lower())
+                name = parts[3].split(",")[0]
+                (p1_sp if parts[2][:2] == "p1" else p2_sp).add(to_id(name))
         if len(mine & p2_sp) > len(mine & p1_sp):
             return "p2"
     except Exception:  # noqa: BLE001 — side-detect failure must never break play

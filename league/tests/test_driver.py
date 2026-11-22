@@ -191,6 +191,54 @@ def test_policy_action_returns_legal_action_or_pass():
     assert got is None or got in acts               # legal (or a pass turn)
 
 
+class _ObsSpyAgent:
+    """Duck-typed agent recording the obs it was handed (torch-free)."""
+
+    def __init__(self):
+        self.obs = None
+        self.acts: list = []
+
+    def act(self, obs, acts, deterministic=False):
+        self.obs = obs
+        self.acts = list(acts or [])
+        class _D:
+            pass
+        d = _D()
+        d.action = self.acts[0] if self.acts else None
+        return d
+
+
+def test_policy_action_uses_caller_side_verbatim():
+    """2026-11-23 POV fix: the caller's KNOWN side (the env's ground truth —
+    battle1=p1, battle2=p2, the same mapping the training observation uses)
+    must be used VERBATIM; the my_side species-guess is bypassed. For the
+    SAME battle object (the p2 player's), the obs handed to the agent must
+    equal build_obs(..., "p2") exactly. Pre-fix this path ran my_side, which
+    failed on real fork logs and built the p2 agent's obs from p1's POV —
+    the root cause of the switch-standoff draws."""
+    import numpy as np
+    from net.env import build_obs
+    from net.tests.test_env_obs import _FakeBattle, _FakeMon
+    v = _vocabs()
+    log = ("|poke|p1a|Garchomp, M|\n"
+           "|poke|p1b|Tornadus, M|\n"
+           "|poke|p2a|Tyranitar, F|\n"
+           "|poke|p2b|Excadrill, F|")
+    b = _FakeBattle(log=log,
+                    team={"p2a": _FakeMon("tyranitar"),
+                          "p2b": _FakeMon("excadrill")},
+                    active=_FakeMon("tyranitar", moves=["crunch"]),
+                    avail_moves=["crunch"])
+    spy = _ObsSpyAgent()
+    got = policy_action(spy, b, "gen9ou", v, greedy=True, side="p2")
+    assert got is not None
+    expect = build_obs(b, "gen9ou", v, "p2")
+    assert set(spy.obs.keys()) == set(expect.keys())
+    for k in expect:
+        np.testing.assert_array_equal(spy.obs[k], expect[k],
+                                      err_msg=f"obs[{k}] differs")
+
+
 def test_policy_action_pass_on_wait_turn():
     from net.tests.test_env_obs import _FakeBattle
     v = _vocabs()

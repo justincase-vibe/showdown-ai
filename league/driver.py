@@ -78,7 +78,8 @@ def policy_action(agent: Any, battle: Any, fmt: str, vocabs: Any,
                   greedy: bool = True,
                   log: Optional[Callable[[str], None]] = None,
                   guard: Optional["DecisionGuard"] = None,
-                  capture: Optional[Callable[[Any, Any], None]] = None) -> Optional[Dict]:
+                  capture: Optional[Callable[[Any, Any], None]] = None,
+                  side: Optional[str] = None) -> Optional[Dict]:
     """The current legal action for ``agent`` from ``battle``'s POV.
 
     ``None`` = pass/wait (no legal action this moment). Defensive by default:
@@ -96,7 +97,18 @@ def policy_action(agent: Any, battle: Any, fmt: str, vocabs: Any,
     with the EXACT encoded observation + full ``Decision`` (action_index /
     logprob / value) right after a SUCCESSFUL decision with a real action —
     the league's experience-collection seam (a pass/wait is not captured: no
-    action taken, no transition to learn from)."""
+    action taken, no transition to learn from).
+
+    ``side`` (2026-11-23 POV fix): the battle's p1/p2 identity of ``battle``,
+    KNOWN by the caller. In self-play the env IS the source of truth
+    (``ShowdownEnv.embed_battle``: battle1 -> "p1", battle2 -> "p2"), so
+    ``play_agent_battle_on`` passes it explicitly and the observation is built
+    with the correct POV — no species-guessing. ``None`` = fall back to
+    :func:`net.env.my_side` (the human-vs-bot path, where the caller does not
+    know the side a priori). A wrong POV here is not a cosmetic glitch: a p2
+    agent seen as p1 gets the opponent's team as its own, its active resolves
+    to 0 HP, and every rule that reads own state misfires (the 2026-11-23
+    switch-standoff / draw bug)."""
     from net.env import build_action_list, build_obs, my_side
     try:
         if getattr(agent, "decides_from_battle", False):
@@ -106,12 +118,19 @@ def policy_action(agent: Any, battle: Any, fmt: str, vocabs: Any,
             # Returns an action dict | None (pass/wait). Nothing is captured:
             # a scripted policy has no experience to collect (the D103
             # capture seam is for the learning nets only).
-            act = agent.decide(battle=battle, fmt=fmt, vocabs=vocabs)
+            # The explicit side (when known) is forwarded too — the ctx brain
+            # must build its belief from the SAME POV the env uses.
+            decide_kwargs: Dict[str, Any] = {}
+            if side is not None:
+                decide_kwargs["side"] = side
+            act = agent.decide(battle=battle, fmt=fmt, vocabs=vocabs,
+                               **decide_kwargs)
             if guard is not None:
                 guard.on_success()
             return act
         lines = [ln for ln in battle._build_replay_log().split("\n") if ln.strip()]
-        side = my_side(battle, lines)
+        if side is None:
+            side = my_side(battle, lines)
         obs = build_obs(battle, fmt, vocabs, side)
         acts = build_action_list(battle)
         d = agent.act(obs, acts, deterministic=greedy)
@@ -215,17 +234,22 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
     try:
         _obs, _info = env.reset()
 
+        # 2026-11-23 POV fix: the env defines the side identity (battle1=p1,
+        # battle2=p2 — the same mapping ShowdownEnv.embed_battle uses for the
+        # training observation). Pass it explicitly so a decision is NEVER
+        # built from the wrong POV (my_side's species guess silently failed on
+        # real fork logs — gender suffix — and defaulted p2 players to p1).
         def da(battle: Any) -> Any:
             if decide is not None:
                 return decide(agent_a, battle, fmt, vocabs, greedy)
             return policy_action(agent_a, battle, fmt, vocabs, greedy, log, guard,
-                                 capture=capture_a)
+                                 capture=capture_a, side="p1")
 
         def db(battle: Any) -> Any:
             if decide is not None:
                 return decide(agent_b, battle, fmt, vocabs, greedy)
             return policy_action(agent_b, battle, fmt, vocabs, greedy, log, guard,
-                                 capture=capture_b)
+                                 capture=capture_b, side="p2")
 
         n_steps = _step_loop(env, da, db, max_steps)
         if on_finish is not None:

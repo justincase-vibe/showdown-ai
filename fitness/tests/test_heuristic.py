@@ -88,6 +88,20 @@ def test_no_switch_available_falls_back_to_move():
     assert d.action is acts[0]
 
 
+def test_zero_hp_active_row_reads_unknown_not_low():
+    """2026-11-23 draw-bug guard: an active-flagged row at 0 HP is a BROKEN
+    own-state (a live active mon can never be at 0 HP — it would be fainted
+    and only switches would be legal). It must read as UNKNOWN, never as
+    "critically low" (which would force a switch every turn and ping-pong a
+    200-step stall against any switching opponent)."""
+    o = _obs(own_hp=0.0)
+    assert HeuristicAgent(gen=9)._my_active_hp(o) is None
+    acts = [{"kind": "move", "move": "earthquake"},
+            {"kind": "switch", "species": "gengar"}]
+    d = HeuristicAgent(gen=9).act(o, acts)
+    assert d.action is acts[0]          # attacks; does not switch on fake 0 HP
+
+
 # ── move scoring ─────────────────────────────────────────────────────────────
 def test_picks_highest_power_move():
     from legality.lookup import get_move

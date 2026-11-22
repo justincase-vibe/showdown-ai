@@ -77,19 +77,30 @@ class StrategyAgent:
         self.posterior = bool(posterior)
 
     def decide(self, battle: Any, fmt: Optional[str] = None,
-               vocabs: Optional[Any] = None) -> Optional[Dict]:
-        """ONE decision from the live battle. Never raises (see class doc)."""
+               vocabs: Optional[Any] = None,
+               side: Optional[str] = None) -> Optional[Dict]:
+        """ONE decision from the live battle. Never raises (see class doc).
+
+        ``side`` (2026-11-23 POV fix): the caller's KNOWN side for ``battle``
+        (the self-play driver passes battle1->"p1" / battle2->"p2" straight
+        from the env — the same mapping the training observation uses). When
+        ``None`` (human-vs-bot / direct use) it falls back to the ``my_side``
+        species guess. A wrong POV here breaks the whole decision: the belief
+        would track the opponent's team as "own" (active unresolved, 0 HP),
+        and rule 3 would switch every turn — the 2026-11-23 draw bug.
+        """
         fmt = fmt or self.fmt
         # POV: the belief pipeline is p1-POV; a p2 player's log is swapped by
         # build_ctx (my_side detects the side — same helper the driver uses).
-        side = "p1"
-        try:
-            from net.env import my_side
-            lines = [ln for ln in battle._build_replay_log().split("\n")
-                     if ln.strip()]
-            side = my_side(battle, lines)
-        except Exception:  # noqa: BLE001 — a POV hiccup defaults to p1
+        if side is None:
             side = "p1"
+            try:
+                from net.env import my_side
+                lines = [ln for ln in battle._build_replay_log().split("\n")
+                         if ln.strip()]
+                side = my_side(battle, lines)
+            except Exception:  # noqa: BLE001 — a POV hiccup defaults to p1
+                side = "p1"
 
         acts: list = []
         try:

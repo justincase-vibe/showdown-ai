@@ -136,6 +136,38 @@ def test_my_side_never_raises_on_malformed_lines():
                    ["|poke|malformed", "|nonsense|line|"]) == "p1"
 
 
+def test_my_side_detects_real_fork_gendered_previews():
+    """2026-11-23 draw-bug regression: the fork's ``|poke|`` lines carry a
+    display name + gender ("Garchomp, M") while ``battle.team`` carries the
+    species id ("garchomp"). The pre-fix raw string compare matched NOTHING
+    against real fork logs and silently defaulted every p2 player to p1 —
+    its observation was built with the opponent's team as its own, its
+    active resolved to 0 HP, and it switched every turn (the stall/draw).
+    The pre-fix tests masked this because their fake lines had no gender."""
+    lines = ["|poke|p1a|Garchomp, M|", "|poke|p1b|Tornadus, M|",
+             "|poke|p2a|Landorus, M|", "|poke|p2b|Talonflame, F|"]
+    b1 = _FakeBattle(team={"p1a": _FakeMon("garchomp"),
+                           "p1b": _FakeMon("tornadus")})
+    b2 = _FakeBattle(team={"p2a": _FakeMon("landorus"),
+                           "p2b": _FakeMon("talonflame")})
+    assert my_side(b1, lines) == "p1"
+    assert my_side(b2, lines) == "p2"          # the pre-fix code said "p1"
+
+
+def test_my_side_majority_wins_when_teams_share_species():
+    """Species Clause is per-team — both teams may field Ceruledge (the
+    2026-11-23 stall seeds had exactly this). The majority match must still
+    win, not the shared species."""
+    lines = ["|poke|p1a|Garchomp, M|", "|poke|p1b|Ceruledge, F|",
+             "|poke|p2a|Ceruledge, M|", "|poke|p2b|Tyranitar, F|"]
+    b1 = _FakeBattle(team={"p1a": _FakeMon("garchomp"),
+                           "p1b": _FakeMon("ceruledge")})
+    b2 = _FakeBattle(team={"p2a": _FakeMon("ceruledge"),
+                           "p2b": _FakeMon("tyranitar")})
+    assert my_side(b1, lines) == "p1"
+    assert my_side(b2, lines) == "p2"
+
+
 # ── _stop_ps_client: clean per-battle websocket teardown ────────────────────
 # Each PokeEnv spins up its OWN event-loop thread, and each of its two agents
 # owns a PSClient whose listen() coroutine runs on it; poke-env only reaps

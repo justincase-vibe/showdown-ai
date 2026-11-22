@@ -167,7 +167,17 @@ class HeuristicAgent:
         a = active_rows[0]
         if float(slot[a, present_i]) < 0.5:
             return None
-        return float(slot[a, hp_i])
+        hp = float(slot[a, hp_i])
+        if hp <= 0.0:
+            # A live active mon can NEVER read 0 HP — at 0 HP it is fainted
+            # and the action list would be switches-only (handled by branch 1
+            # in ``act``). An active-flagged row at 0 HP means the
+            # observation's own-side state did not resolve (a broken POV / a
+            # belief glitch): treat it as UNKNOWN, not as "critically low".
+            # Pre-fix this read (0.00 every turn) made the p2 bot switch
+            # forever — the 2026-11-23 switch-standoff / draw bug.
+            return None
+        return hp
 
     # ── move scoring (the belief state's own lookups; no second table) ──
     def _move_score(self, act: Dict, own_types, opp_types) -> float:

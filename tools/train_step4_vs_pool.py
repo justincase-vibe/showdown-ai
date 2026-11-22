@@ -127,7 +127,13 @@ def play_vs_checkpoint(main_agent: PokeAgent, opp_agent: PokeAgent,
                     # the BATTLE (the belief pipeline), not the encoded obs — the
                     # SAME call the harness/driver route these through. The frozen
                     # opponent never learns, so only its LEGAL action matters here.
-                    act2 = opp_agent.decide(battle=env.battle2, fmt=fmt, vocabs=vocabs)
+                    # 2026-11-23 POV fix: the opponent sits on battle2 = "p2" (the
+                    # env's ground truth) — pass it explicitly so the brain's
+                    # belief is built from the correct POV (a my_side guess on a
+                    # real fork log silently failed and defaulted to p1, which
+                    # made the p2 brain see the MAIN agent's team as its own).
+                    act2 = opp_agent.decide(battle=env.battle2, fmt=fmt, vocabs=vocabs,
+                                            side="p2")
                     if act2 is not None:
                         pe2 = action_to_pe(act2, env.battle2)
                         actions[a2] = np.int64(pe2) if pe2 >= 0 else np.int64(-2)
