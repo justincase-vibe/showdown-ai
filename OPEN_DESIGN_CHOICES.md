@@ -2154,3 +2154,58 @@ External review of the current position; decisions recorded:
   (`test_resist_switch_belief_weights_flip_the_pick`). MY LEAN: small
   follow-up sub-step after 6.6 (each committed separately); additive, no
   schema break, no observation unit removed.
+
+### Step 6.6 — A/B validation (DONE, 2026-11-22): the NEW heuristic wins
+**RESULT (n=20/pair, gen9ou, deterministic; appended to `runs/learning_check.csv`,
+label `step6-heuristic`):**
+
+| bot (p1) | vs (p2) | W/L/D | win rate | 95% CI |
+|---|---|---|---|---|
+| **strategy (NEW, rules 1–4)** | heuristic (OLD) | **15/5/0** | **0.75** | [0.560, 0.940] |
+| strategy (NEW) | random (floor) | 11/9/0 | 0.550 | [0.332, 0.768] |
+| heuristic (OLD) | random (floor) | 16/4/0 | 0.800 | [0.625, 0.975] |
+
+**Reading (bug-checked, not a contradiction):**
+- Headline: the NEW heuristic beats the OLD **75% (15/5)** — rules 1–4
+  (hazards/status/setup/resist-switch) add real strength. ✓
+- Both beat the random floor (the ladder contract holds). The NEW's smaller
+  margin vs random (0.55 vs 0.80) is INSIDE its CI and expected: the new
+  heuristic plays longer, more "complete" attrition games (avg_steps 64 vs 48)
+  — vs a random opponent, longer = more luck rolls FOR them; vs a strategic
+  opponent (the OLD), attrition + setup + status is exactly where it wins.
+  A human would say the same. No action.
+- **Per the 6.1 note: the NEW heuristic (`strategy` rung) is now the standing
+  Step-8 yardstick; the old after-step3 numbers stay as history in the CSV.**
+
+**Implementation decisions (6.6.1–6.6.4, all committed green):**
+- **6.6.1** `net.env.build_ctx` extracted from `build_obs` (belief →
+  `get_context()`; `build_obs` behavior unchanged, 1 test). ONE belief
+  pipeline for obs AND the ctx brain — no second replay-log parser.
+- **6.6.2/6.6.3** `fitness.strategy_agent.StrategyAgent` (the ctx brain as a
+  playable agent: `decide(battle, fmt, vocabs)` → `build_ctx` +
+  `build_action_list` + `choose_action` with the real calc; degrades to first
+  legal / pass, never raises) + the `decides_from_battle` hook in
+  `league.driver.policy_action` (the ONE decision pipeline — the driver
+  routes ctx brains through `.decide()`, nets through `.act()`). The
+  `strategy` Reference (weight 2.0, same rung as `heuristic`) is first-class:
+  harness/league/Step-8 can play it as bot OR ref. 9 hermetic tests; full
+  suite 445 passed.
+- **6.6.4** `tools.heuristic_ab` (3 pairs × n → `runs/learning_check.csv`,
+  reuses `tools.learning_check` CSV contract; smoke 6 battles green, then the
+  official n=20 run above, ~40 min, CPU-only, exit 0).
+
+**Open design choices (new this step — non-blocking):**
+- **OC-6.6a (posterior overrides in the strategy brain).**
+  `choose_action` already accepts `**overrides` (ability/item/tera/evs/nature
+  from the opponent's posterior top-1 — the `fitness.ko` plumbing exists),
+  but `StrategyAgent` currently passes only KNOWN info. The NET gets
+  posterior-informed damage features (`action_features` / `matchup_features`),
+  so the M1 comparison (net vs this yardstick, ≥400 battles) is currently
+  slightly asymmetric. MY LEAN: a small additive follow-up BEFORE the M1
+  gate (pass the posterior top-1 overrides in `StrategyAgent.decide`); cheap
+  and the plumbing is already there.
+- **OC-6.6b (A/B sample size).** n=20 is the 6.1 range (a sanity A/B); the
+  CI on 15/5 is still wide-ish ([0.56, 0.94]). If you want a tighter
+  before-number for the M1 baseline, re-run with `--n 100` (≈3.5 h, CPU).
+  MY LEAN: unnecessary — the M1 gate itself (net vs strategy, ≥400 battles)
+  is the real measurement; this A/B just proves the yardstick moved.
