@@ -87,6 +87,42 @@ OC-6/7/8/9 rulings still stand.
 3. Report the exact "~1–1.5 s/turn" sim-clone cost: time for ONE clone+advance,
    + parallelism feasibility. *(B3 — DONE, measured 2026-11-22; numbers in §2.)*
 
+**PHASE C — M1 GATE (single-learner experiment) — PROGRESS (2026-11-22):**
+- **C1 ✅ (f8e2cc6):** `fitness/m1_pool.py` — the single source of truth for the
+  opponent pool = {random, heuristic, strategy, strategy_posterior} + frozen
+  `self_<i>` snapshots, as a Ladder. Reuses the SAME reference factories the
+  harness / A-B baseline use (one workflow). CPU-first (no torch at import);
+  snapshot nets lazy + cached (one disk read, one frozen net shared across
+  sequential battles, fresh agent per battle). Hermetic: `fitness/tests/test_m1_pool.py`.
+- **C1b ✅ (0a760e4):** `tools/train_step4_vs_pool.py::play_vs_checkpoint` now drives
+  BOTH opponent interfaces — the NEW `decides_from_battle` branch drives
+  strategy/strategy_posterior via `.decide(battle, fmt, vocabs)` (the harness's path);
+  the proven net/old-heuristic `.act` path is UNCHANGED (lowest-risk; the step4
+  pilot is untouched). Hermetic: `test_pool_ctx_brains_are_decide_drivable`.
+- **NEXT: C2** = Arm A (PPO from scratch — the loop already exists) + Arm B (BC
+  warm-start from the strategy bot = review-plan Step 4f, **NOT built yet**). Then
+  C3 (100-battle evals every few rounds + stop rules), C4 (FINAL ≥400 battles vs
+  strategy AND strategy_posterior, sampled+argmax, 95% CI; **PASS yardstick = PLAIN
+  strategy**), C5 (decision rule: ≥40% lower-CI → PASS/propose M2b; 25-40% → keep
+  training + report lagging checks; <25% → stop + ablation/diagnostics).
+- **PENDING CPU-light TASKS (handoff §4/§5, do not block the gate):** (1) investigate
+  WHY `strategy_posterior` had **4 draws** at n=20 (step cap? passive loop? stuck rule?)
+  + fix if a bug; (2) measure a REAL depth-1 search per turn (step w/ batched calc +
+  batched forward) + batched forward B=720 CPU.
+- **DESIGN CHOICES (recorded for the user to weigh in):**
+  - Pool = the 5 fixed opponent types. The DP-A/B/C/D diversity machinery (mixture,
+    PFSP, holdout, exploiters) stays **behind flags, default OFF** — it does NOT change
+    the M1 gate (handoff §6: "do not change the running M1 gate experiment").
+  - Frozen references play as-is: strategy/heuristic are deterministic rule bots;
+    random/snapshot nets are sampled. The LEARNER is sampled during training, argmax
+    at eval — the standard split.
+  - M1 gate is SEQUENTIAL CPU play (one battle at a time) → snapshot nets are safely
+    shared (inference-only, never trained). Concurrency is a later concern.
+  - **OPEN (needs your call before C2):** (a) build Arm B (BC warm-start) NOW or run
+    Arm A first and add Arm B as a second arm? (b) do we launch the FINAL ≥400-battle
+    gate (slow, ~27 h CPU at ~60-75 s/battle) as a long run you supervise, or after a
+    bounded pilot confirms the learner is improving?
+
 ---
 
 Pipeline audited this pass:
