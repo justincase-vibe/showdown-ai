@@ -28,7 +28,13 @@ D61 structure encoded here:
     channels (``opp_ability_post_*`` / ``opp_top_moves`` / ``confidence``) —
     rule 4 (no leakage);
   * D60 coupling: the current legal-action list is emitted as indexed inputs
-    (``action_*``) so the net sees what each action position IS.
+    (``action_*``) so the net sees what each action position IS;
+  * Step 3 (review 2026-11-22): STATIC mon/move data (types, base stats, move
+    power/type/category/priority/accuracy/effect flags) as ADDITIONAL float
+    blocks next to the learned id embeddings — the type chart and move facts
+    the net used to have to discover from a +1/-1 reward 50 turns away.
+    Precomputed by ``net.static_features`` (legality DB) and injected into the
+    pure encoder, so the encoder stays numpy/DB-free.
 """
 from __future__ import annotations
 
@@ -48,6 +54,26 @@ MAX_OWN_MOVES = 4      # a mon carries <=4 moves
 MAX_POST = 5           # the belief posterior top-K (get_context exposes top-5)
 MAX_TOP_MOVES = 4      # the opponent's marginal top-moves (get_context exposes 4)
 MAX_ACTIONS = 12       # D60: the current legal-action list, padded to this width
+
+# ── Step 3 static features (review 2026-11-22, items a/c) ────────────────
+#: the 18 standard types in a FIXED order (one-hot basis for `*_types`).
+TYPES: Tuple[str, ...] = (
+    "Normal", "Fire", "Water", "Electric", "Grass", "Ice", "Fighting",
+    "Poison", "Ground", "Flying", "Psychic", "Bug", "Rock", "Ghost",
+    "Dragon", "Dark", "Steel", "Fairy",
+)
+N_TYPES: int = len(TYPES)
+#: the six base-stat axes in a FIXED order (normalised by /255).
+STAT_AXES: Tuple[str, ...] = ("hp", "atk", "def", "spa", "spd", "spe")
+N_STATS: int = len(STAT_AXES)
+
+#: per-action static move feature width (Step 3.1): 5 scaled values + 6 flags.
+#:   [0] power/200 (0 for status/special)  [1] type_idx/N_TYPES (0 = none)
+#:   [2] category: physical=0.0, special=0.5, status=1.0
+#:   [3] priority: (p+6)/12  ([4] accuracy/100 (None = always hits -> 1.0)
+#:   [5..10] flags: is_hazard, is_screen, has_boosts, side_status,
+#:           side_condition, is_tailwind
+K_MOVE_STATIC: int = 11
 
 
 @dataclass(frozen=True)
@@ -129,6 +155,15 @@ def _layout() -> List[Field]:
     f.append(Field("own_moves", (MAX_SLOTS, MAX_OWN_MOVES), "int64"))
     f.append(Field("opp_species", (MAX_SLOTS,), "int64"))
     f.append(Field("opp_moves", (MAX_SLOTS, MAX_OWN_MOVES), "int64"))
+    # Step 3.1/3.2 static features (precomputed by net.static_features, the
+    # encoder zero-fills when absent — keeps the encoder pure/DB-free).
+    # per-action static move data (id embeddings stay; these are ADDITIONAL)
+    f.append(Field("action_move_static", (MAX_ACTIONS, K_MOVE_STATIC), "float32"))
+    # per-slot static mon data (dual types = 0.5/0.5; base stats /255)
+    f.append(Field("own_types", (MAX_SLOTS, N_TYPES), "float32"))
+    f.append(Field("opp_types", (MAX_SLOTS, N_TYPES), "float32"))
+    f.append(Field("own_stats", (MAX_SLOTS, N_STATS), "float32"))
+    f.append(Field("opp_stats", (MAX_SLOTS, N_STATS), "float32"))
     # opponent UNREVEALED info — ONLY via the posterior channels (rule 4)
     f.append(Field("opp_ability_post_ids", (MAX_POST,), "int64"))
     f.append(Field("opp_ability_post_w", (MAX_POST,), "float32"))

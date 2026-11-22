@@ -55,9 +55,12 @@ from net.registry import (
 # Pinned the FIRST time the suite ran; if ANY field is added/removed/renamed/
 # reshaped/reordered the checksum changes and this FAILS (the drift-catcher).
 # Re-pin deliberately (and reconcile the encoder + S4.2 net) by updating this.
-PINNED_CHECKSUM = "3cadb89a98ecacee70a3049441aadcf4394daf756f57433fb7e2f0edabe21cac"
+PINNED_CHECKSUM = "c38b07e0aacb6a409a8ff42312603bfd6d4325c07c56648f4180050da56f5f3a"
 # re-pinned 2026-11-17: +7 curated-volatile slot columns (D61 surface,
 # user-approved) — SLOT_DIM 25 -> 32. fainted column already existed.
+# re-pinned 2026-11-22 (Step 3.1/3.2): +5 static mon/move feature fields
+# (action_move_static 12x11, own/opp_types 6x18, own/opp_stats 6x6) — the type
+# chart / base stats / move facts the net used to have to discover from reward.
 
 
 def _mon(

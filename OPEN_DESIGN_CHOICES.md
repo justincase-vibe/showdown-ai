@@ -1367,3 +1367,36 @@ encoder's global reads AND `world_model._flip_field` both derive from them.
 Behavior-preserving (the refactored loop writes identical slots/values); pinned
 by `test_flip_field_covers_every_side_keyed_field_the_encoder_reads`. Net suite
 now **135 passed / 1 skipped / 2 deselected** (was 134, +1 the new test).
+
+---
+
+## STEP 3 (review 2026-11-22) — "the net is not GIVEN the information needed to plan" — SUB-STEP PLAN
+
+User-approved (2026-11-22): Steps 2+3 back to back (one invalidation), Step 8 after each.
+Step 2 is DONE (commit e716ab4). Step 3 = the review's observation expansion (items a-d),
+executed as sub-steps, each: registry field(s) + encoder + model consumption + test + commit.
+Checkpoints invalidated either way — layout changes re-pin test_s41's checksum pin (deliberate).
+
+| sub | what | calc? | status |
+|---|---|---|---|
+| 3.1 | static MOVE features per action: `action_move_static` (MAX_ACTIONS,11): power/200, type/18, category, priority(-6..6 -> 0..1), accuracy/100, flags: is_hazard/is_screen/boosts/side_status/side_condition/is_tailwind | no (legality.lookup.get_move) | next |
+| 3.2 | static MON features per slot: `own_types`/`opp_types` (MAX_SLOTS,18) dual=0.5/0.5, `own_stats`/`opp_stats` (MAX_SLOTS,6) base/255 | no (legality.lookup.get_species) | next (same commit as 3.1) |
+| 3.5 | per-SLOT opponent posterior: `opp_post_per_slot_ids/w` (MAX_SLOTS,MAX_POST) + `opp_topmoves_per_slot` (MAX_SLOTS,MAX_TOP_MOVES) — replaces the active-only channels (bench threat visible) | no (ctx already carries per-slot posterior) | after 3.1/3.2 |
+| 3.3 | per-ACTION damage block `action_damage` (MAX_ACTIONS,9): moves vs opp active (min/max/exp pct, guaranteed/can/expected KO, outspeeds, immune; belief-weighted over opp ability posterior); switches (entry-hazard pct, expected dmg taken from opp top moves, forced-switch flag) | YES (damage.calc.calc_damage_many batch + effective_speed) | after 3.5 |
+| 3.4 | MATCHUP matrix `matchup` (120,): alive own i x opp j: exp dmg both ways + speed order (108) + per-own-mon KO counts (12) | YES (one calc_damage_many: 6x6x2) | after 3.3 |
+| 3.6 | env/driver wiring: build features at decision time, pass into encode_context (encoder stays PURE: takes precomputed arrays, zero-fills when absent) | - | with 3.3/3.4 |
+| 3.7 | gate tests: no-leak (unrevealed opp move never changes obs), deterministic, bench-slot permutation permutes only matching rows, OHKO scenario gives switch a distinct feature vector from attacks | - | last |
+
+DESIGN RULES (kept from the review): id embeddings stay (these are ADDITIONAL features);
+encoder stays pure/numpy/DB-free (static+calc features are PRECOMPUTED by net/static_features.py
+/ net/action_features.py and injected as optional arrays); calc is the ONE batch endpoint
+(calc_damage_many); opponent hidden info still only via posterior (rule 4).
+
+PROGRESS:
+- 3.1+3.2: DONE — `net/static_features.py` (build_static_features/move_static_vector/
+  types_onehot/stats_vector), registry +5 fields (action_move_static 12x11,
+  own/opp_types 6x18, own/opp_stats 6x6), encoder places them (zero-fill when
+  absent), MonEncoder + pointer head consume them (widths from registry), env.build_obs
+  wires build_static_features. test_s41 checksum re-pinned to c38b07e0...; new
+  net/tests/test_static_features.py (13 tests). net suite 157 passed; combined
+  suite 831 passed (6 benign Tk/Tcl fixture errors, documented).

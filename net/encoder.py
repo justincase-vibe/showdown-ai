@@ -47,6 +47,7 @@ import numpy as np
 
 from .registry import (
     BOOSTS,
+    DTYPES,
     GLOBAL_INDEX,
     LAYOUT,
     MAX_ACTIONS,
@@ -54,6 +55,7 @@ from .registry import (
     MAX_POST,
     MAX_SLOTS,
     MAX_TOP_MOVES,
+    SHAPES,
     SLOT_INDEX,
     STATUS_FLAGS,
 )
@@ -172,7 +174,9 @@ def _move_row(moves: List[str], vocab) -> np.ndarray:
 
 
 def encode_context(ctx: Dict, vocabs: Vocabs,
-                   actions: Optional[List[Dict]] = None) -> Dict[str, np.ndarray]:
+                   actions: Optional[List[Dict]] = None,
+                   static_feats: Optional[Dict[str, np.ndarray]] = None
+                   ) -> Dict[str, np.ndarray]:
     """Encode one ``get_context()`` snapshot into the registry's fixed tensors.
 
     Parameters
@@ -186,6 +190,11 @@ def encode_context(ctx: Dict, vocabs: Vocabs,
                The caller (env / S4.2) supplies the CURRENT legal list; the
                encoder only maps it to int channels. ``None``/empty -> a fully
                masked action block.
+    static_feats : optional PRECOMPUTED Step-3 static fields (see
+               :mod:`net.static_features`) — the encoder stays pure/DB-free:
+               it only PLACES the arrays it is given. ``None`` -> the five
+               static fields are zero-filled (the net reads "unknown", the
+               same degradation as the id channels).
 
     Returns a ``dict[str, np.ndarray]`` whose keys/shapes/dtypes are EXACTLY
     the registry's ``LAYOUT``.
@@ -306,6 +315,17 @@ def encode_context(ctx: Dict, vocabs: Vocabs,
     out["action_move"] = a_move
     out["action_species"] = a_species
     out["action_mask"] = a_mask
+
+    # ── Step 3 static fields (precomputed; zero-filled when absent) ─────
+    # The encoder never touches the legality DB itself — it only places the
+    # arrays ``net.static_features.build_static_features`` produced, so the
+    # pure/numpy/DB-free contract holds and tests can inject anything.
+    from .static_features import STATIC_FEATURE_NAMES
+    for name in STATIC_FEATURE_NAMES:
+        arr = (static_feats or {}).get(name)
+        if arr is None:
+            arr = np.zeros(SHAPES[name], dtype=DTYPES[name])
+        out[name] = arr
 
     return out
 

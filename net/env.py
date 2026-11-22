@@ -317,6 +317,15 @@ def _zero_obs() -> Dict[str, np.ndarray]:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  the standalone observation builder  (POV-correct, reusable by a Player)
 # ═══════════════════════════════════════════════════════════════════════════════
+def _gen_from_format(fmt: str) -> int:
+    """gen9ou -> 9, gen8bss3v3 -> 8 (the @smogon/calc engine key the static
+    features / heuristic lookup want). Only the leading digits after 'gen'
+    count; a missing/unrecognised format defaults to gen 9 (the primary
+    format) so a bad fmt label degrades to the modern engine, never a crash."""
+    m = re.match(r"gen(\d+)", fmt or "")
+    return int(m.group(1)) if m else 9
+
+
 def build_obs(battle: Any, fmt: str, vocabs: Any, side: str = "p1") -> Dict[str, np.ndarray]:
     """The net's observation for ``battle`` from ``side``'s perspective.
 
@@ -358,7 +367,14 @@ def build_obs(battle: Any, fmt: str, vocabs: Any, side: str = "p1") -> Dict[str,
             belief.update(ev)
         ctx = belief.get_context()
         actions = build_action_list(battle)
-        return encode_context(ctx, vocabs, actions)
+        # Step 3 (review 2026-11-22): precompute the static mon/move features
+        # from the legality DB and inject them as optional arrays. The encoder
+        # stays pure/DB-free; this is the ONE place a live obs meets the DB.
+        # ``build_static_features`` degrades to zero rows on any unknown
+        # species/move and never raises, so this cannot break obs building.
+        from net.static_features import build_static_features
+        static_feats = build_static_features(ctx, actions, _gen_from_format(fmt))
+        return encode_context(ctx, vocabs, actions, static_feats=static_feats)
     except Exception as exc:  # noqa: BLE001 — a live battle must never die on obs
         log.warning("build_obs degraded to zero obs (%s: %s)",
                     type(exc).__name__, exc)

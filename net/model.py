@@ -40,12 +40,15 @@ import torch.nn.functional as F
 
 from .registry import (
     GLOBAL_DIM,
+    K_MOVE_STATIC,
     LAYOUT,
     MAX_ACTIONS,
     MAX_OWN_MOVES,
     MAX_POST,
     MAX_SLOTS,
     MAX_TOP_MOVES,
+    N_STATS,
+    N_TYPES,
     SLOT_DIM,
     SLOT_INDEX,
 )
@@ -113,7 +116,11 @@ class MonEncoder(nn.Module):
         self.emb_ability = nn.Embedding(len(vocabs.ability), EMBED_DIM, padding_idx=0)
         self.emb_item = nn.Embedding(len(vocabs.item), EMBED_DIM, padding_idx=0)
         self.emb_move = nn.Embedding(len(vocabs.move), EMBED_DIM, padding_idx=0)
-        in_dim = SLOT_DIM + 4 * EMBED_DIM  # slot floats + 4 id embeddings
+        # Step 3 (review 2026-11-22): per-slot static mon data (types one-hot
+        # + base stats) is ADDED to the slot floats and id embeddings — the
+        # type chart / base-stat facts the net used to have to discover from a
+        # reward 50 turns away. Both are registry widths, so no drift.
+        in_dim = (SLOT_DIM + 4 * EMBED_DIM + N_TYPES + N_STATS)
         self.mlp = nn.Sequential(
             nn.Linear(in_dim, MON_DIM),
             nn.LayerNorm(MON_DIM),
@@ -123,8 +130,14 @@ class MonEncoder(nn.Module):
 
     def forward(self, slot: torch.Tensor, species: torch.Tensor,
                 ability: torch.Tensor, item: torch.Tensor,
-                moves: torch.Tensor) -> torch.Tensor:
-        """slot (B,T,6,SLOT_DIM) + id rows -> (B,T,6,MON_DIM) per-slot vectors."""
+                moves: torch.Tensor, types: torch.Tensor,
+                stats: torch.Tensor) -> torch.Tensor:
+        """slot (B,T,6,SLOT_DIM) + id rows + static mon rows -> (B,T,6,MON_DIM).
+
+        ``types``/``stats`` are (B,T,6,N_TYPES) / (B,T,6,N_STATS); when the
+        encoder had no static features they are zero rows ("unknown"), so this
+        degrades exactly like the id channels.
+        """
         # moves is (B,T,6,MAX_OWN_MOVES) -> emb (B,T,6,MOVES,E); mean over the
         # MOVES axis (dim=-2), NOT the embedding axis (dim=-1), -> (B,T,6,E).
         emb = torch.cat([
@@ -133,7 +146,7 @@ class MonEncoder(nn.Module):
             self.emb_item(item),              # (B,T,6,E)
             self.emb_move(moves).mean(dim=-2),  # (B,T,6,E) mean over <=4 moves
         ], dim=-1)
-        return self.mlp(torch.cat([slot, emb], dim=-1))
+        return self.mlp(torch.cat([slot, emb, types, stats], dim=-1))
 
 
 class ResidualBlock(nn.Module):
@@ -185,7 +198,8 @@ class PokeNet(nn.Module):
         post_dim = EMBED_DIM              # weighted top-K ability
         topmove_dim = EMBED_DIM           # mean top-moves
         # per-action embedding: kind(16) + move(E) + species(E)
-        action_dim = 16 + 2 * EMBED_DIM
+        #   + Step-3 static move data (K_MOVE_STATIC) — ADDITIONAL to the ids.
+        action_dim = 16 + 2 * EMBED_DIM + K_MOVE_STATIC
         ctx_dim = (GLOBAL_DIM + 2 * EMBED_DIM + post_dim + topmove_dim
                    + action_dim)
         in_dim = 2 * side_dim + ctx_dim
@@ -222,7 +236,8 @@ class PokeNet(nn.Module):
     # ── per-side set encoding (permutation invariant) ─────────────────
     def _side_repr(self, slot: torch.Tensor, species: torch.Tensor,
                    ability: torch.Tensor, item: torch.Tensor,
-                   moves: torch.Tensor, active: torch.Tensor) -> torch.Tensor:
+                   moves: torch.Tensor, active: torch.Tensor,
+                   types: torch.Tensor, stats: torch.Tensor) -> torch.Tensor:
         """(B,T,6,MON_DIM) per-slot + active flag -> (B,T,2*MON_DIM).
 
         ``set_vec``  = SUM over the 6 slots (a set function: slot-order
@@ -230,7 +245,7 @@ class PokeNet(nn.Module):
         ``active_vec`` = SUM over the slots whose ``active`` flag is set
                        (singles = the one active mon; doubles = both).
         """
-        per_slot = self.mon_enc(slot, species, ability, item, moves)  # (B,T,6,M)
+        per_slot = self.mon_enc(slot, species, ability, item, moves, types, stats)  # (B,T,6,M)
         set_vec = per_slot.sum(dim=-2)              # (B,T,M) — permutation invariant
         act_w = active.unsqueeze(-1)                 # (B,T,6,1)
         active_vec = (per_slot * act_w).sum(dim=-2)  # (B,T,M)
@@ -258,6 +273,7 @@ class PokeNet(nn.Module):
             self.emb_action_kind(a_kind),      # (B,T,A,16)
             self.emb_move_g(a_move),           # (B,T,A,E)
             self.emb_species_g(a_sp),          # (B,T,A,E)
+            b["action_move_static"],           # (B,T,A,K_MOVE_STATIC) Step 3
         ], dim=-1)                                                  # (B,T,A,act)
         act_w = a_mask.unsqueeze(-1)                                 # (B,T,A,1)
         act_sum = (act_emb * act_w).sum(dim=-2)                     # (B,T,act)
@@ -277,13 +293,17 @@ class PokeNet(nn.Module):
         _active = SLOT_INDEX["active"]  # per-slot active flag column (registry)
         own = self._side_repr(
             b["own_slot"], b["own_species"], b["own_ability"], b["own_item"],
-            b["own_moves"], b["own_slot"][:, :, :, _active])
+            b["own_moves"], b["own_slot"][:, :, :, _active],
+            b["own_types"], b["own_stats"])
         # opponent ability/item are UNREVEALED — fed as <pad> (0); their info
         # reaches the net ONLY through the posterior channels (rule 4, no leak).
+        # Opponent types/stats ARE public species facts (not hidden), so they
+        # are passed straight through (zero rows when the species is unknown).
         opp = self._side_repr(
             b["opp_slot"], b["opp_species"], torch.zeros_like(b["opp_species"]),
             torch.zeros_like(b["opp_species"]), b["opp_moves"],
-            b["opp_slot"][:, :, :, _active])
+            b["opp_slot"][:, :, :, _active],
+            b["opp_types"], b["opp_stats"])
         ctx = self._context_repr(b, T)
         x = self.input_proj(torch.cat([own, opp, ctx], dim=-1))   # (B,T,D)
         # The trunk is RESIDUAL by construction (every block is
@@ -299,6 +319,7 @@ class PokeNet(nn.Module):
             self.emb_action_kind(b["action_kind"]),   # (B,T,A,16)
             self.emb_move_g(b["action_move"]),        # (B,T,A,E)
             self.emb_species_g(b["action_species"]),  # (B,T,A,E)
+            b["action_move_static"],                  # (B,T,A,K_MOVE_STATIC) Step 3
         ], dim=-1)                                     # (B,T,A,action_dim)
         act_p = self.policy_act_proj(act_emb)          # (B,T,A,INTENT)
         intent = self.policy_intent(h)                 # (B,T,INTENT)
