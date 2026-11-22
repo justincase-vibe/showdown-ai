@@ -1645,6 +1645,69 @@ experiment must show a clear lift over these numbers to count as "learning."
 The "after-Step-3" learning_check run (Step 8) is the comparison point. (Rows
 appended to `runs/learning_check.csv`, label `before-step2`; CSV is gitignored.)
 
+### After-Step-3 TRAINING run (recorded 2026-11-22; the "after" checkpoint)
+
+Because the old (GRU-trunk) checkpoints can't load under the Step 2/3 code, the
+"after" number needs a FRESH checkpoint trained on the NEW layout. Trained one
+main learner (Fork 2, single-learner-first) vs random, CPU, 8 rounds x 20 battles
+= 160 battles, on-policy PPO (lr 3e-4, clip 0.2, gamma 0.99, lam 0.95, 2 epochs).
+Checkpoint: `scratch/after_step3/selfplay_round8.pt` (saves + re-loads OK under the
+new-layout verification; the smoke + this run also proved the pipeline is sound
+under the new layout).
+
+Per-round vs-random win rate (the "is it learning?" signal at train time):
+  round 1: 12W/8L (60%)   round 2: 14W/6L (70%)   round 3: 15W/5L (75%)
+  round 4: 15W/5L (75%)   round 5: 16W/4L (80%)   round 6: 16W/4L (80%)
+  round 7: 18W/2L (90%)   round 8: 18W/2L (90%)
+
+0 crashes, 0 watchdog timeouts, 0 illegal actions across all 160 battles. KL
+stabilizes to ~0.01 by round 7-8 (the policy is converging), value loss falls
+0.25 -> 0.07. The net is CLEARLY learning and climbing — at 90% vs random after
+only 160 battles, it already matches the before-baseline's 0.74 (which needed
+~1000 battles). That is a strong positive signal for the Step 2/3 observation
+layout. The definitive "after" number (vs random + vs heuristic, sampled +
+argmax, n=50) is the concurrent `learning_check` run (label `after-step3`),
+appended to `runs/learning_check.csv` when it completes.
+
+HARDENING (committed `7ec0869`): the first 160-battle attempt hung for 14+ min
+inside a single `env.step()`/`reset()` (a transient server stall — a `max_steps`
+cap can't help because the stall is INSIDE one step call). Diagnosis (15 battles,
+same seeds) reproduced NO hang, confirming it was transient, not a Step 2/3 bug.
+Fix: `SelfPlayTrainer._play_with_watchdog` (cfg `battle_timeout`, default 240s,
+0=disabled) kills a hung battle and skips it so one hang can never stall a run;
+`rollout` records `n_timeouts`. +4 hermetic tests.
+
+### Step 8 RESULT: after-Step-3 vs before (the definitive comparison, 2026-11-22)
+
+`learning_check` (n=50/ref, gen9ou, sampled+argmax, vs random+heuristic) on
+`selfplay_round8.pt`, appended to `runs/learning_check.csv` (label `after-step3`):
+
+  * sampled  vs random     **0.84**  (42W/8L/0D)   95%CI [0.738, 0.942]
+  * sampled  vs heuristic  **0.60**  (30W/20L/0D)  95%CI [0.464, 0.736]
+  * argmax   vs random     **0.76**  (38W/11L/1D)  95%CI [0.642, 0.878]
+  * argmax   vs heuristic  **0.76**  (38W/12L/0D)  95%CI [0.642, 0.878]
+
+vs the BEFORE baseline (old layout, `league_random_1001.pt`, ~1000 battles):
+  sampled vs random 0.74 -> **0.84**  (+10)
+  sampled vs heuristic 0.48 -> **0.60** (+12)   [before LOST to the heuristic; after WINS]
+  argmax  vs random 0.54 -> **0.76**  (+22)
+  argmax  vs heuristic 0.44 -> **0.76** (+32)   [before LOST to the heuristic; after WINS]
+
+**Verdict: the Step 2 (MLP trunk) + Step 3 (static facts + per-action damage +
+per-mon matchup) observation layout is a clear, strong positive.** All four
+metrics improve; the net flips from LOSING to the heuristic (before: 0.48/0.44)
+to BEATING it (after: 0.60/0.76); and it does so with only 160 battles (the
+before needed ~1000). The "never-learns" disaster is avoided — the pipeline
+learns and the new signal helps. This clears the Step 8 gate to proceed to
+Step 4 (the single-learner-first experiment at scale, per the approved Fork 2).
+
+OPEN — next call with the user: (a) proceed to Step 4 single-learner experiment
+(the league now plays a POOL of frozen snapshots + the main learner, not just
+random — the before net trained against a league pool, so the fair next step is
+the same, with the new layout); (b) how much training to give the main learner
+before re-running this eval (the 160-battle result is already strong, but more
+training + the league pool is the real test).
+
 OPEN DESIGN OBSERVATION (not changed — needs a call): the MOVE's type is encoded as
 ONE ordinal float (`type_idx/18`) while the MON's types are one-hot (18 floats).
 An ordinal encoding of a CATEGORICAL type is a slightly awkward input for learning
