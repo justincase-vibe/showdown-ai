@@ -54,6 +54,33 @@ def _clamp01(x: float) -> float:
     return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
 
 
+def _species_data(name: str, gen: int) -> Dict:
+    """``get_species(name, gen)`` with a gen-9 fallback for the static fields.
+
+    The legality DB only stores **gen-9** species types/stats/abilities — for
+    gens 1-8 ``get_species`` returns ``types=[]`` / ``stats=None`` (verified).
+    Base types and base stats are effectively GEN-INVARIANT for a species, so
+    the gen-9 row is the best available static proxy for an old-gen mon; without
+    this the static mon features would silently zero out for every non-gen9
+    format (the user wants all formats to work). Move data is per-gen and is
+    handled separately by :func:`move_static_vector`, so this fallback never
+    hides a real per-gen move difference.
+    """
+    try:
+        from legality.lookup import get_species
+        s = get_species(name, gen) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+    if not (s.get("types") or s.get("stats")) and gen != 9:
+        try:
+            s9 = get_species(name, 9) or {}
+        except Exception:  # noqa: BLE001
+            s9 = {}
+        if s9.get("types") or s9.get("stats"):
+            s = s9
+    return s
+
+
 def move_static_vector(move_name: str, gen: int) -> np.ndarray:
     """One K_MOVE_STATIC row for a move id. ZERO row when unknown (graceful).
 
@@ -89,11 +116,13 @@ def move_static_vector(move_name: str, gen: int) -> np.ndarray:
         v[3] = _clamp01((float(pri) + 6.0) / 12.0)
     acc = m.get("accuracy")
     v[4] = 1.0 if acc is None else _clamp01(float(acc) / 100.0)
+    # flags: use truthiness (not `is not None`) so an empty container/"" from
+    # the DB cannot falsely flag a move (null is the normal "absent" marker).
     v[5] = 1.0 if m.get("is_hazard") else 0.0
     v[6] = 1.0 if m.get("is_screen") else 0.0
-    v[7] = 1.0 if (m.get("boosts") is not None) else 0.0
-    v[8] = 1.0 if (m.get("side_status") is not None) else 0.0
-    v[9] = 1.0 if (m.get("side_condition") is not None) else 0.0
+    v[7] = 1.0 if m.get("boosts") else 0.0
+    v[8] = 1.0 if m.get("side_status") else 0.0
+    v[9] = 1.0 if m.get("side_condition") else 0.0
     v[10] = 1.0 if m.get("is_tailwind") else 0.0
     return v
 
@@ -107,11 +136,7 @@ def types_onehot(species_name: str, gen: int) -> np.ndarray:
     v = np.zeros(N_TYPES, dtype=np.float32)
     if not species_name:
         return v
-    try:
-        from legality.lookup import get_species
-        s = get_species(species_name, gen) or {}
-    except Exception:  # noqa: BLE001
-        return v
+    s = _species_data(species_name, gen)
     types = s.get("types") or ()
     if len(types) == 1:
         t = types[0]
@@ -129,11 +154,7 @@ def stats_vector(species_name: str, gen: int) -> np.ndarray:
     v = np.zeros(N_STATS, dtype=np.float32)
     if not species_name:
         return v
-    try:
-        from legality.lookup import get_species
-        s = get_species(species_name, gen) or {}
-    except Exception:  # noqa: BLE001
-        return v
+    s = _species_data(species_name, gen)
     stats = s.get("stats") or {}
     for i, axis in enumerate(STAT_AXES):
         val = stats.get(axis)
@@ -163,11 +184,13 @@ def build_static_features(ctx: Dict, actions: Optional[List[Dict]],
         "opp_stats": np.zeros((MAX_SLOTS, N_STATS), np.float32),
     }
 
-    # per-action static move data (only kind=="move" carries a move id;
-    # switch/tera/transform rows stay zero — the switch target's species
-    # features already live on its own slot row)
+    # per-action static move data: fill the row for ANY action that carries a
+    # ``move`` (i.e. ``kind`` in move AND tera — a tera action re-uses the same
+    # move, whose type/power matter most precisely because tera changes type
+    # effectiveness). Switch/transform actions carry no ``move`` and stay zero
+    # (the switch target's species features already live on its own slot row).
     for i, act in enumerate((actions or [])[:MAX_ACTIONS]):
-        if act.get("kind") == "move" and act.get("move"):
+        if act.get("move"):
             out["action_move_static"][i] = move_static_vector(act["move"], gen)
 
     own_blocks = _side_slots(ctx, "p1")

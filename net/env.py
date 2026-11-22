@@ -370,10 +370,17 @@ def build_obs(battle: Any, fmt: str, vocabs: Any, side: str = "p1") -> Dict[str,
         # Step 3 (review 2026-11-22): precompute the static mon/move features
         # from the legality DB and inject them as optional arrays. The encoder
         # stays pure/DB-free; this is the ONE place a live obs meets the DB.
-        # ``build_static_features`` degrades to zero rows on any unknown
-        # species/move and never raises, so this cannot break obs building.
-        from net.static_features import build_static_features
-        static_feats = build_static_features(ctx, actions, _gen_from_format(fmt))
+        # Guarded in its OWN try/except: a static-feature bug degrades ONLY the
+        # static fields to zero (the encoder zero-fills when None) and must never
+        # take down the whole observation (the HP/status/hazard/belief features
+        # are the more important signal and must survive).
+        static_feats = None
+        try:
+            from net.static_features import build_static_features
+            static_feats = build_static_features(ctx, actions, _gen_from_format(fmt))
+        except Exception as sexc:  # noqa: BLE001
+            log.warning("static features disabled (%s: %s)",
+                        type(sexc).__name__, sexc)
         return encode_context(ctx, vocabs, actions, static_feats=static_feats)
     except Exception as exc:  # noqa: BLE001 — a live battle must never die on obs
         log.warning("build_obs degraded to zero obs (%s: %s)",

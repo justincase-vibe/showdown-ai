@@ -1400,3 +1400,33 @@ PROGRESS:
   wires build_static_features. test_s41 checksum re-pinned to c38b07e0...; new
   net/tests/test_static_features.py (13 tests). net suite 157 passed; combined
   suite 831 passed (6 benign Tk/Tcl fixture errors, documented).
+
+BUG-HUNT (2026-11-22, "check for bugs and unwanted outcomes first"): found + fixed
+3 real issues, all in the static-feature path (the net suite grew to 160 passed,
+league+fitness 186 passed):
+ 1. **tera actions lost their move-static row** — build_action_list emits BOTH a
+    plain `move` and its `tera` variant (each carrying the same `move` id), but the
+    builder only filled `kind=="move"`. A tera action is EXACTLY where the move's
+    type/power matter most (tera changes type effectiveness), so it was zeroing
+    out. Fix: fill the row for ANY action carrying a `move` (move+tera); switch/
+    transform stay zero. (test_tera_action_gets_move_static_row)
+ 2. **old-gen species zeroed out** — verified the legality DB stores ONLY gen-9
+    species data; gens 1-8 `get_species` return `types=[]` / `stats=None`, so every
+    non-gen9 format would have had ZERO mon static features (the user wants all
+    formats). Fix: `_species_data` falls back to the gen-9 row for types/stats
+    (base types/stats are gen-invariant); move data stays per-gen. (test_old_gen_*)
+ 3. **a static-feature bug could take down the WHOLE obs** — env.build_obs computed
+    static features inside the same try as belief/encode, so an unexpected static
+    error would zero out HP/status/hazard/belief too. Fix: static features are
+    built in their OWN try/except; a failure degrades only the static fields to
+    zero (encoder zero-fills), the rest of the obs survives.
+ + defensive: flag checks use truthiness (not `is not None`) so an empty container
+   from the DB cannot falsely flag a move.
+
+OPEN DESIGN OBSERVATION (not changed — needs a call): the MOVE's type is encoded as
+ONE ordinal float (`type_idx/18`) while the MON's types are one-hot (18 floats).
+An ordinal encoding of a CATEGORICAL type is a slightly awkward input for learning
+the type CHART (Fire vs Water vs Grass becomes a distance problem). Making the move
+type one-hot too (18 floats instead of 1) would be more symmetric and likely better,
+but it changes K_MOVE_STATIC -> re-pin checksum + wider input. Deferred: decide with
+3.3/3.4 (the damage features) when the observation layout is finalized.

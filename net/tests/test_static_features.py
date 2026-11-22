@@ -158,6 +158,49 @@ def test_build_respects_max_actions_cap():
     assert out["action_move_static"][MAX_ACTIONS - 1].any()
 
 
+# ── tera actions also carry a move -> they get the move-static row ──────
+def test_tera_action_gets_move_static_row():
+    ctx = make_ctx()
+    # build_action_list emits BOTH a plain move and its tera variant, each
+    # carrying the same ``move`` id — both must get the move-static row.
+    actions = [
+        {"kind": "move", "move": "icebeam"},
+        {"kind": "tera", "move": "icebeam"},
+        {"kind": "switch", "species": "volcarona"},   # no move -> zero
+    ]
+    out = sf.build_static_features(ctx, actions, 9)
+    ice = sf.move_static_vector("icebeam", 9)
+    assert ice.any()                       # sanity: icebeam resolves
+    assert np.array_equal(out["action_move_static"][0], ice)   # move row
+    assert np.array_equal(out["action_move_static"][1], ice)   # tera row too
+    assert not out["action_move_static"][2].any()             # switch stays zero
+
+
+# ── old-gen species still get types/stats via the gen-9 fallback ──────────
+def test_old_gen_species_falls_back_to_gen9_data():
+    # the legality DB only stores gen-9 species data; gens 1-8 return
+    # types=[] / stats=None. Base types/stats are gen-invariant, so the static
+    # features must fall back to the gen-9 row (otherwise every old-gen battle
+    # would have zero mon features). Move data is per-gen and unaffected.
+    t_old = sf.types_onehot("garchomp", 1)      # gen 1 -> empty in DB
+    t_9 = sf.types_onehot("garchomp", 9)
+    assert t_9.any(), "sanity: gen-9 garchomp has types"
+    assert np.array_equal(t_old, t_9), "old-gen types must fall back to gen-9"
+
+    s_old = sf.stats_vector("garchomp", 7)      # gen 7 -> stats None in DB
+    s_9 = sf.stats_vector("garchomp", 9)
+    assert s_9.any(), "sanity: gen-9 garchomp has stats"
+    assert np.array_equal(s_old, s_9), "old-gen stats must fall back to gen-9"
+
+
+def test_old_gen_move_still_per_gen():
+    # the move vector must still be resolved for an old gen (Earthquake exists
+    # in every gen) and must not be zero.
+    v = sf.move_static_vector("earthquake", 1)
+    assert v[0] == pytest.approx(100 / 200.0)   # power present in gen 1 too
+    assert v[1] == pytest.approx(_TYPE_IDX["Ground"] / N_TYPES)
+
+
 # ── bench-slot permutation permutes ONLY the matching rows ───────────────
 def test_bench_swap_permutes_matching_static_rows():
     ctx = make_ctx()
