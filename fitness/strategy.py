@@ -235,7 +235,8 @@ def _boosts_for(name: Any, gen: int, move_db: Optional[Any]) -> Optional[Dict]:
 
 
 def _pick_setup(moves: List, threat: str, gen: int = 9,
-                move_db: Optional[Any] = None) -> Optional[Dict]:
+                move_db: Optional[Any] = None,
+                own_boosts: Optional[Dict] = None) -> Optional[Dict]:
     """Rule 3 (Step 6.4): the strongest legal SELF-BOOST action, or None.
 
     Chosen ONLY when ``threat == 'safe'`` (strict — not even can_ko, and NOT
@@ -245,15 +246,27 @@ def _pick_setup(moves: List, threat: str, gen: int = 9,
     ties keep legal order. Moves with only negative boosts (Growl) never
     qualify. Per-gen data (the DB override makes e.g. gen-1 Light Screen a
     boost, which this rule then treats as setup — correct for that gen).
-    Pure + degrading; never raises.
+
+    D2 (2026-11-23): a candidate is SKIPPED when ALL of its positive-boost
+    stats are already at +6 (``own_boosts`` = the own active's boost sheet) —
+    a capped Swords Dance is a NO-OP turn (the move fizzles), and a teacher
+    should attack instead (the old bug: it re-picked SD every 'safe' turn).
+    A multi-stat move (Work Up: atk+1/spa+1) still qualifies while ANY of its
+    boosted stats has headroom. ``own_boosts=None`` degrades to the old
+    behavior (nothing is ever capped). Pure + degrading; never raises.
     """
     if threat != "safe":
         return None
+    boosts = own_boosts if isinstance(own_boosts, dict) else {}
     best_act, best_str = None, 0
     for act, name in moves:
         b = _boosts_for(name, gen, move_db)
         if not b:
             continue
+        pos_stats = [k for k, v in b.items()
+                     if isinstance(v, (int, float)) and v > 0]
+        if pos_stats and all((boosts.get(k) or 0) >= 6 for k in pos_stats):
+            continue  # D2: fully +6-capped -> a no-op turn, never "the best"
         strength = max((v for v in b.values()
                         if isinstance(v, (int, float)) and v > 0),
                        default=0)
@@ -695,6 +708,8 @@ def choose_action(
     gen: int = 9,
     calc_fn: Optional[Any] = None,
     switch_threshold: float = 0.30,
+    can_ko_switch_hp: float = 0.50,
+    recently_switched: bool = False,
     move_db: Optional[Any] = None,
     **overrides: Any,
 ) -> Optional[Dict]:
@@ -704,9 +719,22 @@ def choose_action(
     Decision order (deterministic):
       1. no actions -> ``None`` (pass/wait).
       2. no moves legal (force-switch) -> the best switch-in (hazard-aware).
-      3. threatened — the opponent's likely move would ``guaranteed_ko`` /
-         ``can_ko`` MY active — OR my active HP <= ``switch_threshold``, and a
-         switch is legal -> switch (hazard-aware target).
+      3. threatened (D2, 2026-11-23 user ruling — hysteresis + minimum
+         advantage margin, the fix for the switch-ping-pong draws):
+         * ``guaranteed_ko`` -> ALWAYS switch (escape or die; NEVER blocked);
+         * my HP <= ``switch_threshold`` (0.30) -> ALWAYS switch (dying
+           escape; NEVER blocked);
+         * ``can_ko`` (a WEAK signal — only the max-damage roll KOs) ->
+           switch ONLY with a real disadvantage (my HP <= ``can_ko_switch_hp``
+           = 0.50) AND only when NOT ``recently_switched`` (the hysteresis
+           window; the per-battle switch memory is owned by the calling agent,
+           e.g. ``StrategyAgent`` — this function stays pure).
+         The OLD rule switched on ``can_ko`` at 100% HP with no margin — that
+         over-fire is what ping-ponged strategy-vs-strategy to 200-step draws.
+         No hazard state in singles forces an immediate switch (the ruling's
+         third escape class): Stealth Rock / Spikes hit on switch-IN, so
+         fleeing them is pointless; :func:`_pick_switch` already lands the
+         switch hazard-aware.
       3.5 (Step 6.2) hazard setup — a hazard move is legal, its field is not
          already up on our side, the known opponent is not majority-immune,
          and I am not guaranteed-KO'd -> set the hazard (free match-long value;
@@ -766,9 +794,16 @@ def choose_action(
         calc_fn=calc_fn, **overrides)["threat"]
 
     # 3) switch when threatened or low-HP, if a switch is legal.
-    if switches and (threat in ("guaranteed_ko", "can_ko")
-                     or own_hp <= switch_threshold):
-        return _pick_switch(switches, ctx, gen, move_db=move_db)
+    #    D2 (2026-11-23 ruling): see the rule-3 docstring above — escape
+    #    switches (guaranteed_ko / HP <= 0.30) are NEVER blocked by the
+    #    hysteresis window; a voluntary can_ko switch needs the margin
+    #    (HP <= 0.50) AND a fresh switch (not recently_switched).
+    if switches:
+        if threat == "guaranteed_ko" or own_hp <= switch_threshold:
+            return _pick_switch(switches, ctx, gen, move_db=move_db)
+        if (threat == "can_ko" and own_hp <= can_ko_switch_hp
+                and not recently_switched):
+            return _pick_switch(switches, ctx, gen, move_db=move_db)
 
     # 3.5) hazard setup (Step 6.2, rule 1): free match-long value — set rocks/
     # spikes/toxic spikes when legal, our field is clean, the known opponent
@@ -782,7 +817,10 @@ def choose_action(
     # legal AND threat is exactly 'safe' (a setup turn must be near-safe;
     # unknown threat -> don't gamble) — SWORDSDANCE & co, the setup-sweeper
     # concept the net must learn to recognize and value.
-    setup = _pick_setup(moves, threat, gen, move_db=move_db)
+    # D2: the own active's boost sheet caps +6-capped setups (a no-op turn).
+    own_boosts = ((ctx.get("own") or {}).get(own_slot) or {}).get("boosts")
+    setup = _pick_setup(moves, threat, gen, move_db=move_db,
+                        own_boosts=own_boosts)
     if setup is not None:
         return setup
 

@@ -21,7 +21,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-__all__ = ["StrategyAgent", "strategy_reference", "strategy_posterior_reference"]
+__all__ = ["StrategyAgent", "strategy_reference",
+           "strategy_posterior_reference", "recently_switched_after"]
 
 
 def _gen_from_format(fmt: str) -> int:
@@ -65,11 +66,18 @@ class StrategyAgent:
     def __init__(self, fmt: str = "gen9ou", gen: int = 9,
                  switch_threshold: float = 0.30,
                  seed: Optional[int] = None,
-                 posterior: bool = False) -> None:
+                 posterior: bool = False,
+                 no_reswitch_turns: int = 2) -> None:
         self.fmt = fmt
         self.gen = int(gen)
         self.switch_threshold = float(switch_threshold)
         self.seed = seed
+        # D2 (2026-11-23 ruling): the hysteresis window N — a switch on turn T
+        # blocks a VOLUNTARY can_ko switch on turns T+1..T+N-1 (escape
+        # switches are never blocked). The agent is built per battle
+        # (Reference.make_agent), so this memory resets itself each battle.
+        self.no_reswitch_turns = int(no_reswitch_turns)
+        self._last_switch_turn: Optional[int] = None
         # 6.6a: when True, the damage calc uses the opponent's TOP-1 posterior
         # (ability/evs/nature) + tera — the SAME information the net's action
         # features see (a fair M1 comparison). The plain ``strategy`` yardstick
@@ -128,12 +136,55 @@ class StrategyAgent:
                     ov = _posterior_overrides(ctx, own_slot, opp_slot) or {}
                 except Exception:  # noqa: BLE001 — degrade to known-info only
                     ov = {}
+        # D2 (2026-11-23): hysteresis — feed the per-battle switch memory into
+        # rule 3 (a voluntary can_ko switch is blocked right after a switch;
+        # escape switches are never blocked). ``ctx['turn']`` is the belief's
+        # turn counter — the same source the observation sees (D29: the fork
+        # log is the ground truth the belief tracks).
+        turn = ctx.get("turn")
         try:
-            act = choose_action(ctx, acts, fmt=fmt, gen=self.gen,
-                                switch_threshold=self.switch_threshold, **ov)
+            act = choose_action(
+                ctx, acts, fmt=fmt, gen=self.gen,
+                switch_threshold=self.switch_threshold,
+                recently_switched=recently_switched_after(
+                    self._last_switch_turn, turn, self.no_reswitch_turns),
+                **ov)
         except Exception:  # noqa: BLE001 — choose_action should not raise;
             act = None     # belt-and-braces: degrade to a legal action
-        return act if act is not None else acts[0]
+        act = act if act is not None else acts[0]
+        # D2: record this decision's switch (voluntary OR forced) so the next
+        # turn(s) inside the window see ``recently_switched=True``.
+        if (isinstance(act, dict) and act.get("kind") == "switch"
+                and isinstance(turn, int)):
+            self._last_switch_turn = turn
+        return act
+
+
+def recently_switched_after(last_switch_turn: Optional[int],
+                            current_turn: Optional[int],
+                            no_reswitch_turns: int) -> bool:
+    """D2 (2026-11-23): True when ``current_turn`` falls INSIDE the
+    no-re-switch window after the last switch.
+
+    A switch on turn T blocks a VOLUNTARY can_ko switch on turns T+1..T+N-1
+    (N = ``no_reswitch_turns``); turn T+N is free again. Escape switches
+    (guaranteed_ko / HP <= threshold) ignore the window entirely (see
+    ``fitness.strategy.choose_action`` rule 3). A missing turn (degrade path)
+    or N <= 0 -> False (hysteresis simply inactive). A same-turn re-decision
+    (diff 0, defensive) blocks rather than allows. Pure — unit-testable
+    without a battle object.
+    """
+    if last_switch_turn is None or current_turn is None:
+        return False
+    try:
+        last = int(last_switch_turn)
+        cur = int(current_turn)
+        n = int(no_reswitch_turns)
+    except (TypeError, ValueError):
+        return False
+    if n <= 0:
+        return False
+    return 0 <= (cur - last) < n
 
 
 def strategy_reference(fmt: str = "gen9ou",

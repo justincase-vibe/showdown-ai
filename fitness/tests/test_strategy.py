@@ -909,5 +909,137 @@ def test_real_get_context_feeds_the_brain_end_to_end():
     assert chosen.get("move") == "toxic"
 
 
+# ══ D2 (2026-11-23) — switch hysteresis + minimum advantage margin ══
+#
+# The user ruling: "after a switch, no switching again for N turns unless
+# threatened with a KO or hazards force it; require a minimum advantage
+# margin for a voluntary switch." The KO threshold is hp_frac*100 (fitness.ko),
+# so the scenarios below are built against THAT scale: a 30-50% move is can_ko
+# vs a 40%-HP mon (max 50 >= 40, min 30 < 40), not vs a 100%-HP mon.
+
+def test_choose_can_ko_at_full_hp_attacks_not_switches():
+    # D2 margin: can_ko (max 110 >= 100, min 90 < 100) at 100% HP is a WEAK
+    # signal (only a max roll KOs) -> NO voluntary switch (the OLD rule
+    # switched here — the ping-pong trigger) -> attack instead.
+    calc, _ = fake_calc({"hammer": (90, 110, 100), "ember": (5, 10, 7),
+                         "tackle": (2, 4, 3)})
+    ctx = _full_ctx(own_hp=1.0, opp_moves=("hammer",))
+    acts = _acts(["ember", "tackle"], ["garchomp"])
+    assert S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc)["kind"] == "move"
+
+
+def test_choose_can_ko_at_half_hp_switches():
+    # D2 margin met: can_ko (max 50 >= 40, min 30 < 40) at 40% HP (<= 0.50)
+    # -> voluntary switch.
+    calc, _ = fake_calc({"hammer": (30, 50, 40), "ember": (5, 10, 7),
+                         "tackle": (2, 4, 3)})
+    ctx = _full_ctx(own_hp=0.4, opp_moves=("hammer",))
+    acts = _acts(["ember", "tackle"], ["garchomp", "torterra"])
+    assert S.choose_action(ctx, acts, fmt="gen9ou",
+                           calc_fn=calc)["kind"] == "switch"
+
+
+def test_choose_can_ko_half_hp_blocked_by_hysteresis():
+    # D2 hysteresis: the same can_ko@40% situation, but we switched last turn
+    # -> the VOLUNTARY switch is blocked -> attack (the ping-pong breaker).
+    calc, _ = fake_calc({"hammer": (30, 50, 40), "ember": (5, 10, 7),
+                         "tackle": (2, 4, 3)})
+    ctx = _full_ctx(own_hp=0.4, opp_moves=("hammer",))
+    acts = _acts(["ember", "tackle"], ["garchomp", "torterra"])
+    a = S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc,
+                        recently_switched=True)
+    assert a["kind"] == "move"
+
+
+def test_choose_guaranteed_ko_switches_even_recently_switched():
+    # D2 escape: guaranteed_ko (min 85 >= 40) ALWAYS switches, even right
+    # after a switch — being blocked there would mean standing in the KO.
+    calc, _ = fake_calc({"hammer": (85, 95, 90)})
+    ctx = _full_ctx(own_hp=0.4, opp_moves=("hammer",))
+    acts = _acts(["ember", "tackle"], ["garchomp", "torterra"])
+    a = S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc,
+                        recently_switched=True)
+    assert a["kind"] == "switch"
+
+
+def test_choose_low_hp_escape_allowed_recently_switched():
+    # D2 escape: HP (20%) <= 0.30 threshold switches even when recently
+    # switched (a dying mon must be able to keep fleeing).
+    calc, _ = fake_calc({"hammer": (10, 20, 15)})
+    ctx = _full_ctx(own_hp=0.2, opp_moves=("hammer",))
+    acts = _acts(["ember", "tackle"], ["garchomp", "torterra"])
+    a = S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc,
+                        recently_switched=True)
+    assert a["kind"] == "switch"
+
+
+def test_choose_can_ko_above_margin_no_switch():
+    # D2 margin: can_ko (max 70 >= 60, min 40 < 60) at 60% HP (> 0.50 margin)
+    # -> no switch even with hysteresis OFF (the margin alone blocks it).
+    calc, _ = fake_calc({"hammer": (40, 70, 55), "ember": (5, 10, 7),
+                         "tackle": (2, 4, 3)})
+    ctx = _full_ctx(own_hp=0.6, opp_moves=("hammer",))
+    acts = _acts(["ember", "tackle"], ["garchomp", "torterra"])
+    assert S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc)["kind"] == "move"
+
+
+# ══ D2 (2026-11-23) — the +6 setup cap (no-op turn must not be "the best") ══
+
+def test_setup_rule_skips_fully_capped_boost():
+    # D2: atk already at +6 -> Swords Dance is a NO-OP turn (the move
+    # fizzles) -> the teacher attacks instead (old bug: it re-picked SD on
+    # every 'safe' turn, even at +6).
+    calc, _ = fake_calc({"ember": (5, 10, 8), "flamethrower": (20, 40, 30)})
+    ctx = _full_ctx(opp_moves=("ember",))
+    ctx["own"]["p1a"]["boosts"] = {"atk": 6}
+    db = _setup_db({"swordsdance": {"atk": 2}})
+    a = S.choose_action(ctx, _acts(["Swords Dance", "Flamethrower"]),
+                        fmt="gen9ou", calc_fn=calc, move_db=db)
+    assert a["move"] == "Flamethrower"
+
+
+def test_setup_rule_still_qualifies_with_headroom():
+    # D2: atk at +4 still has headroom to +6 -> Swords Dance (capped at +6,
+    # +2 effective) still beats a weak attack.
+    calc, _ = fake_calc({"ember": (5, 10, 8), "flamethrower": (20, 40, 30)})
+    ctx = _full_ctx(opp_moves=("ember",))
+    ctx["own"]["p1a"]["boosts"] = {"atk": 4}
+    db = _setup_db({"swordsdance": {"atk": 2}})
+    a = S.choose_action(ctx, _acts(["Swords Dance", "Flamethrower"]),
+                        fmt="gen9ou", calc_fn=calc, move_db=db)
+    assert a["move"] == "Swords Dance"
+
+
+def test_setup_rule_multistat_qualifies_when_any_stat_has_headroom():
+    # D2: Work Up (atk+1/spa+1) with atk at +6 but spa at +2 -> still has
+    # headroom (spa) -> qualifies as setup.
+    calc, _ = fake_calc({"ember": (5, 10, 8)})
+    ctx = _full_ctx(opp_moves=("ember",))
+    ctx["own"]["p1a"]["boosts"] = {"atk": 6, "spa": 2}
+    db = _setup_db({"workup": {"atk": 1, "spa": 1}})
+    a = S.choose_action(ctx, _acts(["Work Up", "Ember"]),
+                        fmt="gen9ou", calc_fn=calc, move_db=db)
+    assert a["move"] == "Work Up"
+
+
+# ══ D2 (2026-11-23) — the agent's hysteresis window (pure helper) ══
+
+def test_recently_switched_window():
+    from fitness.strategy_agent import recently_switched_after as f
+    # no history / missing turn -> hysteresis inactive
+    assert f(None, 5, 2) is False
+    assert f(3, None, 2) is False
+    # switch on turn 3, N=2: turn 4 blocked, turn 5 free again
+    assert f(3, 4, 2) is True
+    assert f(3, 5, 2) is False
+    # same-turn re-decision (defensive) blocks rather than allows
+    assert f(3, 3, 2) is True
+    # N=0 disables hysteresis entirely; N=1 blocks nothing beyond turn 3
+    assert f(3, 4, 0) is False
+    assert f(3, 3, 1) is True and f(3, 4, 1) is False
+    # junk input degrades to inactive, never raises
+    assert f("x", 4, 2) is False and f(3, "y", 2) is False
+
+
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(pytest.main([__file__, "-v"]))
