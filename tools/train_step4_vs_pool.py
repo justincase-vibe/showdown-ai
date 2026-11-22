@@ -221,7 +221,7 @@ def main() -> None:
 
         print(f"\n{'round':>5} {'battles':>7} {'trans':>6} {'crash':>5} {'tmo':>4} "
               f"{'win':>4} {'loss':>5} {'illeg':>5} {'policy':>8} "
-              f"{'value':>8} {'entrop':>8} {'clip':>7}", flush=True)
+              f"{'value':>8} {'entrop':>8} {'clip':>7} {'kl':>8}", flush=True)
 
         for rnd in range(N_ROUNDS):
             buffer.clear()
@@ -305,13 +305,17 @@ def main() -> None:
             # Print
             elapsed = time.time() - round_t0
             wr = n_wins / max(1, n_battles)
-            p = metrics.get("policy_loss", float('nan'))
-            v = metrics.get("value_loss", float('nan'))
+            # NOTE: ppo.update returns keys 'policy'/'value' (not policy_loss/value_loss)
+            p = metrics.get("policy", metrics.get("policy_loss", float('nan')))
+            v = metrics.get("value", metrics.get("value_loss", float('nan')))
+            kl = metrics.get("kl_approx", float('nan'))
+            if isinstance(kl, float) and kl != kl:  # NaN
+                kl = -1.0
             e = metrics.get("entropy", float('nan'))
             c = metrics.get("frac_clipped", float('nan'))
             print(f"{rnd+1:>5} {n_battles:>7} {n_trans:>6} {n_crash:>5} {n_timeout:>4} "
                   f"{wr:>4.0%} {n_losses:>5} {n_illegal:>5} {p:>8.4f} "
-                  f"{v:>8.4f} {e:>8.4f} {c:>7.3f}", flush=True)
+                  f"{v:>8.4f} {e:>8.4f} {c:>7.3f} {kl:>8.4f}", flush=True)
 
         total = time.time() - t0
         print(f"\n[step4] DONE in {total:.0f}s — checkpoints in {CKPT_DIR}", flush=True)
