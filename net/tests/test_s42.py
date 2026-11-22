@@ -377,6 +377,35 @@ def test_net_state_conditions_not_constant_action():
         "init (the 'never learns' disaster).")
 
 
+# ── (3c) OWN-MATCHUP CONSUMPTION guard (Step 3.4) ────────────────────────────
+# The own_matchup field (how each own mon fares against the enemy team) is the
+# board-level damage landscape the net needs for win-condition / switch / threat
+# planning. If MonEncoder did NOT fold it into the per-mon vector (or the wiring
+# silently zero-filled it), the net would IGNORE the whole feature and two
+# otherwise-identical states differing ONLY in own_matchup would produce
+# IDENTICAL logits. This guard catches that: a real change to own_matchup MUST
+# move the logits. (A "feature added to the layout but never read" is exactly
+# the kind of silent bug the user wants caught, not shipped.)
+def test_own_matchup_changes_move_logits():
+    torch.manual_seed(0)
+    v = build_vocabs()
+    b = batch_to_torch(random_batch(v, B=1, T=1, seed=7))
+    net = PokeNet(v)
+    net.eval()
+    with torch.no_grad():
+        logits_a = net(b)["logits"]
+    # a large, distinct own_matchup block (a mon that KOs everything, net +1)
+    b2 = {k: x.clone() if torch.is_tensor(x) else x for k, x in b.items()}
+    b2["own_matchup"] = torch.full_like(b2["own_matchup"], 1.0)
+    with torch.no_grad():
+        logits_b = net(b2)["logits"]
+    delta = float((logits_b - logits_a).abs().max())
+    assert delta > 1e-5, (
+        f"own_matchup has NO effect on the logits (max|Δ|={delta:.2e}) — the net "
+        "is not reading the per-own-mon matchup summary (dead feature / wiring "
+        "zero-fills it). The MonEncoder must fold it into the own mon's vector.")
+
+
 # ── (5) no NaN/inf grads on a real-corpus batch ───────────────────────────
 @needs_fixture
 def test_no_nan_inf_grads_real_corpus_batch(corpus: CorpusBundle):
