@@ -1536,6 +1536,78 @@ league+fitness 186 passed):
  + defensive: flag checks use truthiness (not `is not None`) so an empty container
    from the DB cannot falsely flag a move.
 
+### 3.4 DESIGN (locked before coding, 2026-11-22) — per-own-mon MATCHUP summary
+
+WHAT IT ADDS: the board-level damage LANDSCAPE — "how does EACH of my mons fare
+against the whole enemy team?" This is the signal the net needs for the user's
+win-condition / switch / threat scenarios ("my dragonite 6-0s once gengar is
+dead", "who can I KO, who KOs me", "is my switch-in safe"). It is a PER-OWN-MON
+fact (one 8-dim vector per own slot), so it folds into the OWN-side MON ENCODING
+(`MonEncoder` / `_side_repr`) — the EXACT 3.5 lesson: per-mon things go per-mon,
+NOT summed into the global context (the 3.5 first attempt summed 6 opponent slots
+into a global constant and shadowed the own-side signal, loss stuck 0.69). The
+opponent side passes all-zero own_matchup (its <pad>/zero contribution is 0),
+mirroring how the own side already passes all-zero posterior.
+
+New registry field `own_matchup` (MAX_SLOTS, 8) float32. K_OWN_MATCHUP = 8. All
+dims bounded in [0,1] (pcts/100, fractions/6, flags) — no raw constant to shadow.
+  [0] best_hit       strongest hit THIS mon can land on any enemy   (max exp% /100)
+  [1] worst_hit      strongest hit any enemy can land on THIS mon   (max exp% /100)
+  [2] ko_guar_frac   # enemy mons it KOs guaranteed / (# alive enemy mons)
+  [3] ko_can_frac    # enemy mons it CAN KO (max dmg)              / (# alive enemy)
+  [4] taken_ko_frac  # enemy mons that CAN KO this mon             / (# alive enemy)
+  [5] survives_strongest  1.0 iff the worst enemy hit < 100% of full HP
+  [6] net_ko_margin  (ko_can_frac - taken_ko_frac)                 (in [-1,1])
+  [7] best_vs_worst  best_hit - worst_hit  (signed, in [-1,1]) — "does it hit
+                          harder than it gets hit?" (a fast read on threat level)
+
+COMPUTATION (reuse the ONE calc, do NOT re-derive):
+ * ONE batched `damage.calc.calc_damage_many(items)` — up to 6 x 6 x 2 = 72 items
+   (own_i's strongest move vs opp_j, AND opp_j's top move vs own_i), in a SINGLE
+   Node spawn (the "quick + API-reachable" priority; no per-item spawn).
+ * each own mon's attack move = its HIGHEST-base-power damaging move (DB lookup;
+   fallback the first move). each opponent's attack move = its `top_moves[0]`
+   (belief posterior), fallback its first observed move.
+ * opponent hidden info = that opponent mon's TOP-1 posterior ability (override),
+   same convention as 3.3.
+ * KO verdicts via `fitness.ko.ko_assessment(raw, defender_hp_frac=defender's
+   current hp_frac)` — same semantics as `move_ko` (a defender at hp_frac has
+   hp_frac of max HP; a move KOs when exp/max% >= that threshold).
+ * DEGRADES to a ZERO row per mon (never raises) when a species/move is unknown
+   or the calc fails — the net reads "unknown", exactly like the id channels.
+
+PLACEMENT / WIRING (same discipline as static_features + action_features):
+ * `net/matchup_features.py` — PURE, lazy calc import, `build_own_matchup(ctx,
+   fmt, gen, calc_fn=None)` -> `{"own_matchup": (6,8) float32}`; injectable
+   `calc_fn` so tests pin interpretation with fakes (only a couple touch Node).
+ * encoder PLACES it (zero-fill when absent — the pure/DB-free contract holds).
+ * model: `MonEncoder` takes an `own_matchup` input, folds it into the per-mon
+   vector (like types/stats), `in_dim += K_OWN_MATCHUP`; own side passes the
+   real array, opponent side passes zeros. `_side_repr` threads it through.
+ * `env.build_obs` wires `build_own_matchup` in its OWN try/except (a calc
+   failure degrades ONLY this field to zero; the HP/status/belief obs survives).
+ * `test_s41` checksum re-pin (25 -> 26 fields); +`net/tests/test_matchup_features.py`
+   (hermetic via an injected batch calc_fn; one real-calc/DB integration test).
+
+SPEED DECISION (recorded, deliberate): the per-pair SPEED-advantage dim from the
+initial sketch is DROPPED — base speed is ALREADY in the `own_stats`/`opp_stats`
+channels (per-mon), the net can read "who is faster" per mon, and per-pair
+effective speed (abilities/items/weather) would need 36 extra Node spawns (2 x
+36 compare_speed calls), violating the quick/API priority. The per-turn ACTIVE
+outspeed is already carried by `action_damage[6]` (3.3). If Step 8 shows the net
+wants an explicit speed-order signal, this is a 2-line re-add (re-pin checksum).
+
+PROGRESS (3.4, 2026-11-22):
+- 3.4: DONE — registry +K_OWN_MATCHUP (8) + field `own_matchup` (6x8); new
+  `net/matchup_features.py` (build_own_matchup / _own_attack_move / _opp_attack_move
+  / _top_ability, ONE calc_damage_many batch, ko_assessment KO verdicts, degrades
+  to zero); encoder places it (zero-fill); MonEncoder folds it into the per-mon
+  vector (in_dim += 8), own side real + opponent side zeros; env.build_obs wires
+  it in its OWN try/except. test_s41 checksum re-pinned (1141 -> 1189 elements,
+  24 -> 25 fields); +net/tests/test_matchup_features.py (10 hermetic tests via an
+  injected batch calc_fn + 1 real-calc/DB integration test). net + league +
+  fitness all green. (See the PROGRESS log line updated below.)
+
 OPEN DESIGN OBSERVATION (not changed — needs a call): the MOVE's type is encoded as
 ONE ordinal float (`type_idx/18`) while the MON's types are one-hot (18 floats).
 An ordinal encoding of a CATEGORICAL type is a slightly awkward input for learning

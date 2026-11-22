@@ -55,7 +55,7 @@ from net.registry import (
 # Pinned the FIRST time the suite ran; if ANY field is added/removed/renamed/
 # reshaped/reordered the checksum changes and this FAILS (the drift-catcher).
 # Re-pin deliberately (and reconcile the encoder + S4.2 net) by updating this.
-PINNED_CHECKSUM = "739e1d0383c810cdac8e5e756c169d07768ef29c1319c883c30c47dd59cc015c"
+PINNED_CHECKSUM = "c71fa691ec8271861028251b0f61d711bb32866b7ba6712d87ffcbc0154a9d5d"
 # re-pinned 2026-11-17: +7 curated-volatile slot columns (D61 surface,
 # user-approved) — SLOT_DIM 25 -> 32. fainted column already existed.
 # re-pinned 2026-11-22 (Step 3.1/3.2): +5 static mon/move feature fields
@@ -67,6 +67,11 @@ PINNED_CHECKSUM = "739e1d0383c810cdac8e5e756c169d07768ef29c1319c883c30c47dd59cc0
 # re-pinned 2026-11-22 (Step 3.3a): +1 per-ACTION damage block
 # (action_damage 12x9) — will-this-KO / who-is-faster per legal action, the
 # belief facts the net needs to plan (1033 -> 1141 elements, 23 -> 24 fields).
+# re-pinned 2026-11-22 (Step 3.4): +1 per-OWN-MON MATCHUP summary
+# (own_matchup 6x8) — how each own mon fares against the whole enemy team
+# (best/worst hit, KO counts both ways, net margin), the board-level coverage
+# landscape for win-condition / switch planning (1141 -> 1189 elements,
+# 24 -> 25 fields).
 
 
 def _mon(

@@ -87,6 +87,14 @@ K_MOVE_STATIC: int = 11
 #: "3.3 DESIGN"); the net learns the per-kind meaning from action_kind.
 K_ACTION_DAMAGE: int = 9
 
+#: per-OWN-MON MATCHUP feature width (Step 3.4): how THIS mon fares against the
+#: whole enemy team — the board-level damage landscape for win-condition /
+#: switch / threat planning. All dims bounded in [0,1] (pcts/100, /6 fractions,
+#: flags). See OPEN_DESIGN_CHOICES.md "3.4 DESIGN" for the locked schema.
+#:   [0] best_hit  [1] worst_hit  [2] ko_guar_frac  [3] ko_can_frac
+#:   [4] taken_ko_frac  [5] survives_strongest  [6] net_ko_margin  [7] best_vs_worst
+K_OWN_MATCHUP: int = 8
+
 
 @dataclass(frozen=True)
 class Field:
@@ -175,6 +183,13 @@ def _layout() -> List[Field]:
     # net.action_features (the ONE calc pipeline); the encoder zero-fills when
     # absent. The belief facts the net needs to plan, per legal action.
     f.append(Field("action_damage", (MAX_ACTIONS, K_ACTION_DAMAGE), "float32"))
+    # per-OWN-MON MATCHUP summary (Step 3.4): how each own mon fares against the
+    # whole enemy team (best/worst hit, KO counts both ways, net margin) — the
+    # board-level coverage landscape for win-condition / switch planning. Lives
+    # PER-MON (folded into the OWN-side mon encoding, the 3.5 lesson), NOT the
+    # global context. Precomputed by net.matchup_features (the ONE calc batch);
+    # the encoder zero-fills when absent.
+    f.append(Field("own_matchup", (MAX_SLOTS, K_OWN_MATCHUP), "float32"))
     # per-slot static mon data (dual types = 0.5/0.5; base stats /255)
     f.append(Field("own_types", (MAX_SLOTS, N_TYPES), "float32"))
     f.append(Field("opp_types", (MAX_SLOTS, N_TYPES), "float32"))

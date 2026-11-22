@@ -325,7 +325,8 @@ def encode_context(ctx: Dict, vocabs: Vocabs,
     # anything. ``static_feats`` is the union of both (built by env.build_obs).
     from .static_features import STATIC_FEATURE_NAMES
     from .action_features import ACTION_DAMAGE_NAMES
-    for name in (*STATIC_FEATURE_NAMES, *ACTION_DAMAGE_NAMES):
+    from .matchup_features import OWN_MATCHUP_NAMES
+    for name in (*STATIC_FEATURE_NAMES, *ACTION_DAMAGE_NAMES, *OWN_MATCHUP_NAMES):
         arr = (static_feats or {}).get(name)
         if arr is None:
             arr = np.zeros(SHAPES[name], dtype=DTYPES[name])

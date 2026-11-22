@@ -42,6 +42,7 @@ from .registry import (
     GLOBAL_DIM,
     K_ACTION_DAMAGE,
     K_MOVE_STATIC,
+    K_OWN_MATCHUP,
     LAYOUT,
     MAX_ACTIONS,
     MAX_OWN_MOVES,
@@ -129,7 +130,12 @@ class MonEncoder(nn.Module):
         # shadowed the own-side signal and regressed state-conditioning, so it
         # lives per-mon. The own side passes all-zero posterior/top-moves (its
         # ability/item embeddings are <pad>, contributing 0).
-        in_dim = (SLOT_DIM + 6 * EMBED_DIM + N_TYPES + N_STATS)
+        # Step 3.4: the per-OWN-MON MATCHUP summary (how this mon fares against
+        # the whole enemy team) is ALSO folded into each mon's vector HERE, like
+        # types/stats — the 3.5 lesson (per-mon things go per-mon, NOT the global
+        # context, which shadowed the own-side signal). The own side passes the
+        # real array; the opponent side passes all-zero rows (contribution 0).
+        in_dim = (SLOT_DIM + 6 * EMBED_DIM + N_TYPES + N_STATS + K_OWN_MATCHUP)
         self.mlp = nn.Sequential(
             nn.Linear(in_dim, MON_DIM),
             nn.LayerNorm(MON_DIM),
@@ -141,7 +147,8 @@ class MonEncoder(nn.Module):
                 ability: torch.Tensor, item: torch.Tensor,
                 moves: torch.Tensor, types: torch.Tensor,
                 stats: torch.Tensor, post_ids: torch.Tensor,
-                post_w: torch.Tensor, top_moves: torch.Tensor) -> torch.Tensor:
+                post_w: torch.Tensor, top_moves: torch.Tensor,
+                own_matchup: torch.Tensor) -> torch.Tensor:
         """slot (B,T,S,SLOT_DIM) + id rows + static rows + posterior -> (B,T,S,MON_DIM).
 
         ``types``/``stats`` are (B,T,S,N_TYPES) / (B,T,S,N_STATS); when the
@@ -149,6 +156,8 @@ class MonEncoder(nn.Module):
         degrades exactly like the id channels. ``post_ids``/``post_w``/``top_moves``
         are the per-slot opponent posterior (B,T,S,K)/(B,T,S,K)/(B,T,S,M); the
         OWN side passes all-zero rows (its contribution is 0).
+        ``own_matchup`` (B,T,S,K_OWN_MATCHUP) is the per-own-mon matchup summary;
+        the OPPONENT side passes all-zero rows (it is an own-side concept).
         """
         # moves is (B,T,S,MAX_OWN_MOVES) -> emb (B,T,S,MOVES,E); mean over the
         # MOVES axis (dim=-2), NOT the embedding axis (dim=-1), -> (B,T,S,E).
@@ -162,7 +171,10 @@ class MonEncoder(nn.Module):
         # whose <pad> embeddings are 0, so the contribution is 0).
         post = (self.emb_ability(post_ids) * post_w.unsqueeze(-1)).sum(dim=-2)  # (B,T,S,E)
         top = self.emb_move(top_moves).mean(dim=-2)                            # (B,T,S,E)
-        return self.mlp(torch.cat([slot, emb, types, stats, post, top], dim=-1))
+        # own_matchup is already bounded floats (pcts/100, /6 fractions, flags)
+        # — appended raw (like types/stats), NOT re-embedded (it is a value,
+        # not an id). Opponent side passes zeros -> contributes 0.
+        return self.mlp(torch.cat([slot, emb, types, stats, post, top, own_matchup], dim=-1))
 
 
 class ResidualBlock(nn.Module):
@@ -257,7 +269,7 @@ class PokeNet(nn.Module):
                    moves: torch.Tensor, active: torch.Tensor,
                    types: torch.Tensor, stats: torch.Tensor,
                    post_ids: torch.Tensor, post_w: torch.Tensor,
-                   top_moves: torch.Tensor) -> torch.Tensor:
+                   top_moves: torch.Tensor, own_matchup: torch.Tensor) -> torch.Tensor:
         """(B,T,6,MON_DIM) per-slot + active flag -> (B,T,2*MON_DIM).
 
         ``set_vec``  = SUM over the 6 slots (a set function: slot-order
@@ -266,7 +278,7 @@ class PokeNet(nn.Module):
                        (singles = the one active mon; doubles = both).
         """
         per_slot = self.mon_enc(slot, species, ability, item, moves, types, stats,
-                                post_ids, post_w, top_moves)  # (B,T,6,M)
+                                post_ids, post_w, top_moves, own_matchup)  # (B,T,6,M)
         set_vec = per_slot.sum(dim=-2)              # (B,T,M) — permutation invariant
         act_w = active.unsqueeze(-1)                 # (B,T,6,1)
         active_vec = (per_slot * act_w).sum(dim=-2)  # (B,T,M)
@@ -315,11 +327,16 @@ class PokeNet(nn.Module):
         z_post_ids = torch.zeros_like(b["opp_post_per_slot_ids"])
         z_post_w = torch.zeros_like(b["opp_post_per_slot_w"])
         z_top = torch.zeros_like(b["opp_topmoves_per_slot"])
+        # Step 3.4: own_matchup is an OWN-side concept. The own side gets the
+        # real per-mon matchup summary; the opponent side gets all-zero rows
+        # (it has no "own matchup" — its contribution to the mon vector is 0),
+        # mirroring how the own side already passes all-zero posterior.
+        z_matchup = torch.zeros_like(b["own_matchup"])
         own = self._side_repr(
             b["own_slot"], b["own_species"], b["own_ability"], b["own_item"],
             b["own_moves"], b["own_slot"][:, :, :, _active],
             b["own_types"], b["own_stats"],
-            z_post_ids, z_post_w, z_top)
+            z_post_ids, z_post_w, z_top, b["own_matchup"])
         # opponent ability/item are UNREVEALED — fed as <pad> (0); their info
         # reaches the net ONLY through the posterior channels (rule 4, no leak).
         # Opponent types/stats ARE public species facts (not hidden), so they
@@ -330,7 +347,7 @@ class PokeNet(nn.Module):
             b["opp_slot"][:, :, :, _active],
             b["opp_types"], b["opp_stats"],
             b["opp_post_per_slot_ids"], b["opp_post_per_slot_w"],
-            b["opp_topmoves_per_slot"])
+            b["opp_topmoves_per_slot"], z_matchup)
         ctx = self._context_repr(b, T)
         x = self.input_proj(torch.cat([own, opp, ctx], dim=-1))   # (B,T,D)
         # The trunk is RESIDUAL by construction (every block is

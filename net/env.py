@@ -389,6 +389,17 @@ def build_obs(battle: Any, fmt: str, vocabs: Any, side: str = "p1") -> Dict[str,
         except Exception as aexc:  # noqa: BLE001
             log.warning("action damage disabled (%s: %s)",
                         type(aexc).__name__, aexc)
+        # Step 3.4: the per-own-mon MATCHUP summary (how each own mon fares
+        # against the whole enemy team) — the board-level damage landscape for
+        # win-condition / switch / threat planning. Its OWN try/except: a calc
+        # failure degrades ONLY this field to zero (the encoder zero-fills) and
+        # must never take down the rest of the observation.
+        try:
+            from net.matchup_features import build_own_matchup
+            precomputed.update(build_own_matchup(ctx, fmt, gen))
+        except Exception as mexc:  # noqa: BLE001
+            log.warning("own matchup disabled (%s: %s)",
+                        type(mexc).__name__, mexc)
         return encode_context(ctx, vocabs, actions, static_feats=precomputed or None)
     except Exception as exc:  # noqa: BLE001 — a live battle must never die on obs
         log.warning("build_obs degraded to zero obs (%s: %s)",
