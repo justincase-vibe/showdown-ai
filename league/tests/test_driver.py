@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -324,3 +325,60 @@ def test_play_agent_battle_on_legacy_passfest_without_guard():
         env_factory=lambda: env, max_decision_errors=None)
     assert n == 50                                      # ran to the cap, no raise
     assert not a1 and not a2                            # nobody ever acted -> nobody won
+
+
+# ── the ctx-brain hook (Step 6.6: decides_from_battle) ──────────────────────
+class _CtxAgent:
+    """A StrategyAgent-shaped policy (the ``decides_from_battle`` marker).
+
+    Its ``act`` MUST NOT be called (the hook routes through ``decide``);
+    a call to it is a wiring error and fails the test loudly."""
+
+    decides_from_battle = True
+
+    def __init__(self, action: Any = ACT_TACKLE, boom: bool = False):
+        self._action = action
+        self._boom = boom
+        self.decide_calls = 0
+
+    def decide(self, battle: Any, fmt: str, vocabs: Any) -> Any:
+        self.decide_calls += 1
+        if self._boom:
+            raise RuntimeError("brain exploded")
+        return self._action
+
+    def act(self, *a: Any, **k: Any) -> Any:  # pragma: no cover - wiring guard
+        raise AssertionError("act() must not be called for a ctx brain")
+
+
+def test_policy_action_routes_ctx_brain_through_decide():
+    from net.tests.test_env_obs import _FakeBattle, _FakeMon
+    a = _CtxAgent()
+    b = _FakeBattle(active=_FakeMon("garchomp", moves=["outrage"]),
+                    avail_moves=["outrage"])
+    got = policy_action(a, b, "gen9ou", None, greedy=True)
+    assert got == ACT_TACKLE
+    assert a.decide_calls == 1
+
+
+def test_policy_action_ctx_brain_pass_turn_returns_none():
+    from net.tests.test_env_obs import _FakeBattle
+    a = _CtxAgent(action=None)          # no legal action this moment
+    assert policy_action(a, _FakeBattle(), "gen9ou", None, greedy=True) is None
+
+
+def test_policy_action_ctx_brain_guard_counts_success():
+    from net.tests.test_env_obs import _FakeBattle
+    g = DecisionGuard(max_consecutive=3)
+    policy_action(_CtxAgent(), _FakeBattle(), "gen9ou", None, greedy=True,
+                  guard=g)
+    assert g.consecutive == 0           # a successful decision resets/holds 0
+
+
+def test_policy_action_ctx_brain_error_degrades_to_pass():
+    from net.tests.test_env_obs import _FakeBattle
+    warnings: list = []
+    got = policy_action(_CtxAgent(boom=True), _FakeBattle(), "gen9ou", None,
+                        greedy=True, log=warnings.append)
+    assert got is None                  # the brain's raise degrades to a pass
+    assert any("decision error" in w for w in warnings)

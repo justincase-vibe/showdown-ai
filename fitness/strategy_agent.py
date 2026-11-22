@@ -1,0 +1,121 @@
+"""Step 6.6 — the battle-time strategy policy: the ctx brain as a PLAYABLE agent.
+
+``fitness.strategy.choose_action`` (rules 1–4, Steps 6.2–6.5) is a pure
+function over the ``get_context()`` snapshot — but the live battle hands an
+agent the ENCODED obs, not the ctx. This module closes that gap WITHOUT a
+second pipeline (one-workflow):
+
+    battle -> net.env.build_ctx   (the SAME belief pipeline build_obs uses)
+           -> net.env.build_action_list
+           -> fitness.strategy.choose_action  (the ONE shared damage calc)
+
+It is a ``Reference`` (``fitness.ladder``), so the harness / league / Step-8
+can play it like any bot: the driver's ``policy_action`` recognizes the
+``decides_from_battle`` marker and routes the decision through
+``agent.decide()`` (which sees the battle) instead of ``agent.act(obs, acts)``.
+
+CPU-first: importing this module pulls NO torch and NO poke_env (both are
+imported lazily inside ``decide`` — the same discipline as ``fitness.heuristic``).
+"""
+from __future__ import annotations
+
+import re
+from typing import Any, Dict, Optional
+
+__all__ = ["StrategyAgent", "strategy_reference"]
+
+
+def _gen_from_format(fmt: str) -> int:
+    """gen9ou -> 9, gen8bss3v3 -> 8 (the @smogon/calc engine key). Local
+    copy (net.env has the same) so this module stays net-import-free at
+    reference-build time. Unrecognised -> 9 (the primary format)."""
+    m = re.match(r"gen(\d+)", fmt or "")
+    return int(m.group(1)) if m else 9
+
+
+class StrategyAgent:
+    """The ctx-based brain (``choose_action`` rules 1–4) as a battle policy.
+
+    Marker contract (consumed by ``league.driver.policy_action``):
+      * ``decides_from_battle = True`` — this policy consumes the BATTLE (the
+        belief pipeline), not the encoded obs;
+      * ``decide(battle, fmt, vocabs) -> action dict | None`` (``None`` =
+        pass/wait, no legal action this moment).
+
+    The decision builds the belief's ``get_context()`` snapshot via
+    ``net.env.build_ctx`` — the EXACT pipeline ``build_obs`` uses (one source
+    of truth) — and runs ``fitness.strategy.choose_action`` over it with the
+    real legal-action list. The damage calc is the ONE shared model
+    (``choose_action``'s default = ``damage.calc.calc_damage``).
+
+    Deterministic (``seed`` is accepted for ``Reference.make_agent(seed)``
+    contract parity but is unused — like ``HeuristicAgent``). Never raises:
+    a belief failure degrades to the first legal action (the A3.1 contract),
+    an empty action list degrades to a pass.
+    """
+
+    decides_from_battle = True
+
+    def __init__(self, fmt: str = "gen9ou", gen: int = 9,
+                 switch_threshold: float = 0.30,
+                 seed: Optional[int] = None) -> None:
+        self.fmt = fmt
+        self.gen = int(gen)
+        self.switch_threshold = float(switch_threshold)
+        self.seed = seed
+
+    def decide(self, battle: Any, fmt: Optional[str] = None,
+               vocabs: Optional[Any] = None) -> Optional[Dict]:
+        """ONE decision from the live battle. Never raises (see class doc)."""
+        fmt = fmt or self.fmt
+        # POV: the belief pipeline is p1-POV; a p2 player's log is swapped by
+        # build_ctx (my_side detects the side — same helper the driver uses).
+        side = "p1"
+        try:
+            from net.env import my_side
+            lines = [ln for ln in battle._build_replay_log().split("\n")
+                     if ln.strip()]
+            side = my_side(battle, lines)
+        except Exception:  # noqa: BLE001 — a POV hiccup defaults to p1
+            side = "p1"
+
+        acts: list = []
+        try:
+            from net.env import build_action_list
+            acts = list(build_action_list(battle) or [])
+        except Exception:  # noqa: BLE001 — no legal actions -> pass
+            acts = []
+        if not acts:
+            return None  # a pass/wait turn (no legal action this moment)
+
+        from net.env import build_ctx
+        ctx = build_ctx(battle, fmt, side)
+        if ctx is None:
+            return acts[0]  # belief unavailable: first legal (the A3.1 degrade)
+
+        from fitness.strategy import choose_action
+        try:
+            act = choose_action(ctx, acts, fmt=fmt, gen=self.gen,
+                                switch_threshold=self.switch_threshold)
+        except Exception:  # noqa: BLE001 — choose_action should not raise;
+            act = None     # belt-and-braces: degrade to a legal action
+        return act if act is not None else acts[0]
+
+
+def strategy_reference(fmt: str = "gen9ou",
+                       gen: Optional[int] = None) -> "Any":
+    """The NEW heuristic (rules 1–4) as a ladder rung — the standing Step-8
+    yardstick (the 6.1 design note: "the NEW heuristic becomes the standing
+    Step 8 yardstick"). Weight 2.0, the same rung as ``heuristic_reference``.
+    Lazy, like ``random_reference`` / ``heuristic_reference``."""
+    from .ladder import Reference
+
+    g = int(gen) if gen is not None else _gen_from_format(fmt)
+
+    def make_agent(seed: Optional[int] = None) -> StrategyAgent:
+        return StrategyAgent(fmt=fmt, gen=g, seed=seed)
+
+    return Reference(
+        name="strategy", make_agent=make_agent, weight=2.0,
+        description=("ctx brain (choose_action rules 1-4: hazard/status/"
+                     "setup/resist-switch) — the Step-6 teacher heuristic"))

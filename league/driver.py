@@ -99,6 +99,17 @@ def policy_action(agent: Any, battle: Any, fmt: str, vocabs: Any,
     action taken, no transition to learn from)."""
     from net.env import build_action_list, build_obs, my_side
     try:
+        if getattr(agent, "decides_from_battle", False):
+            # a ctx-based brain (fitness.strategy_agent.StrategyAgent): its
+            # policy consumes the belief's get_context() — built from the
+            # BATTLE (the SAME pipeline build_obs uses), not the encoded obs.
+            # Returns an action dict | None (pass/wait). Nothing is captured:
+            # a scripted policy has no experience to collect (the D103
+            # capture seam is for the learning nets only).
+            act = agent.decide(battle=battle, fmt=fmt, vocabs=vocabs)
+            if guard is not None:
+                guard.on_success()
+            return act
         lines = [ln for ln in battle._build_replay_log().split("\n") if ln.strip()]
         side = my_side(battle, lines)
         obs = build_obs(battle, fmt, vocabs, side)
