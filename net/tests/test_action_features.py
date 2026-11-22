@@ -323,3 +323,63 @@ def test_top1_posterior_ability_selected():
     ]
     from net.action_features import _top_ability
     assert _top_ability(ctx["opponent"]["p2a"]) == "torrent"
+
+
+def test_switch_finds_incoming_mon_slot_keyed_ctx():
+    """REGRESSION: the real belief state keys ctx["own"] by SLOT IDs
+    ("p1a", "p1b", …), NOT by species name.  The old ``.get(species)``
+    lookup always missed in production, silently dropping the incoming
+    mon's ability/item.  This test uses the REAL slot-keyed format and
+    verifies the incoming mon is found (non-zero damage).
+    """
+    ctx = {
+        "active": {"p1": "p1a", "p2": "p2a"},
+        # Slot-keyed own blocks (the real belief state format)
+        "own": {
+            "p1a": {"name": "garchomp", "hp_frac": 1.0, "ability": "roughskin", "item": "lifeorb"},
+            "p1b": {"name": "gengar", "hp_frac": 1.0, "ability": "cursedbody", "item": "focusband"},
+        },
+        "opponent": {"p2a": {"species": "blastoise", "hp_frac": 1.0,
+                              "top_moves": ["bigmove"],
+                              "posterior": [{"ability": "torrent", "weight": 0.9}]}},
+        "field": {},
+    }
+    actions = [{"kind": "switch", "species": "gengar"}]
+    captured = {}
+    def spy_calc(attacker, defender, move, fmt=None, gen=9):
+        captured["defender"] = defender
+        return {"min_pct": 50, "max_pct": 60, "expected_pct": 55, "immune": False}
+    out = build_action_damage(ctx, actions, fmt="gen9bss3v3",
+                              calc_fn=spy_calc, speed_fn=lambda a, d: "a")
+    v = out["action_damage"][0]
+    # damage must be non-zero (the mon was found)
+    assert v[2] > 0.0, "incoming mon not found — damage is zero (slot-keyed ctx bug)"
+    # the incoming mon's ability must be passed to the calc
+    assert captured["defender"].get("ability") == "cursedbody"
+    assert captured["defender"].get("item") == "focusband"
+    assert captured["defender"].get("name") == "gengar"
+
+
+def test_find_own_block_helper():
+    """Unit-test the _find_own_block helper directly."""
+    from net.action_features import _find_own_block
+    ctx = {
+        "own": {
+            "p1a": {"name": "garchomp", "hp_frac": 0.8},
+            "p1b": {"name": "gengar", "hp_frac": 1.0},
+        }
+    }
+    # finds by species name (slot-keyed dict)
+    blk = _find_own_block(ctx, "gengar")
+    assert blk["name"] == "gengar" and blk["hp_frac"] == 1.0
+    blk = _find_own_block(ctx, "garchomp")
+    assert blk["hp_frac"] == 0.8
+    # case-insensitive
+    blk = _find_own_block(ctx, "Gengar")
+    assert blk["name"] == "gengar"
+    # not found -> empty dict
+    assert _find_own_block(ctx, "mewtwo") == {}
+    # empty species -> empty dict
+    assert _find_own_block(ctx, "") == {}
+    # no own key -> empty dict
+    assert _find_own_block({}, "gengar") == {}

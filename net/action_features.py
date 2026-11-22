@@ -50,6 +50,31 @@ def _clamp01(x: float) -> float:
     return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
 
 
+def _find_own_block(ctx: Dict, species: str) -> Dict:
+    """Find an own mon's block by species name.
+
+    ``ctx["own"]`` is keyed by SLOT IDs ("p1a", "p1b", …) in the real belief
+    state, not by species.  The old ``.get(species)`` lookup always missed in
+    production (silently dropping the incoming mon's ability/item from the
+    damage calc).  This helper searches by the block's ``name`` field (the
+    species id) and falls back to a direct key match for test contexts that
+    key their own dict by species name.
+    """
+    own = ctx.get("own") or {}
+    target = (species or "").strip().lower()
+    if not target:
+        return {}
+    # Primary: search by the block's species name (real belief state, slot-keyed).
+    for blk in own.values():
+        nm = (blk.get("name") or blk.get("species") or "").strip().lower()
+        if nm == target:
+            return blk
+    # Fallback: direct key match (test contexts that key own by species).
+    if species in own:
+        return own[species]
+    return {}
+
+
 def _top_ability(opp_block: Optional[Dict]) -> Optional[str]:
     """The opponent's TOP-1 posterior ability (deterministic), or None.
 
@@ -268,11 +293,17 @@ def build_action_damage(ctx: Dict, actions: Optional[List[Dict]], fmt: str,
                     # mon).
                     attacker = _ko.block_to_calc_mon(
                         opp, ability=opp_ability)
-                    inc = (ctx.get("own", {}) or {}).get(sp) or {}
+                    inc = _find_own_block(ctx, sp)
                     inc_block = {"name": inc.get("name") or sp}
                     hp_in = inc.get("hp_frac")
                     hp_in = 1.0 if hp_in is None else max(0.0, min(1.0, float(hp_in)))
                     inc_block["hp"] = hp_in
+                    # include the incoming mon's known ability/item (own-side
+                    # info — public, no leak) so the calc is accurate.
+                    if inc.get("ability"):
+                        inc_block["ability"] = inc["ability"]
+                    if inc.get("item"):
+                        inc_block["item"] = inc["item"]
                     if not attacker or not inc_block.get("name"):
                         assessment = None
                     else:
