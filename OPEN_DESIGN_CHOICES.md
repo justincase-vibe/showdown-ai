@@ -1381,7 +1381,7 @@ Checkpoints invalidated either way — layout changes re-pin test_s41's checksum
 |---|---|---|---|
 | 3.1 | static MOVE features per action: `action_move_static` (MAX_ACTIONS,11): power/200, type/18, category, priority(-6..6 -> 0..1), accuracy/100, flags: is_hazard/is_screen/boosts/side_status/side_condition/is_tailwind | no (legality.lookup.get_move) | next |
 | 3.2 | static MON features per slot: `own_types`/`opp_types` (MAX_SLOTS,18) dual=0.5/0.5, `own_stats`/`opp_stats` (MAX_SLOTS,6) base/255 | no (legality.lookup.get_species) | next (same commit as 3.1) |
-| 3.5 | per-SLOT opponent posterior: `opp_post_per_slot_ids/w` (MAX_SLOTS,MAX_POST) + `opp_topmoves_per_slot` (MAX_SLOTS,MAX_TOP_MOVES) — replaces the active-only channels (bench threat visible) | no (ctx already carries per-slot posterior) | after 3.1/3.2 |
+| 3.5 | per-SLOT opponent posterior: `opp_post_per_slot_ids/w` (MAX_SLOTS,MAX_POST) + `opp_topmoves_per_slot` (MAX_SLOTS,MAX_TOP_MOVES) — replaces the active-only channels (bench threat visible) | no (ctx already carries per-slot posterior) | DONE (per-mon side encoding) |
 | 3.3 | per-ACTION damage block `action_damage` (MAX_ACTIONS,9): moves vs opp active (min/max/exp pct, guaranteed/can/expected KO, outspeeds, immune; belief-weighted over opp ability posterior); switches (entry-hazard pct, expected dmg taken from opp top moves, forced-switch flag) | YES (damage.calc.calc_damage_many batch + effective_speed) | after 3.5 |
 | 3.4 | MATCHUP matrix `matchup` (120,): alive own i x opp j: exp dmg both ways + speed order (108) + per-own-mon KO counts (12) | YES (one calc_damage_many: 6x6x2) | after 3.3 |
 | 3.6 | env/driver wiring: build features at decision time, pass into encode_context (encoder stays PURE: takes precomputed arrays, zero-fills when absent) | - | with 3.3/3.4 |
@@ -1400,6 +1400,18 @@ PROGRESS:
   wires build_static_features. test_s41 checksum re-pinned to c38b07e0...; new
   net/tests/test_static_features.py (13 tests). net suite 157 passed; combined
   suite 831 passed (6 benign Tk/Tcl fixture errors, documented).
+- 3.5: DONE — the 3 opponent-posterior fields became PER-SLOT (registry
+  opp_post_per_slot_ids/w 6x5, opp_topmoves_per_slot 6x4): every bench mon's
+  ability/move threat is now visible ("Gengar is in the back"), not just the
+  active one. Encoder fills per-slot; slot 0 == the old active-only value (a
+  strict superset, no signal lost). MonEncoder now folds each mon's posterior/
+  top-moves INTO that mon's vector (like types/stats) — set-pooled, bounded,
+  per-mon, permutation-invariant. IMPORTANT: first attempt put the posterior in
+  the GLOBAL context (sum over 6 slots) and that REGRESSED the
+  state-conditioning guard (inflated constant shadowed the own-side signal,
+  loss stuck at 0.69); fixed by moving it per-mon into the side encoding. test
+  checksum re-pinned to 9d00eb07...; +test_posterior_is_per_slot_bench_threat_visible.
+  net 161 passed; league+fitness 186 passed.
 
 BUG-HUNT (2026-11-22, "check for bugs and unwanted outcomes first"): found + fixed
 3 real issues, all in the static-feature path (the net suite grew to 160 passed,

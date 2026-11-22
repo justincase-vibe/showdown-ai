@@ -14,9 +14,9 @@ Contract (what it guarantees):
     of strings, no dict-iteration-order dependence: slots are read in the
     canonical a..f order);
   * **no leakage (rule 4)** — opponent UNREVEALED info (ability, item) reaches
-    the output ONLY through the posterior channels (``opp_ability_post_*`` and
-    ``opp_top_moves`` and the per-slot ``confidence``); a raw opponent ability /
-    item id is never emitted;
+    the output ONLY through the posterior channels (``opp_post_per_slot_*`` and
+    ``opp_topmoves_per_slot`` — per-slot since Step 3.5 — and the per-slot
+    ``confidence``); a raw opponent ability / item id is never emitted;
   * **permutation-friendly** — a bench swap is a pure row permutation of
     ``own_slot`` / ``own_*`` (the S4.2 set-encoder is then permutation-
     invariant); the encoder itself just preserves the canonical slot order.
@@ -275,27 +275,29 @@ def encode_context(ctx: Dict, vocabs: Vocabs,
     out["opp_moves"] = opp_moves
 
     # ── opponent UNREVEALED info: ONLY via the posterior channels ────
-    # (rule 4 / no-leakage). Tied to the ACTIVE opponent mon (the one we act
-    # against); falls back to the first slot that carries a posterior.
-    post_ids = np.zeros(MAX_POST, dtype=np.int64)
-    post_w = np.zeros(MAX_POST, dtype=np.float32)
-    top_moves = np.zeros(MAX_TOP_MOVES, dtype=np.int64)
-    active_opp_blk = opp_blocks.get(opp_active) if opp_active else None
-    if active_opp_blk is None:
-        for slot in _slot_ids("p2"):
-            if opp_blocks.get(slot):
-                active_opp_blk = opp_blocks[slot]
-                break
-    if active_opp_blk is not None:
-        posterior = active_opp_blk.get("posterior", []) or []
+    # (rule 4 / no-leakage). Step 3.5: PER-SLOT — every opponent mon's ability
+    # posterior + marginal top-moves are visible, not just the active one. This
+    # is what lets the net see a bench threat ("a Gengar is in the back") and
+    # plan around it. A raw opponent ability/id is STILL never emitted — only
+    # the belief posterior (rule 4 held). Slot 0 == the old active-only value;
+    # slots 1-5 are the (new) bench. Empty/bench slots with no posterior stay
+    # zero rows (the net reads "unknown", like the id channels).
+    post_ids = np.zeros((MAX_SLOTS, MAX_POST), dtype=np.int64)
+    post_w = np.zeros((MAX_SLOTS, MAX_POST), dtype=np.float32)
+    top_moves = np.zeros((MAX_SLOTS, MAX_TOP_MOVES), dtype=np.int64)
+    for i, slot in enumerate(_slot_ids("p2")):
+        blk = opp_blocks.get(slot)
+        if not blk:
+            continue
+        posterior = blk.get("posterior", []) or []
         for k, cand in enumerate(posterior[:MAX_POST]):
-            post_ids[k] = _idx(vocabs.ability, cand.get("ability", ""))
-            post_w[k] = _clamp01(float(cand.get("weight", 0.0) or 0.0))
-        for k, m in enumerate((active_opp_blk.get("top_moves", []) or [])[:MAX_TOP_MOVES]):
-            top_moves[k] = _idx(vocabs.move, m)
-    out["opp_ability_post_ids"] = post_ids
-    out["opp_ability_post_w"] = post_w
-    out["opp_top_moves"] = top_moves
+            post_ids[i, k] = _idx(vocabs.ability, cand.get("ability", ""))
+            post_w[i, k] = _clamp01(float(cand.get("weight", 0.0) or 0.0))
+        for k, m in enumerate((blk.get("top_moves", []) or [])[:MAX_TOP_MOVES]):
+            top_moves[i, k] = _idx(vocabs.move, m)
+    out["opp_post_per_slot_ids"] = post_ids
+    out["opp_post_per_slot_w"] = post_w
+    out["opp_topmoves_per_slot"] = top_moves
 
     # ── D60: the current legal-action list as indexed inputs ─────────
     actions = actions or []

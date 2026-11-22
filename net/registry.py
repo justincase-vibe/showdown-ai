@@ -25,8 +25,11 @@ D61 structure encoded here:
     embeddings — NOT one-hot, NOT the old lossy multi-probe hash;
   * the moveset-shape prior is CUT (redundant with the belief posterior);
   * opponent UNREVEALED info reaches the net ONLY through the posterior
-    channels (``opp_ability_post_*`` / ``opp_top_moves`` / ``confidence``) —
-    rule 4 (no leakage);
+    channels (``opp_post_per_slot_*`` / ``opp_topmoves_per_slot`` / per-slot
+    ``confidence``) — rule 4 (no leakage); since Step 3.5 the posterior is
+    PER-SLOT (every bench mon's ability/move threat is visible, not just the
+    active one — the "Gengar is in the back" signal the net needs to plan
+    around);
   * D60 coupling: the current legal-action list is emitted as indexed inputs
     (``action_*``) so the net sees what each action position IS;
   * Step 3 (review 2026-11-22): STATIC mon/move data (types, base stats, move
@@ -164,10 +167,13 @@ def _layout() -> List[Field]:
     f.append(Field("opp_types", (MAX_SLOTS, N_TYPES), "float32"))
     f.append(Field("own_stats", (MAX_SLOTS, N_STATS), "float32"))
     f.append(Field("opp_stats", (MAX_SLOTS, N_STATS), "float32"))
-    # opponent UNREVEALED info — ONLY via the posterior channels (rule 4)
-    f.append(Field("opp_ability_post_ids", (MAX_POST,), "int64"))
-    f.append(Field("opp_ability_post_w", (MAX_POST,), "float32"))
-    f.append(Field("opp_top_moves", (MAX_TOP_MOVES,), "int64"))
+    # opponent UNREVEALED info — ONLY via the posterior channels (rule 4).
+    # Step 3.5: PER-SLOT (MAX_SLOTS x K) so every bench mon's ability/move
+    # threat is visible, not just the active one. Slot 0 == the old active-only
+    # value (a strict superset — no signal lost, bench added).
+    f.append(Field("opp_post_per_slot_ids", (MAX_SLOTS, MAX_POST), "int64"))
+    f.append(Field("opp_post_per_slot_w", (MAX_SLOTS, MAX_POST), "float32"))
+    f.append(Field("opp_topmoves_per_slot", (MAX_SLOTS, MAX_TOP_MOVES), "int64"))
     # D60: the current legal-action list as indexed inputs
     f.append(Field("action_kind", (MAX_ACTIONS,), "int64"))
     f.append(Field("action_move", (MAX_ACTIONS,), "int64"))

@@ -55,12 +55,15 @@ from net.registry import (
 # Pinned the FIRST time the suite ran; if ANY field is added/removed/renamed/
 # reshaped/reordered the checksum changes and this FAILS (the drift-catcher).
 # Re-pin deliberately (and reconcile the encoder + S4.2 net) by updating this.
-PINNED_CHECKSUM = "c38b07e0aacb6a409a8ff42312603bfd6d4325c07c56648f4180050da56f5f3a"
+PINNED_CHECKSUM = "9d00eb070e5aebc6372daf9f0a88c93fa6271a7ac09142a68a929780149faba7"
 # re-pinned 2026-11-17: +7 curated-volatile slot columns (D61 surface,
 # user-approved) — SLOT_DIM 25 -> 32. fainted column already existed.
 # re-pinned 2026-11-22 (Step 3.1/3.2): +5 static mon/move feature fields
 # (action_move_static 12x11, own/opp_types 6x18, own/opp_stats 6x6) — the type
 # chart / base stats / move facts the net used to have to discover from reward.
+# re-pinned 2026-11-22 (Step 3.5): the 3 opponent-posterior fields became
+# PER-SLOT (opp_post_per_slot_ids/w 6x5, opp_topmoves_per_slot 6x4) — every
+# bench mon's ability/move threat is now visible, not just the active one.
 
 
 def _mon(
@@ -244,7 +247,8 @@ def test_bench_swap_is_pure_row_permutation():
     # global + opponent side: completely unchanged
     for name in ("global", "global_weather", "global_terrain",
                  "opp_slot", "opp_species", "opp_moves",
-                 "opp_ability_post_ids", "opp_ability_post_w", "opp_top_moves",
+                 "opp_post_per_slot_ids", "opp_post_per_slot_w",
+                 "opp_topmoves_per_slot",
                  "action_kind", "action_move", "action_species", "action_mask"):
         assert np.array_equal(enc1[name], enc2[name]), f"{name} changed by a bench swap"
 
@@ -267,11 +271,16 @@ def test_opponent_unrevealed_only_via_posterior():
     out = encode_context(ctx, v)
     # there is NO raw opponent ability / item channel at all (structural)
     assert "opp_ability" not in out and "opp_item" not in out
-    # the opponent's abilities reach the net ONLY as posterior ids
-    post = set(int(x) for x in out["opp_ability_post_ids"] if x != 0)
-    assert post, "expected the active opponent's posterior abilities to be present"
-    for idx in post:
-        assert v.ability.id_of(idx) in ("roughskin", "sandveil")
+    # the opponent's abilities reach the net ONLY as posterior ids (per-slot
+    # since Step 3.5; flatten across slots here). The active mon's roughskin/
+    # sandveil AND the bench mon's poisontouch are all legitimate posterior ids
+    # (a posterior is NOT a leak — it is the belief's distribution, not a raw id).
+    post = set(int(x) for x in out["opp_post_per_slot_ids"].ravel() if x != 0)
+    post_names = {v.ability.id_of(i) for i in post}
+    assert {"roughskin", "sandveil"} <= post_names, \
+        "the active opponent's posterior abilities must be present"
+    assert post_names <= {"roughskin", "sandveil", "poisontouch"}, \
+        f"only known posterior abilities may appear, got {post_names}"
     # the opponent's raw revealed species IS allowed (it is revealed, not hidden)
     assert out["opp_species"][0] == v.species.index("garchomp")
 
@@ -286,7 +295,34 @@ def test_opponent_block_ability_key_never_leaked():
     out = encode_context(ctx, v)
     assert "opp_ability" not in out
     # 'roughskin' appears only as a posterior id, never as a standalone channel
-    assert v.ability.id_of(out["opp_ability_post_ids"][0]) in ("roughskin", "sandveil")
+    # (slot 0 = the active opponent, k=0 = its top posterior ability)
+    assert v.ability.id_of(out["opp_post_per_slot_ids"][0][0]) in ("roughskin", "sandveil")
+
+
+def test_posterior_is_per_slot_bench_threat_visible():
+    """Step 3.5: each opponent mon carries its OWN posterior (not a copy of the
+    active one). make_ctx has active p2a=garchomp (roughskin/sandveil) and bench
+    p2b=toxicroc (poisontouch) — the bench threat must be independently visible,
+    which is the 'Gengar is in the back' signal the net plans around."""
+    ctx = make_ctx()
+    v = make_vocabs(ctx)
+    out = encode_context(ctx, v)
+
+    # slot 0 (active garchomp): roughskin/sandveil
+    slot0 = set(int(x) for x in out["opp_post_per_slot_ids"][0] if x != 0)
+    assert slot0 == {v.ability.index("roughskin"), v.ability.index("sandveil")}
+
+    # slot 1 (bench toxicroc): poisontouch — its OWN posterior, not slot 0's
+    slot1 = set(int(x) for x in out["opp_post_per_slot_ids"][1] if x != 0)
+    assert slot1 == {v.ability.index("poisontouch")}
+
+    # the two slots are genuinely independent (bench != active copy)
+    assert slot0 != slot1
+    # bench top-moves also visible on slot 1 (stealthrock / stoneedge)
+    tm1 = set(int(x) for x in out["opp_topmoves_per_slot"][1] if x != 0)
+    assert v.move.index("stealthrock") in tm1
+    # empty slots (p2c..f) carry no posterior (zero rows)
+    assert not out["opp_post_per_slot_ids"][2:].any()
 
 
 # ── dim-registry checksum (the drift-catcher pin) ─────────────────────
