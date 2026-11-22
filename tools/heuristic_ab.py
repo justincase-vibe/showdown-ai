@@ -42,9 +42,17 @@ from tools.learning_check import CSV_HEADER, DEFAULT_CSV, ci95  # noqa: E402
 
 
 def _gen_from_format(fmt: str) -> int:
+    """@smogon/calc engine key for a format id — the ONE source of truth is
+    ``legality.formats.engine_key`` (D32: champions = 0, NOT 9; mapping to 9
+    would silently mis-calc ~25 moves). Regex fallback for ids outside the
+    registry; unrecognised -> 9 (the primary format)."""
     import re
-    m = re.match(r"gen(\d+)", fmt or "")
-    return int(m.group(1)) if m else 9
+    try:
+        from legality.formats import engine_key
+        return int(engine_key(fmt))
+    except Exception:  # noqa: BLE001 — unknown id / unmappable mod -> fallback
+        m = re.match(r"gen(\d+)", fmt or "")
+        return int(m.group(1)) if m else 9
 
 
 def matrix() -> List[Tuple[str, str]]:

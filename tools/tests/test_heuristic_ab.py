@@ -38,4 +38,5 @@ def test_matrix_names_match_the_refs_dict():
 def test_gen_from_format():
     assert _gen_from_format("gen9ou") == 9
     assert _gen_from_format("gen8bss3v3") == 8
-    assert _gen_from_format("champions") == 9   # unrecognised -> primary
+    assert _gen_from_format("gen9championsou") == 0   # D32: champions engine
+    assert _gen_from_format("champions") == 9          # unregistered -> 9

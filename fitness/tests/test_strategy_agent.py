@@ -25,6 +25,11 @@ from fitness.strategy_agent import (  # noqa: E402
 def test_gen_from_format():
     assert _gen_from_format("gen9ou") == 9
     assert _gen_from_format("gen8bss3v3") == 8
+    # D32: champions is a DIFFERENT mechanics set (engine 0) — NOT gen 9
+    # (champions Slash BP=80 vs gen-9 70). The registry is the source of
+    # truth (legality.formats.engine_key); a bare "champions" is not a
+    # registered format id -> the documented primary-format fallback.
+    assert _gen_from_format("gen9championsou") == 0
     assert _gen_from_format("champions") == 9      # unrecognised -> primary
 
 

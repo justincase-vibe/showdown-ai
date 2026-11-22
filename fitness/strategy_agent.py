@@ -26,11 +26,21 @@ __all__ = ["StrategyAgent", "strategy_reference"]
 
 
 def _gen_from_format(fmt: str) -> int:
-    """gen9ou -> 9, gen8bss3v3 -> 8 (the @smogon/calc engine key). Local
-    copy (net.env has the same) so this module stays net-import-free at
-    reference-build time. Unrecognised -> 9 (the primary format)."""
-    m = re.match(r"gen(\d+)", fmt or "")
-    return int(m.group(1)) if m else 9
+    """The @smogon/calc engine key (the ``gen`` argument) for a format id.
+
+    The ONE source of truth is ``legality.formats.engine_key`` (D32):
+    champions formats map to **0, NOT 9** — mapping them to 9 would
+    silently mis-calc ~25 moves (champions Slash BP=80 vs gen-9 70). The
+    regex fallback covers format ids OUTSIDE the registry (custom formats);
+    unrecognised -> 9 (the primary format). Lazy import keeps this module
+    cheap at import time.
+    """
+    try:
+        from legality.formats import engine_key
+        return int(engine_key(fmt))
+    except Exception:  # noqa: BLE001 — unknown id / unmappable mod -> fallback
+        m = re.match(r"gen(\d+)", fmt or "")
+        return int(m.group(1)) if m else 9
 
 
 class StrategyAgent:
