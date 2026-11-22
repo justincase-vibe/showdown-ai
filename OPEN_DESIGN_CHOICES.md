@@ -1715,3 +1715,54 @@ the type CHART (Fire vs Water vs Grass becomes a distance problem). Making the m
 type one-hot too (18 floats instead of 1) would be more symmetric and likely better,
 but it changes K_MOVE_STATIC -> re-pin checksum + wider input. Deferred: decide with
 3.3/3.4 (the damage features) when the observation layout is finalized.
+
+---
+
+## STEP 5 DESIGN NOTE (draft, PARKED — implementation blocked on Step 4/8 showing learning)
+
+Status: design only. Per review plan, do NOT implement M2b until the Step 8 eval
+of the Step 4 learner confirms improvement. Step 4 training launched 2026-11-22 13:18
+(PID 1765, 160 battles / 8 rounds, log `scratch/step4/train_step4.log`).
+
+### Problem (why)
+The alternating MCTS tree gives the opponent an unfair first-look (setup/hazard/
+double-switch cases systematically undervalued) and cannot output mixed strategies.
+Pokemon turns are SIMULTANEOUS.
+
+### Design (per-turn matrix game)
+1. Rows = my legal actions (cap top-K by policy, K=3-4).
+2. Cols = opponent plausible actions, belief/posterior-weighted (top-K by posterior),
+   K=3-4. Turn-1 case: posterior must yield >=1 plausible attack move (already an
+   OC-9 test requirement).
+3. Cell (i,j) = state after BOTH actions resolve, scored by value head (root-POV).
+   - Forward model option A: Showdown sim clone (Battle.toJSON/fromJSON, apply both
+     choices, read result). Requires spike: clones+turns/sec on gen9bss3v3.
+   - Forward model option B (fallback): depth-1, calc-based approximation for the
+     top-3x3 cells only.
+4. Solve zero-sum matrix with `scipy.optimize.linprog`; SAMPLE action from the
+   resulting mixed strategy (keeps exploration legal; log-prob from the mixed
+   strategy for PPO, or sample-and-record like today — decide at build time).
+5. Belief samples: for each posterior sample, matrix differs via cell values;
+   average mixed strategies across samples (or sample state first, then solve).
+   Budget check: ~36 cells x ~20 samples x forward-cost must fit per-turn time.
+6. Tera/mega: omitted from action lists (OC-8); nulled in formats without them.
+
+### Spike plan (first build task when unblocked)
+- Measure sim clone+one-turn cost in the fork (target: <~50ms/clone to keep
+  ~720 forward evals < 36s/turn; otherwise drop to option B or smaller K).
+- Verify Battle.toJSON/fromJSON round-trip for gen9bss3v3 incl. weather/terrain.
+- Hermetic test: known 2x2 matrix -> LP returns analytic mixed strategy.
+
+### Acceptance gates
+- Sim forward model agrees with real Showdown on scripted cells (reuse OC-6
+  agreement-suite style: hazards, status, screens, speed ties).
+- Mixed strategy sanity: rock-paper-scenario states produce non-degenerate mixes.
+- A/B vs alternating tree on the Step 7 scenario suite; keep the better one.
+
+### Open decisions (for user, at unblock time)
+- S5-D1: forward model A (sim clone) vs B (calc depth-1) — expect A if spike is
+  fast, else B.
+- S5-D2: K (rows/cols) default 4 or 3 — latency vs quality.
+- S5-D3: how to log mixed-strategy action for PPO (sampled action + logprob from
+  mix, vs. policy head fallback).
+- S5-D4: belief-sampling strategy (average mixes vs sample-state-then-solve).
