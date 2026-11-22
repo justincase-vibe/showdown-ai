@@ -19,7 +19,9 @@ from fitness.strategy_agent import (  # noqa: E402
     StrategyAgent,
     _gen_from_format,
     strategy_reference,
+    strategy_posterior_reference,
 )
+from fitness.strategy import _posterior_overrides  # noqa: E402
 
 
 def test_gen_from_format():
@@ -71,3 +73,70 @@ def test_decide_degrades_to_first_legal_when_belief_is_broken():
     assert acts
     got = StrategyAgent(fmt="gen9ou").decide(b, fmt="gen9ou")
     assert got is not None and got in acts          # legal, never raises
+
+
+# ══════════════ 6.6a — the strategy_posterior variant (A2) ══════════════
+
+def test_strategy_posterior_reference_shape():
+    """The SECOND yardstick (6.6a): same name-rung contract, but the agent is
+    built with posterior=True (the informed damage calc)."""
+    ref = strategy_posterior_reference(fmt="gen9ou")
+    assert ref.name == "strategy_posterior"
+    assert ref.weight == 2.0                        # same rung as `strategy`
+    agent = ref.agent(seed=3)
+    assert isinstance(agent, StrategyAgent)
+    assert agent.posterior is True                  # the informed variant
+    assert agent.decides_from_battle is True
+
+
+def test_strategy_yardstick_unchanged():
+    """The EXISTING yardstick stays known-info-only (posterior=False) — the
+    user's 6.6a: keep `strategy` as-is, add `strategy_posterior` as a SECOND
+    variant, do NOT redefine the yardstick."""
+    plain = strategy_reference(fmt="gen9ou").agent(seed=3)
+    assert plain.posterior is False                 # unchanged yardstick
+    # both variants share the same rules/weight — only the calc differs
+    assert strategy_reference("gen9ou").weight == \
+        strategy_posterior_reference("gen9ou").weight
+
+
+def test_posterior_overrides_extracts_top1_and_public():
+    """Hermetic: _posterior_overrides returns the opponent's TOP-1 posterior
+    build (ability/evs/nature by weight) + the public tera + the own known
+    build — the EXACT set the net's action features pass (6.6a fairness)."""
+    ctx = {
+        "active": {"p1": "p1a", "p2": "p2a"},
+        "own": {"p1a": {"tera": "Dragon", "evs": {"hp": 252}, "nature": "Adamant"}},
+        "opponent": {"p2a": {
+            "tera": "Water",
+            "posterior": [
+                {"ability": "Swift Swim", "evs": {"spa": 252},
+                 "nature": "Modest", "weight": 0.7},
+                {"ability": "Rain Dish", "evs": {"hp": 252},
+                 "nature": "Calm", "weight": 0.3},
+            ],
+        }},
+    }
+    ov = _posterior_overrides(ctx, "p1a", "p2a")
+    # top-1 by weight (Swift Swim 0.7 > Rain Dish 0.3) — NOT the lower-weight pick
+    assert ov["opp_ability"] == "Swift Swim"
+    assert ov["opp_evs"] == {"spa": 252}
+    assert ov["opp_nature"] == "Modest"
+    # public / revealed tera (both sides)
+    assert ov["own_tera"] == "Dragon"
+    assert ov["opp_tera"] == "Water"
+    # own known build
+    assert ov["own_evs"] == {"hp": 252}
+    assert ov["own_nature"] == "Adamant"
+
+
+def test_posterior_overrides_empty_when_no_posterior():
+    """No posterior (a belief that has not inferred a build yet) -> empty dict,
+    so the calc degrades to known-info-only (the plain `strategy` path)."""
+    ctx = {
+        "active": {"p1": "p1a", "p2": "p2a"},
+        "own": {"p1a": {}},
+        "opponent": {"p2a": {"posterior": [], "tera": ""}},
+    }
+    ov = _posterior_overrides(ctx, "p1a", "p2a")
+    assert ov == {}

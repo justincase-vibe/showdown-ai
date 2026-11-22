@@ -63,6 +63,10 @@ def matrix() -> List[Tuple[str, str]]:
         ("strategy", "heuristic"),   # the headline comparison (REPORT)
         ("strategy", "random"),      # PASS gate: the new one beats the floor
         ("heuristic", "random"),     # sanity: the OLD still beats the floor
+        # 6.6a: the SECOND yardstick's baseline — strategy_posterior (the
+        # informed-calc variant) vs the OLD heuristic, so we have its number
+        # before the M1 gate compares the net against it.
+        ("strategy_posterior", "heuristic"),
     ]
 
 
@@ -82,7 +86,7 @@ def run_ab(
     from pool import PoolConfig, ResourcePool
     from fitness.ladder import random_reference
     from fitness.heuristic import heuristic_reference
-    from fitness.strategy_agent import strategy_reference
+    from fitness.strategy_agent import strategy_reference, strategy_posterior_reference
     from fitness.harness import evaluate
 
     t0 = time.time()
@@ -92,6 +96,9 @@ def run_ab(
     vocabs = build_vocabs()
     refs = {
         "strategy": strategy_reference(fmt=fmt),
+        # 6.6a: the informed-calc variant (same rules 1-4, posterior top-1 build
+        # in the calc) — the fair-comparison yardstick for the M1 gate.
+        "strategy_posterior": strategy_posterior_reference(fmt=fmt),
         "heuristic": heuristic_reference(gen=_gen_from_format(fmt)),
         "random": random_reference(vocabs, device="cpu"),
     }

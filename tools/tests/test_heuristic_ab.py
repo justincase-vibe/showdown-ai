@@ -19,20 +19,23 @@ from tools.heuristic_ab import _gen_from_format, matrix  # noqa: E402
 
 
 def test_matrix_pairs_in_order():
-    # headline first (strategy vs heuristic), then the two floor checks.
+    # headline first (strategy vs heuristic), then the two floor checks, then
+    # the 6.6a baseline (strategy_posterior vs heuristic).
     assert matrix() == [
         ("strategy", "heuristic"),
         ("strategy", "random"),
         ("heuristic", "random"),
+        ("strategy_posterior", "heuristic"),
     ]
 
 
 def test_matrix_names_match_the_refs_dict():
     # run_ab builds refs keyed by exactly these names (strategy_reference ->
-    # "strategy", heuristic_reference -> "heuristic", random_reference ->
-    # "random"). A drift on either side would KeyError mid-run; pin the set.
+    # "strategy", strategy_posterior_reference -> "strategy_posterior",
+    # heuristic_reference -> "heuristic", random_reference -> "random"). A
+    # drift on either side would KeyError mid-run; pin the set.
     assert {n for pair in matrix() for n in pair} == \
-        {"strategy", "heuristic", "random"}
+        {"strategy", "strategy_posterior", "heuristic", "random"}
 
 
 def test_gen_from_format():

@@ -194,18 +194,25 @@ def opp_move_ko(ctx: Dict, own_slot: str, opp_slot: str, move: Any, *,
                 fmt: str, gen: int = 9, calc_fn: Optional[Any] = None,
                 own_ability: Optional[str] = None, own_item: Optional[str] = None,
                 opp_ability: Optional[str] = None, opp_item: Optional[str] = None,
-                own_tera: Optional[str] = None, opp_tera: Optional[str] = None) -> Dict:
+                own_tera: Optional[str] = None, opp_tera: Optional[str] = None,
+                own_evs: Optional[Dict] = None, own_nature: Optional[str] = None,
+                opp_evs: Optional[Dict] = None, opp_nature: Optional[str] = None) -> Dict:
     """"Will the OPPONENT's move KO me?" — the reverse direction (attacker =
     opponent, defender = my active mon). Same machinery as :func:`move_ko`; the
     slots are swapped so ``own_*`` overrides apply to MY mon and ``opp_*`` to
     theirs. Lets the heuristic weigh "will I survive this turn?" when choosing.
+
+    6.6a: the ``*_evs`` / ``*_nature`` overrides (the opponent's posterior
+    top-1 build) are now accepted too, so the DEFENSIVE calc is as informed as
+    the OFFENSIVE one (:func:`move_ko`) — the strategy_posterior variant passes
+    the same top-1 posterior both ways.
     """
     own = (ctx.get("own", {}) or {}).get(own_slot, {}) or {}
     opp = (ctx.get("opponent", {}) or {}).get(opp_slot, {}) or {}
     defender = block_to_calc_mon(own, ability=own_ability, item=own_item,
-                                 tera_type=own_tera)
+                                 tera_type=own_tera, evs=own_evs, nature=own_nature)
     attacker = block_to_calc_mon(opp, ability=opp_ability, item=opp_item,
-                                 tera_type=opp_tera)
+                                 tera_type=opp_tera, evs=opp_evs, nature=opp_nature)
     hp = _hp_frac(own)
     if not attacker or not defender:
         # the REAL case here: the ATTACKER is the opponent, whose species is

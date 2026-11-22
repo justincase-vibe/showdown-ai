@@ -519,6 +519,10 @@ def rank_moves(
     opp_item: Optional[str] = None,
     own_tera: Optional[str] = None,
     opp_tera: Optional[str] = None,
+    own_evs: Optional[Dict] = None,
+    own_nature: Optional[str] = None,
+    opp_evs: Optional[Dict] = None,
+    opp_nature: Optional[str] = None,
 ) -> Dict:
     """Rank ``moves`` best-first by KO likelihood, then raw damage.
 
@@ -549,7 +553,9 @@ def rank_moves(
                 ctx, own_slot, opp_slot, move, fmt=fmt, gen=gen, calc_fn=calc_fn,
                 own_ability=own_ability, own_item=own_item,
                 opp_ability=opp_ability, opp_item=opp_item,
-                own_tera=own_tera, opp_tera=opp_tera)
+                own_tera=own_tera, opp_tera=opp_tera,
+                own_evs=own_evs, own_nature=own_nature,
+                opp_evs=opp_evs, opp_nature=opp_nature)
         return assessments[key]
 
     # stable sort: equal (tier, magnitude) keeps the caller's order (determinism)
@@ -592,6 +598,10 @@ def threat_assessment(
     opp_item: Optional[str] = None,
     own_tera: Optional[str] = None,
     opp_tera: Optional[str] = None,
+    own_evs: Optional[Dict] = None,
+    own_nature: Optional[str] = None,
+    opp_evs: Optional[Dict] = None,
+    opp_nature: Optional[str] = None,
 ) -> Dict:
     """'Will I be KO'd by the opponent's move?' — the DEFENSIVE half of the crux.
 
@@ -620,7 +630,9 @@ def threat_assessment(
                 ctx, own_slot, opp_slot, move, fmt=fmt, gen=gen, calc_fn=calc_fn,
                 own_ability=own_ability, own_item=own_item,
                 opp_ability=opp_ability, opp_item=opp_item,
-                own_tera=own_tera, opp_tera=opp_tera)
+                own_tera=own_tera, opp_tera=opp_tera,
+                own_evs=own_evs, own_nature=own_nature,
+                opp_evs=opp_evs, opp_nature=opp_nature)
         return assessments[key]
 
     worst_move, worst_score = None, None
@@ -631,6 +643,48 @@ def threat_assessment(
             worst_move, worst_score = m, s
     return {"threat": _threat_label(assessments[_move_key(worst_move)]),
             "worst": worst_move, "assessments": assessments}
+
+
+def _posterior_overrides(ctx: Dict, own_slot: str, opp_slot: str) -> Dict:
+    """6.6a — the opponent's TOP-1 posterior hidden info (ability/evs/nature) as
+    calc overrides, EXACTLY mirroring what the net's action features pass
+    (``net.action_features``: top-1 ability + evs + nature, own/opp tera from
+    the blocks, own evs/nature from the known build). This is what makes the
+    ``strategy_posterior`` variant see the SAME information as the net (the
+    user's 6.6a: "so both sides see the same information"), so the M1 comparison
+    (net vs strategy_posterior) is fair.
+
+    The plain ``strategy`` yardstick does NOT call this (it passes known-info
+    only) — so the existing yardstick is unchanged. Empty dict when no posterior
+    is available (degrade to the known-info-only path)."""
+    own = (ctx.get("own") or {}).get(own_slot) or {}
+    opp = (ctx.get("opponent") or {}).get(opp_slot) or {}
+    ov: Dict = {}
+    # opponent top-1 posterior (the hidden build — the dominant pick carries the
+    # signal, the same deterministic top-1 the net uses; ties -> first, stable).
+    best, best_w = None, -1.0
+    for cand in (opp.get("posterior") or []):
+        w = float(cand.get("weight", 0.0) or 0.0)
+        if w > best_w:
+            best_w, best = w, cand
+    if best is not None:
+        if best.get("ability"):
+            ov["opp_ability"] = best["ability"]
+        if best.get("evs"):
+            ov["opp_evs"] = best["evs"]
+        if best.get("nature"):
+            ov["opp_nature"] = best["nature"]
+    # tera (own always known; opponent known once revealed) — public info
+    if own.get("tera"):
+        ov["own_tera"] = own["tera"]
+    if opp.get("tera"):
+        ov["opp_tera"] = opp["tera"]
+    # own EVs/nature (the known build; the net passes these the same way)
+    if own.get("evs"):
+        ov["own_evs"] = own["evs"]
+    if own.get("nature"):
+        ov["own_nature"] = own["nature"]
+    return ov
 
 
 def choose_action(

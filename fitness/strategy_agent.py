@@ -68,11 +68,17 @@ class StrategyAgent:
 
     def __init__(self, fmt: str = "gen9ou", gen: int = 9,
                  switch_threshold: float = 0.30,
-                 seed: Optional[int] = None) -> None:
+                 seed: Optional[int] = None,
+                 posterior: bool = False) -> None:
         self.fmt = fmt
         self.gen = int(gen)
         self.switch_threshold = float(switch_threshold)
         self.seed = seed
+        # 6.6a: when True, the damage calc uses the opponent's TOP-1 posterior
+        # (ability/evs/nature) + tera — the SAME information the net's action
+        # features see (a fair M1 comparison). The plain ``strategy`` yardstick
+        # keeps posterior=False (known-info only, UNCHANGED).
+        self.posterior = bool(posterior)
 
     def decide(self, battle: Any, fmt: Optional[str] = None,
                vocabs: Optional[Any] = None) -> Optional[Dict]:
@@ -103,10 +109,21 @@ class StrategyAgent:
         if ctx is None:
             return acts[0]  # belief unavailable: first legal (the A3.1 degrade)
 
-        from fitness.strategy import choose_action
+        from fitness.strategy import choose_action, _posterior_overrides
+        # 6.6a: the posterior variant feeds the opponent's top-1 build into the
+        # calc (mirroring the net); the plain yardstick passes known-info only.
+        ov: Dict = {}
+        if self.posterior:
+            own_slot = (ctx.get("active") or {}).get("p1")
+            opp_slot = (ctx.get("active") or {}).get("p2")
+            if own_slot is not None and opp_slot is not None:
+                try:
+                    ov = _posterior_overrides(ctx, own_slot, opp_slot) or {}
+                except Exception:  # noqa: BLE001 — degrade to known-info only
+                    ov = {}
         try:
             act = choose_action(ctx, acts, fmt=fmt, gen=self.gen,
-                                switch_threshold=self.switch_threshold)
+                                switch_threshold=self.switch_threshold, **ov)
         except Exception:  # noqa: BLE001 — choose_action should not raise;
             act = None     # belt-and-braces: degrade to a legal action
         return act if act is not None else acts[0]
@@ -129,3 +146,26 @@ def strategy_reference(fmt: str = "gen9ou",
         name="strategy", make_agent=make_agent, weight=2.0,
         description=("ctx brain (choose_action rules 1-4: hazard/status/"
                      "setup/resist-switch) — the Step-6 teacher heuristic"))
+
+
+def strategy_posterior_reference(fmt: str = "gen9ou",
+                                 gen: Optional[int] = None) -> "Any":
+    """6.6a — the strategy bot WITH the opponent's TOP-1 posterior build
+    (ability/evs/nature/tera) fed into the damage calc — the SAME information
+    the net's action features see. This is the SECOND yardstick for the M1 gate
+    (the user's 6.6a: report the net against BOTH ``strategy`` and
+    ``strategy_posterior``; the existing ``strategy`` yardstick is unchanged).
+    Same weight (2.0) and rules (1-4) as ``strategy_reference`` — the ONLY
+    difference is the informed damage calc. Lazy, like the others."""
+    from .ladder import Reference
+
+    g = int(gen) if gen is not None else _gen_from_format(fmt)
+
+    def make_agent(seed: Optional[int] = None) -> StrategyAgent:
+        return StrategyAgent(fmt=fmt, gen=g, seed=seed, posterior=True)
+
+    return Reference(
+        name="strategy_posterior", make_agent=make_agent, weight=2.0,
+        description=("ctx brain (rules 1-4) WITH the opponent's top-1 posterior"
+                     " build in the damage calc — the fair-comparison yardstick "
+                     "for the M1 gate (same info the net sees)"))
