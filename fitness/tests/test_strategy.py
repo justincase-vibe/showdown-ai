@@ -232,6 +232,89 @@ def test_rank_degrades_stably_when_opponent_unknown():
     assert r["assessments"]["ember"]["unknown_defender"] is True
 
 
+# ══ Step 6.2 — rule 1: hazard setup (hermetic; fake calc, no Node/GPU) ══
+
+def test_hazard_rule_sets_stealthrock_over_weak_attack():
+    # SR legal + our field clean + opp (venusaur) not Flying -> hazard over 15% attack
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    a = S.choose_action(ctx, _acts(["Stealth Rock", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Stealth Rock"
+
+
+def test_hazard_rule_skips_when_our_field_already_has_rocks():
+    calc, _ = fake_calc({"hammer": (40, 60, 50)})
+    ctx = _full_ctx(opp_moves=())
+    ctx["field"]["stealthrock"] = {"p1": True}
+    a = S.choose_action(ctx, _acts(["Stealth Rock", "hammer"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "hammer"
+
+
+def test_hazard_rule_skips_when_guaranteed_ko_threat():
+    # opp hammer (min 85) KOs my 80%-HP active -> guaranteed_ko -> attack, not SR
+    calc, _ = fake_calc({"hammer": (85, 95, 90), "ember": (10, 20, 15)})
+    ctx = _full_ctx(own_hp=0.8, opp_moves=("hammer",))
+    a = S.choose_action(ctx, _acts(["Stealth Rock", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_hazard_rule_skips_spikes_vs_flying_opponent():
+    # pidgeot is Flying -> immune to Spikes (immune fraction 1.0 > 0.5) -> attack
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp="pidgeot", opp_moves=())
+    a = S.choose_action(ctx, _acts(["Spikes", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_hazard_rule_sets_when_half_bench_vulnerable():
+    # active pidgeot (Flying/immune) + bench venusaur (vulnerable) ->
+    # immune fraction 0.5 <= 0.5 -> hazards still set (design: >= half vulnerable)
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp="pidgeot", opp_moves=())
+    ctx["opponent"]["p2b"] = {"species": "venusaur", "hp_frac": 0.0,
+                               "statuses": [], "boosts": {}, "moves": []}
+    a = S.choose_action(ctx, _acts(["Spikes", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Spikes"
+
+
+def test_hazard_rule_toxic_spikes_name_set_covers_db_gap():
+    # toxicspikes is NOT in legality.HAZARDS — the canonical name set must
+    # still classify it. Steel (magnezone) immune -> attack; Water -> set.
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx_steel = _full_ctx(opp="magnezone", opp_moves=())
+    a = S.choose_action(ctx_steel, _acts(["Toxic Spikes", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+    ctx_water = _full_ctx(opp="blastoise", opp_moves=())
+    b = S.choose_action(ctx_water, _acts(["Toxic Spikes", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert b["move"] == "Toxic Spikes"
+
+
+def test_hazard_rule_ignores_opp_side_hazards():
+    # the OPPONENT's rocks (p2) must not block MY setup — only p1 does.
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    ctx["field"]["stealthrock"] = {"p2": True}
+    a = S.choose_action(ctx, _acts(["Stealth Rock", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Stealth Rock"
+
+
+def test_hazard_rule_sticky_web_untracked_field_still_set():
+    # sticky web is not in the belief field -> always "clean" -> free value
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    a = S.choose_action(ctx, _acts(["Sticky Web", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Sticky Web"
+
+
 def test_rank_empty_moves():
     r = S.rank_moves(_ctx(), "p1a", "p2a", [], fmt="gen9ou",
                      calc_fn=lambda *a, **k: _dmg(0, 0, 0))

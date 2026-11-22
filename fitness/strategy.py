@@ -33,6 +33,129 @@ from . import ko as _ko
 
 __all__ = ["ko_ladder_score", "rank_moves", "threat_assessment", "choose_action"]
 
+# ══════════════════ Step 6.2 — rule 1: hazard setup ══════════════════
+
+#: Canonical hazard-move names (lowercased, spaces/dashes stripped). Covers
+#: the DB ``is_hazard`` flag AND the toxicspikes data gap (legality.HAZARDS
+#: omits it). Hazard identities are stable across gens, so a name set is the
+#: hermetic primary source; an injectable ``move_db`` is the generic fallback.
+_HAZARD_NAMES = frozenset({
+    "stealthrock", "spikes", "toxicspikes",
+    "stickyweb", "stickybarb", "stickybarbedsteel",
+})
+
+#: hazard id -> (ctx['field'] key, kind) that shows it ALREADY UP on OUR side
+#: (p1). Sticky Web is untracked in the belief field -> absent here, so it is
+#: always treated as "clean" (setting it is free value).
+_HAZARD_FIELD = {
+    "stealthrock": ("stealthrock", "bool"),
+    "spikes": ("spikes", "layers"),
+    "toxicspikes": ("toxicspikes", "layers"),
+}
+
+#: hazard id -> opponent TYPES immune to it (type-based only; ability
+#: immunities like Levitate are not in the ctx — degrade: attempt anyway).
+_HAZARD_IMMUNE_TYPES = {
+    "stealthrock": frozenset({"Flying"}),
+    "spikes": frozenset({"Flying"}),
+    "toxicspikes": frozenset({"Poison", "Ground", "Steel"}),
+    "stickyweb": frozenset(),
+    "stickybarb": frozenset(),
+    "stickybarbedsteel": frozenset(),
+}
+
+
+def _norm_move(name: Any) -> str:
+    """A move name normalized for hazard identity (lower, no spaces/dashes)."""
+    return str(name or "").lower().replace(" ", "").replace("-", "")
+
+
+def _hazard_id(name: Any, move_db: Optional[Any] = None) -> Optional[str]:
+    """Resolve a move name to a canonical hazard id, or None if not a hazard.
+
+    Primary: the canonical name set (hermetic, covers the toxicspikes DB gap).
+    Fallback: an injectable ``move_db(name, gen)`` — its ``is_hazard`` flag
+    catches hazards the name set doesn't know (future-proof). Never raises.
+    """
+    n = _norm_move(name)
+    if n in _HAZARD_NAMES:
+        return n
+    if move_db is not None:
+        try:
+            if (move_db(n, 9) or {}).get("is_hazard"):
+                return n
+        except Exception:  # noqa: BLE001 — a lookup failure is "not a hazard"
+            pass
+    return None
+
+
+def _opp_species(ctx: Dict) -> List[str]:
+    """All KNOWN opponent species in the ctx (active + bench), deduped."""
+    out: List[str] = []
+    for block in (ctx.get("opponent") or {}).values():
+        block = block or {}
+        sp = block.get("species") or block.get("name")
+        if sp and sp not in out:
+            out.append(sp)
+    return out
+
+
+def _hazard_field_clean(hid: str, ctx: Dict) -> bool:
+    """Is the hazard NOT already up on OUR side (p1)? Untracked hazards
+    (sticky web) count as clean — setting them is free value."""
+    spec = _HAZARD_FIELD.get(hid)
+    if spec is None:
+        return True
+    key, kind = spec
+    val = ((ctx.get("field") or {}).get(key) or {}).get("p1")
+    if kind == "bool":
+        return not val
+    return int(val or 0) <= 0
+
+
+def _hazard_broadly_effective(hid: str, ctx: Dict, gen: int) -> bool:
+    """≥ half of the KNOWN opponent species are not type-immune to the hazard.
+
+    No known species (or all lookups fail) -> True: hazards are free value
+    with no info, so a teacher still sets them (6.1 design note)."""
+    immune_to = _HAZARD_IMMUNE_TYPES.get(hid, frozenset())
+    if not immune_to:
+        return True
+    known: List[bool] = []
+    for sp in _opp_species(ctx):
+        types = set(_species_types(sp, gen))
+        if types:
+            known.append(bool(types & immune_to))
+    if not known:
+        return True
+    return (sum(known) / len(known)) <= 0.5
+
+
+def _pick_hazard(moves: List, ctx: Dict, threat: str,
+                 gen: int = 9, move_db: Optional[Any] = None) -> Optional[Dict]:
+    """Rule 1 (Step 6.2): the best legal HAZARD action, or None.
+
+    ``moves`` is the ``[(action_dict, move_name), ...]`` list from
+    :func:`choose_action`. A hazard is chosen when: it is legal, its field is
+    not already up on OUR side, it is broadly effective against the known
+    opponent (active + bench), and I am NOT guaranteed-KO'd this turn (a
+    guaranteed threat -> attack/switch instead; a can_ko risk for free hazard
+    value is acceptable — conservative per the 6.1 design note). Pure +
+    degrading: any lookup failure just skips that candidate; never raises.
+    """
+    if threat == "guaranteed_ko":
+        return None
+    for act, name in moves:
+        hid = _hazard_id(name, move_db)
+        if hid is None:
+            continue
+        if not _hazard_field_clean(hid, ctx):
+            continue
+        if not _hazard_broadly_effective(hid, ctx, gen):
+            continue
+        return act
+    return None
+
 #: per-gen cached species -> display-types (lazy; avoids a net.legality import
 #: at module load so ``import fitness.strategy`` stays torch-free / cheap).
 _TYPES_BY_GEN: Dict[int, Dict[str, tuple]] = {}
@@ -253,6 +376,7 @@ def choose_action(
     gen: int = 9,
     calc_fn: Optional[Any] = None,
     switch_threshold: float = 0.30,
+    move_db: Optional[Any] = None,
     **overrides: Any,
 ) -> Optional[Dict]:
     """The COMPLETE KO-aware decision, ENTIRELY from the ``get_context()``
@@ -261,9 +385,13 @@ def choose_action(
     Decision order (deterministic):
       1. no actions -> ``None`` (pass/wait).
       2. no moves legal (force-switch) -> the best switch-in (hazard-aware).
-      3. threatened — the opponent's likely move would ``guaranteed_ko`` / 
+      3. threatened — the opponent's likely move would ``guaranteed_ko`` /
          ``can_ko`` MY active — OR my active HP <= ``switch_threshold``, and a
          switch is legal -> switch (hazard-aware target).
+      3.5 (Step 6.2) hazard setup — a hazard move is legal, its field is not
+         already up on our side, the known opponent is not majority-immune,
+         and I am not guaranteed-KO'd -> set the hazard (free match-long value;
+         the concept the net must learn to value).
       4. otherwise -> the best damaging move (``rank_moves``: KO ladder, then
          damage; a status move sorts last).
 
@@ -314,6 +442,14 @@ def choose_action(
     if switches and (threat in ("guaranteed_ko", "can_ko")
                      or own_hp <= switch_threshold):
         return _pick_switch(switches, ctx, gen)
+
+    # 3.5) hazard setup (Step 6.2, rule 1): free match-long value — set rocks/
+    # spikes/toxic spikes when legal, our field is clean, the known opponent
+    # is not majority-immune, and I am not guaranteed-KO'd (with a switch
+    # legal, the threat rule above would have fired first).
+    hazard = _pick_hazard(moves, ctx, threat, gen, move_db=move_db)
+    if hazard is not None:
+        return hazard
 
     # 4) offensive: the best damaging move (KO ladder, then damage).
     names = [name for _a, name in moves]
