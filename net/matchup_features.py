@@ -152,11 +152,15 @@ def _calc_mon(block: Dict, ability: Optional[str]) -> Dict:
     """Map a ``get_context()`` mon block to an @smogon/calc dict (no I/O).
 
     Uses ``fitness.ko.block_to_calc_mon`` (the ONE block->calc mapping) with the
-    top-1 ability override. Returns ``{}`` when no species is known (the caller
-    skips the calc for that mon).
+    top-1 ability override. Also passes the block's known tera type and item
+    (public info — own side always known, opponent side known once revealed).
+    Returns ``{}`` when no species is known (the caller skips the calc for
+    that mon).
     """
     from fitness.ko import block_to_calc_mon
-    return block_to_calc_mon(block, ability=ability)
+    tera = (block.get("tera") or None) or None
+    item = (block.get("item") or None) or None
+    return block_to_calc_mon(block, ability=ability, tera_type=tera, item=item)
 
 
 def build_own_matchup(ctx: Dict, fmt: str, gen: int = 9, *,

@@ -262,12 +262,20 @@ def build_action_damage(ctx: Dict, actions: Optional[List[Dict]], fmt: str,
     opp_ability = _top_ability(opp)
     outspeed = _active_outspeed(own, opp, opp_ability, fmt, gen, speed_fn=speed_fn)
 
+    # Tera types from the belief (public info: own tera is always known;
+    # opponent tera is known once revealed). Passed to the calc so STAB
+    # and defensive typing are correct.
+    own_tera = (own.get("tera") or None) or None
+    opp_tera = (opp.get("tera") or None) or None
+
     for i, act in enumerate(acts):
         if act.get("kind") in _MOVE_KINDS and act.get("move"):
             try:
                 assessment = _ko.move_ko(
                     ctx, own_slot, opp_slot, act["move"],
-                    fmt=fmt, gen=gen, opp_ability=opp_ability, calc_fn=calc_fn)
+                    fmt=fmt, gen=gen, opp_ability=opp_ability,
+                    own_tera=own_tera, opp_tera=opp_tera,
+                    calc_fn=calc_fn)
             except Exception:  # noqa: BLE001 — a calc failure degrades to zero
                 assessment = {}
             out[i] = action_damage_row(assessment, outspeed)
