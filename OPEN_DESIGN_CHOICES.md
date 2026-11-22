@@ -1827,3 +1827,138 @@ Script: `scratch/step5_spike/roundtrip.js` (node, uses fork `dist/sim`).
   (b) investigate the policy head's top-1 (e.g. entropy coefficient is keeping the
   distribution flat — median gap 0.072 — which is fine for PPO but makes argmax
   nearly a coin-flip among 3-4 moves).
+
+## Step 6.1 — design note: upgrading the scripted bot (2026-11-22)
+
+Goal (per Claude review, Step 6): make the scripted teacher/opponent teach the
+missing concepts — hazards, status, setup, resist-switching. Design ONLY in this
+sub-step; implementation is 6.2–6.5, one rule at a time, each with hermetic
+tests, then 6.6 A/B validation.
+
+### Audit conclusions (verified against the code)
+- Current `choose_action` order: (1) no actions→None; (2) force-switch→
+  `_pick_switch` (hazard-aware); (3) threat∈{guaranteed,can_ko} or hp≤0.30 →
+  switch; (4) `rank_moves` best damaging move. **It never sets hazards/screens/
+  boosts/status.** Status moves always sort last (0 damage).
+- Move DB already classifies what rules 1 & 3 need, per-gen
+  (`legality/lookup.get_move(name, gen)`): `category`, `boosts` (parsed JSON,
+  e.g. `{"atk":2}`), `is_hazard`, `is_screen`, `is_tailwind`. No curated move
+  lists needed for those two rules.
+- Belief ctx (`get_context()`): opponent bench IS present — bench mons placed at
+  `ctx['opponent']` p2b..p2f with `species` (preview-derived), `hp_frac 0.0`,
+  `maxhp None`. So the "opponent bench not weak to this hazard" predicate can
+  read species from those blocks. Field block carries `stealthrock`/
+  `toxicspikes`/screens per side.
+- Rule 2 gap: the DB has **no flag** saying which status a status move inflicts
+  (Wish/Wisp/Thunder Wave/Toxic/Sleep Powder...). Decided: a small curated
+  static map move_id→status in `fitness/strategy.py` (a dozen or so entries;
+  parsing `desc` text is brittle across gens — rejected).
+- `choose_action` must stay pure/fork-neutral: rules are predicates over
+  `(ctx, acts, move_db_flags, calc)`; all degrade to today's behavior when
+  signals are missing; never raise.
+
+### Decision priority (final)
+1. no actions → None. 2. force-switch → `_pick_switch` (now also resist-aware,
+   rule 4). 3. threatened (guaranteed/can_ko) or hp≤0.30 → switch (rule 4).
+4. **NEW rule 1: hazard set** — if a hazard move is legal, hazard not yet on
+   our side, hazard is broadly effective vs the known opponent bench, and the
+   opponent cannot guarantee-KO me this turn (threat ∉ {guaranteed_ko}).
+5. **NEW rule 3: setup** — if a positive stat-boost move is legal (DB `boosts`
+   has any value ≥ +2... actually ANY positive boost), threat == 'safe' (NOT
+   can_ko — a setup turn must be near-safe), and I can't be OHKO'd by the
+   opponent's top move.
+6. **NEW rule 2: status** — if a status-inflicting move is legal, target lacks
+   that status, target isn't immune (type chart), and threat ∉
+   {guaranteed_ko, can_ko} (paralysis/sleep is worth taking a bad roll on;
+   burn is not).
+7. else → `rank_moves` best damaging move (unchanged).
+
+Rationale: KO attacks still win when they exist (they'd have triggered the
+threat rule anyway); hazards > setup > status > attack when no KO is on the
+board, because hazards have the highest match-long value in our observation
+set and the net must learn to value them (user: "it currently disregards
+hazards as viable strategy").
+
+### Rule 1 — hazards (6.2)
+- Predicate: ∃ legal move m with `get_move(m,gen).is_hazard`; the matching
+  field flag (stealthrock / toxicspikes; Spikes tracked under the same
+  `is_hazard` flag — field key TBD in impl, check `field` dict) is NOT set for
+  p1; and the hazard is "broadly effective": ≥ half of the KNOWN opponent
+  species (active + bench blocks with non-empty `species`) take ≥0.5× damage
+  from it (Stealth Rock: Rock/Steel/Flying/Bug; Toxic Spikes: not Poison/
+  Ground/Steel/Immune; Spikes: same).
+- Gate: `threat_assessment` ∉ {guaranteed_ko} (setup-safe); if the opponent
+  would can_ko me, prefer attacking (risk acceptable) — keep it conservative.
+- Degrade: unknown bench (no species blocks) → still set if hazard move is
+  legal and field is clean (hazards are free value with no info).
+- Test cases: (a) Stealth Rock legal + field clean + bench mixed types → SR
+  chosen over a 10% attack; (b) field already has SR → attack instead; (c)
+  guaranteed_ko threat → attack/switch, not SR; (d) all-bench-immune (e.g.
+  full Flying+Ground vs Spikes, none vs SR) → attack; (e) only one switch
+  legal, no moves → force-switch path unchanged.
+
+### Rule 2 — status (6.3)
+- Map (static, move_id → status): will_o_wisp→burn, thunder_wave→paralysis,
+  toxic→toxic, toxin→toxic, sleep_powder→sleep, spore→sleep, hypnosis→sleep,
+  leech_seed→leech_seed, acid_armor→(n/a, skip), glare→paralysis, yawn→n/a,
+  sticky_bomb? (no). Keep to the common OU set; unknown move → rule not
+  applicable.
+- Predicate: ∃ legal move m in the map; `ctx['opponent'][opp_slot]['statuses']`
+  does not include m's status (and not `toxic` when m→toxic; `brn`→burn etc. —
+  use canonical status names; verify what belief records); immunity: target
+  types ∩ immune types(m) == ∅ using `get_type_chart(gen)` (burn: Fire+Water
+  immune via status-immunity rules; paralyz: Electric; sleep: Psychic; toxic:
+  Poison/Steel; leech_seed: Grass/has Ability? — degrade: if immune → skip).
+- Gate: threat ∉ {guaranteed_ko, can_ko}.
+- Degrade: opponent species unknown → statuses known but types unknown →
+  still paralyze/burn (most immunities are type-based; unknown types ⇒ attempt
+  is a coin flip, acceptable for a scripted teacher? DECIDE IN 6.3: lean
+  attempt, since teacher should show the behavior).
+- Test cases: (a) Will-O-Wisp legal, opp Electric-types absent, safe → chosen
+  over weak attack; (b) opp already burned → not chosen; (c) opp is a Fire
+  type → not chosen; (d) guaranteed_ko threat → not chosen; (e) Thunder Wave
+  vs Electric → not chosen.
+
+### Rule 3 — setup (6.4)
+- Predicate: ∃ legal move m with `boosts` containing a positive entry
+  (self-boost: Swords Dance / Calm Mind / Dragon Dance / Quiver Dance /
+  Nasty Plot / Curse...).
+- Gate: threat == 'safe' (strict — not even can_ko: a wasted setup turn is
+  worse than chip damage). If threat == 'unknown' (opponent can't be
+  assessed), do NOT setup (conservative; the teacher should not gamble).
+- Order within rule: strongest single boost first (Swords Dance +2 over a +1),
+  tie → earlier in legal order.
+- Test cases: (a) Swords Dance legal + safe → chosen over a 20% attack;
+  (b) can_ko threat → attack/switch, not setup; (c) unknown threat → attack;
+  (d) multiple boost moves → strongest first.
+
+### Rule 4 — resist-switch, belief-weighted (6.5)
+- Enhance `_pick_switch` scoring: for each switch candidate species, compute
+  effectiveness of the opponent's top_moves against its types
+  (`get_type_chart(gen)`); weight each move by its posterior weight if the
+  belief exposes per-move weights (else uniform).
+  Score = − Σ weight × max(1.0, effectiveness). Existing hazard penalties
+  (SR / Toxic Spikes) ADD to the same score (a hazard ≈ a constant "move" the
+  opponent always uses).
+- Degrade: no opp moves known or no types → current hazard-only scoring, then
+  first legal.
+- Test cases: (a) two switches, one resists the opp top move → chosen over an
+  equally-hazard-safe one; (b) SR on field can flip the choice (hazard
+  penalty outweighs resist); (c) no opp-move info → hazard-only path (existing
+  tests still pass — regression guard).
+
+### Wiring + validation (6.6)
+- New rules live INSIDE `choose_action` (single entry point; thin-wrapper
+  contract preserved). No public signature change beyond an optional
+  `move_db` injection for tests (default `legality.lookup.get_move`; tests
+  inject stubs to stay hermetic / gen-free).
+- 6.6: A/B old vs new heuristic vs random, ~10–20 battles each, recorded to
+  `runs/learning_check.csv` under label `step6-heuristic`. The NEW heuristic
+  becomes the standing Step 8 yardstick; the old after-step3 numbers stay as
+  history.
+
+### Open (decide during 6.2–6.5, not before)
+- Exact `field` dict keys for Spikes vs Stealth Rock (read belief/state.py
+  field bookkeeping at impl time).
+- Canonical status names the belief records (`burn` vs `brn`).
+- Whether rule 2 attempts on unknown types (teacher-behavior argument: yes).
