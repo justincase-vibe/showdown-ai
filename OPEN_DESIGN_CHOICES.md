@@ -1471,7 +1471,7 @@ SPLIT: 3.3a = move/tera rows (+ zero switch rows), full wiring + tests + commit.
         (Checksum is pinned ONCE in 3.3a — the field/shape is added once; 3.3b only
          changes content + tests, no re-pin.)
 
-PROGRESS (3.3a DONE, 2026-11-22):
+PROGRESS (3.3a + 3.3b DONE, 2026-11-22):
 - 3.3a: DONE — `net/action_features.py` (build_action_damage / action_damage_row /
   _top_ability / _active_outspeed), registry +1 field (action_damage 12x9), encoder
   places it (zero-fill when absent, stays pure/DB-free), model folds it into the
@@ -1483,6 +1483,27 @@ PROGRESS (3.3a DONE, 2026-11-22):
   re-pinned (739e1d03, 1033->1141 elements, 23->24 fields); +net/tests/
   test_action_features.py (11 tests, hermetic via injected calc/speed fakes).
   net 172 passed; league+fitness 186 passed.
+- 3.3b: DONE — SWITCH rows now carry entry-hazard % (dim 8) + the incoming mon's
+  damage from the opponent's TOP move (dims 0-5,7). New helpers in
+  net/action_features.py: `hazard_pct` (Stealth Rock 12.5% x per-type Rock
+  effectiveness from the D29 DB chart; Spikes 12.5%/layer, Ground types take
+  none; Toxic Spikes 12.5%/layer; Sticky Web excluded — it is speed, not
+  damage; unknown types degrade to neutral 1.0; never raises) and
+  `switch_damage_row` (same 9-dim vocabulary as move rows; dim 6 outspeed
+  stays 0 for switches). The switch branch builds the calc dicts DIRECTLY via
+  block_to_calc_mon (attacker = opp active at its HP fraction, defender = the
+  INCOMING mon at its own HP, 1.0 for a fresh bench mon) instead of
+  fitness.ko.opp_move_ko — that function scores vs MY ACTIVE's HP, which is the
+  wrong defender for a switch row; re-deriving the KO verdicts via
+  ko_assessment(raw, defender_hp_frac=hp_in) is what the
+  test_switch_ko_verdicts_use_incoming_hp_not_active guard pins. +11 tests in
+  test_action_features.py (21 total, hermetic via injected calc/speed/chart
+  fakes + one real-calc/DB integration test). BUG CAUGHT during 3.3b: my first
+  hazard test values were computed from memory of the type chart, not the DB
+  chart (e.g. assumed Ground 2x Rock); the DB chart (D29) is the source of
+  truth and the tests now pin its actual cells (Garchomp 6.25%, Magcargo 25%
+  SR hazard). No registry/checksum change (shape landed in 3.3a). net 182
+  passed; league+fitness 186 passed.
 - GUARD FIX (3.3a bug-hunt): test_s42 overfit-32 + state-conditioning FAILED at the
   fixed seed-0 (loss pinned at ln(2)=0.693, the constant-policy attractor).
   Diagnosed (scratch/probe_33_overfit.py) as MULTI-BASIN init-sensitivity, NOT a

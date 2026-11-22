@@ -37,7 +37,8 @@ import numpy as np
 
 from .registry import K_ACTION_DAMAGE, MAX_ACTIONS
 
-__all__ = ["ACTION_DAMAGE_NAMES", "build_action_damage", "action_damage_row"]
+__all__ = ["ACTION_DAMAGE_NAMES", "build_action_damage",
+           "action_damage_row", "switch_damage_row", "hazard_pct"]
 
 #: the exact registry field this module fills (the encoder's zero-fill set).
 ACTION_DAMAGE_NAMES: tuple = ("action_damage",)
@@ -113,14 +114,102 @@ def action_damage_row(assessment: Optional[Dict], outspeed: float) -> np.ndarray
     return v
 
 
+def _top_move(opp_block: Optional[Dict]) -> Optional[str]:
+    """The opponent's TOP move (marginal over the posterior), or None.
+
+    ``top_moves`` is the belief's ranked marginal (``get_context()``); the first
+    entry is the deterministic pick (3.3 DESIGN: TOP-1 opp move for the switch
+    dims). Falls back to the first observed move so a belief without a posterior
+    (e.g. no learnset row) still yields a signal instead of silence.
+    """
+    tops = (opp_block or {}).get("top_moves") or []
+    if tops:
+        return tops[0]
+    used = (opp_block or {}).get("moves") or []
+    return used[0] if used else None
+
+
+def hazard_pct(incoming_species: str, field: Dict, gen: int,
+               type_chart: Optional[Dict] = None) -> float:
+    """Entry-hazard damage the INCOMING mon takes (as a 0-1 fraction of MAX HP).
+
+    Only the three DAMAGE hazards: Stealth Rock (12.5% x Rock effectiveness on
+    each of the incoming mon's types, per the type chart), Spikes (12.5% per
+    layer; Ground-type mons take none) and Toxic Spikes (12.5% per layer). Sticky Web is
+    speed, not damage, and is excluded. Hazard state is read from the belief's
+    ``field`` (``stealthrock``/``spikes``/``toxicspikes`` are the opponent's
+    hazards ON MY side — the damage my switch-in takes). Unknown types degrade
+    to a neutral effectiveness of 1.0 per missing type; a calc/chart failure
+    returns 0.0 (no hazard signal), never raises.
+    """
+    f = field or {}
+    try:
+        if not f:
+            return 0.0
+        sp = (incoming_species or "").strip().lower()
+        types: tuple = ()
+        if sp:
+            try:
+                from net.static_features import _species_data  # gen-9 fallback
+                types = tuple((_species_data(sp, gen) or {}).get("types") or ())
+            except Exception:  # noqa: BLE001
+                types = ()
+        pct = 0.0
+        if f.get("spikes"):
+            layers = int(f["spikes"].get("p1", 0) or 0)
+            ground = any(t.lower() == "ground" for t in types)
+            if layers and not ground:
+                pct += 0.125 * min(layers, 3)
+        if f.get("toxicspikes"):
+            layers = int(f["toxicspikes"].get("p1", 0) or 0)
+            if layers:
+                pct += 0.125 * min(layers, 2)
+        if f.get("stealthrock") and f["stealthrock"].get("p1"):
+            if type_chart is None:
+                from legality.lookup import get_type_chart
+                type_chart = get_type_chart(gen)
+            eff = 1.0
+            if types:
+                for t in types[:2]:
+                    row = type_chart.get(t) or {}
+                    eff *= float(row.get("Rock", 1.0))
+            pct += 0.125 * eff
+        return min(pct, 1.0)
+    except Exception:  # noqa: BLE001 — a hazard bug degrades to zero, not a raise
+        return 0.0
+
+
+def switch_damage_row(assessment: Optional[Dict], hazard: float) -> np.ndarray:
+    """One K_ACTION_DAMAGE row for a SWITCH action.
+
+    Dims 0-5,7 carry the incoming mon's damage from the opponent's top move
+    (same ``ko_assessment`` shape as move rows, so the net reads the same
+    vocabulary across action kinds); dim 8 (``dmg_in``) carries the entry-hazard
+    fraction. Degrades to all-zero when there is no signal.
+    """
+    v = np.zeros(K_ACTION_DAMAGE, dtype=np.float32)
+    a = assessment or {}
+    v[0] = _clamp01(float(a.get("min_pct", 0.0) or 0.0) / 100.0)
+    v[1] = _clamp01(float(a.get("max_pct", 0.0) or 0.0) / 100.0)
+    v[2] = _clamp01(float(a.get("expected_pct", 0.0) or 0.0) / 100.0)
+    v[3] = 1.0 if a.get("can_ko") else 0.0
+    v[4] = 1.0 if a.get("guaranteed_ko") else 0.0
+    v[5] = 1.0 if a.get("expected_ko") else 0.0
+    v[7] = 1.0 if a.get("immune") else 0.0
+    v[8] = _clamp01(hazard)
+    return v
+
+
 def build_action_damage(ctx: Dict, actions: Optional[List[Dict]], fmt: str,
                         gen: int = 9, *,
                         calc_fn: Optional[Callable] = None,
-                        speed_fn: Optional[Callable] = None) -> Dict[str, np.ndarray]:
+                        speed_fn: Optional[Callable] = None,
+                        type_chart: Optional[Dict] = None) -> Dict[str, np.ndarray]:
     """The ONE ``action_damage`` field for a ``get_context()`` snapshot.
 
     3.3a: MOVE/TERA rows are filled (will-this-KO + outspeed via the ONE calc);
-    SWITCH rows are zero (3.3b adds entry-hazard % + incoming damage). Any action
+    3.3b: SWITCH rows carry entry-hazard % on the incoming mon (dim 8) + the
+    incoming mon's damage from the opponent's TOP move (dims 0-5,7). Any action
     that cannot be assessed degrades to a zero row — never raises.
 
     :param ctx: the ``belief.state.BeliefState.get_context()`` dict.
@@ -130,6 +219,8 @@ def build_action_damage(ctx: Dict, actions: Optional[List[Dict]], fmt: str,
     :param calc_fn: injectable (tests) — the damage calc (``fitness.ko``'s
                     ``calc_fn`` contract); defaults to the shared ``damage.calc``.
     :param speed_fn: injectable (tests) — ``fn(a, d) -> 'a'|'b'|'tie'``.
+    :param type_chart: injectable (tests) — ``get_type_chart``-shaped
+                       ``{defending: {attacking: factor}}``; defaults to the DB.
     """
     out = np.zeros((MAX_ACTIONS, K_ACTION_DAMAGE), np.float32)
     acts = list(actions or [])[:MAX_ACTIONS]
@@ -155,5 +246,40 @@ def build_action_damage(ctx: Dict, actions: Optional[List[Dict]], fmt: str,
             except Exception:  # noqa: BLE001 — a calc failure degrades to zero
                 assessment = {}
             out[i] = action_damage_row(assessment, outspeed)
-        # switch/transform rows stay zero in 3.3a (3.3b fills the switch rows).
+            continue
+        if act.get("kind") == "switch" and act.get("species"):
+            # 3.3b: switch row = hazard % on the incoming mon + incoming damage
+            # from the opponent's top move (defender = the incoming mon at full
+            # HP; attacker = the opponent's active at ITS current HP fraction,
+            # since the calc reads the attacker's ``hp`` from the block).
+            sp = act["species"]
+            haz = hazard_pct(sp, ctx.get("field"), gen, type_chart=type_chart)
+            assessment = None
+            top_move = _top_move(opp)
+            if top_move:
+                try:
+                    # Build the calc dicts DIRECTLY (not via fitness.ko's
+                    # opp_move_ko, which maps the opponent block's ``name`` key
+                    # while the belief's opponent blocks carry ``species`` —
+                    # that mismatch would silently degrade every switch row to
+                    # zero). Attacker = the opp active at its current HP
+                    # fraction; defender = the INCOMING mon (``name`` key on the
+                    # own side), scored at its own HP (1.0 for a fresh bench
+                    # mon).
+                    attacker = _ko.block_to_calc_mon(
+                        opp, ability=opp_ability)
+                    inc = (ctx.get("own", {}) or {}).get(sp) or {}
+                    inc_block = {"name": inc.get("name") or sp}
+                    hp_in = inc.get("hp_frac")
+                    hp_in = 1.0 if hp_in is None else max(0.0, min(1.0, float(hp_in)))
+                    inc_block["hp"] = hp_in
+                    if not attacker or not inc_block.get("name"):
+                        assessment = None
+                    else:
+                        calc_fn = calc_fn or _ko._default_calc()
+                        raw = calc_fn(attacker, inc_block, top_move, fmt=fmt, gen=gen)
+                        assessment = _ko.ko_assessment(raw, defender_hp_frac=hp_in)
+                except Exception:  # noqa: BLE001 — degrade to hazard-only row
+                    assessment = None
+            out[i] = switch_damage_row(assessment, haz)
     return {"action_damage": out}
