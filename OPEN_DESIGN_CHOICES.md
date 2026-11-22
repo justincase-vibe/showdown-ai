@@ -1962,3 +1962,51 @@ hazards as viable strategy").
   field bookkeeping at impl time).
 - Canonical status names the belief records (`burn` vs `brn`).
 - Whether rule 2 attempts on unknown types (teacher-behavior argument: yes).
+
+## Review absorption (2026-11-22) — gate size, cost wording, format strategy, milestones
+
+External review of the current position; decisions recorded:
+
+### 1. Gate size (AGREED — the review is right)
+- n=50 is a PILOT (95% CI ~ +/-14 pts; only detects huge differences). The
+  running `step4-vs-pool` n=50 run stays as the directional pilot; it is NOT
+  the gate.
+- **Official Step 8 gate = >= 400 battles per comparison** (Step 8 protocol).
+  Optional later: sequential early-stopping (stop on clear win/loss) to save
+  wall-time — not built yet.
+
+### 2. Sim-clone cost wording (CORRECTED)
+- Measured (spike, CPU): serialize ~0.2-0.4 ms; deserialize ~0.4-1.1 ms;
+  **clone + one full turn ~0.5-0.6 ms median** (well under the 50 ms/clone
+  design target).
+- The "1.0-1.5 s/turn" figure is the **entire search** (36 cells x 20 belief
+  samples ~ 720 forward evals), NOT per clone. Search is feasible; re-measure
+  on GPU before Step 5 impl.
+
+### 3. Format strategy (AGREED — one format first)
+- Current: gen9ou/3v3 pool is the ONLY training format. Keep it.
+- After the in-format gate passes: **evaluate on unseen teams** (the fixed
+  pool invites overfitting) — add to the harness before any scaling claims.
+- Then parameterize (one model per format / format conditioning). One net for
+  all formats is NOT the near-term goal.
+- Singles across generations = reachable second step. Doubles = new action +
+  observation space, later.
+- Note: calc/move-data-derived features transfer across formats better than
+  learned ID embeddings do (already the design's bias).
+
+### 4. Decision-matrix logging (ADOPTED)
+- Log per turn: legal actions + policy probs + expected damage per action +
+  value estimate. Becomes the payoff matrix once search exists; also the
+  "what is the bot considering" inspector. Implementation: a logging hook in
+  the Step 8 harness / league driver (small, after Step 6).
+- Scenario curves (per-concept scores) rise per concept = the concept-level
+  readout.
+
+### 5. MILESTONES (numbered, with bars)
+- **M1** policy beats max-damage AND the (new, Step 6) heuristic, **>= 400
+  battles per comparison** (Step 8 harness, recorded in learning_check.csv).
+- **M2** scenario scores rise per concept (hazards / status / setup /
+  resist-switch) — measured via the decision-matrix logging + targeted
+  scenario battles.
+- **M3** search beats policy-only by a measured margin (Step 5, after M1/M2).
+- **M4** second format, evaluated on UNSEEN teams (after M1).
