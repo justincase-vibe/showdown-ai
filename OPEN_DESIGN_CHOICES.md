@@ -2022,3 +2022,26 @@ External review of the current position; decisions recorded:
 - Bug caught by tests (fixed pre-commit): `_species_types` returns a TUPLE;
   `tuple & frozenset` raises TypeError -> wrap in `set()`. The "degrade, never
   raise" contract needs type discipline, not just try/except.
+
+### Step 6.2 completion — field-setup family (user-flagged, 2026-11-22)
+- **User-caught bug:** the initial 6.2 assumed Sticky Web was untracked in the
+  belief; it IS tracked (`stickyweb` per-side bool). "Always clean" would have
+  made the bot re-pick Sticky Web every turn. Fixed + regression test.
+- **Clarification:** Toxic Spikes WAS handled (name set + `toxicspikes`
+  layer check + immunity); only the DB *flag* gap existed (legality.HAZARDS
+  omits it) — covered by the name set.
+- **Rule 1 extended to the whole field-setup family** via one declarative
+  table `_FIELD_SETUP_RULES` (move names -> field key + side/shared kind),
+  priority order hazards > tailwind > screens > terrain:
+  - per-side setups (hazards/screens/tailwind): clean iff p1 not set — the
+    OPPONENT's setup does not block ours;
+  - terrain is SHARED: any active terrain (either side's) blocks re-setting;
+  - `tailwind_side` is a SIDE STRING in the belief, not a dict — special-cased
+    (a second caught-before-run type bug).
+- Screens (Reflect/Light Screen/Aurora Veil) now set when clean; they have no
+  type immunities (they help, they don't hurt) so the effectiveness check is
+  vacuously true for them.
+- OPEN (minor, decide in 6.4/6.6 if it matters): hazard-priority is currently
+  global (a legal Stealth Rock always beats a legal Tailwind). A human might
+  tailwind in a speed race even with rocks available. Acceptable for a
+  teacher; revisit if the A/B (6.6) shows it hurting.

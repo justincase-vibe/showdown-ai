@@ -306,13 +306,75 @@ def test_hazard_rule_ignores_opp_side_hazards():
     assert a["move"] == "Stealth Rock"
 
 
-def test_hazard_rule_sticky_web_untracked_field_still_set():
-    # sticky web is not in the belief field -> always "clean" -> free value
+def test_hazard_rule_sets_sticky_web_when_field_clean():
+    # sticky web IS tracked in the belief (per-side bool) -> clean -> free value
     calc, _ = fake_calc({"ember": (10, 20, 15)})
     ctx = _full_ctx(opp_moves=())
     a = S.choose_action(ctx, _acts(["Sticky Web", "ember"]),
                         fmt="gen9ou", calc_fn=calc)
     assert a["move"] == "Sticky Web"
+
+
+def test_hazard_rule_skips_sticky_web_when_already_up_on_our_side():
+    # THE BUG the user caught: "untracked -> always clean" would re-pick
+    # Sticky Web every turn. belief tracks it per-side -> must skip.
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    ctx["field"]["stickyweb"] = {"p1": True}
+    a = S.choose_action(ctx, _acts(["Sticky Web", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_hazard_rule_skips_tailwind_when_already_our_side():
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    ctx["field"]["tailwind_side"] = "p1"
+    a = S.choose_action(ctx, _acts(["Tailwind", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_hazard_rule_sets_tailwind_when_clean_and_skips_opp_side_only():
+    # opp's tailwind (p2) must not block ours — per-side setup
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    ctx["field"]["tailwind_side"] = "p2"
+    a = S.choose_action(ctx, _acts(["Tailwind", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Tailwind"
+
+
+def test_hazard_rule_skips_terrain_when_any_terrain_active():
+    # terrain is SHARED state: the OPPONENT's Grassy Terrain also blocks ours
+    # (re-setting would be a wasted turn)
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    ctx["field"]["terrain"] = "electric"
+    a = S.choose_action(ctx, _acts(["Misty Terrain", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_hazard_rule_sets_terrain_when_none_active():
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    ctx["field"]["terrain"] = None
+    a = S.choose_action(ctx, _acts(["Psychic Terrain", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Psychic Terrain"
+
+
+def test_hazard_rule_priority_hazards_over_tailwind_over_terrain():
+    # several legal setups -> match-long value order: hazard > tailwind > terrain
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    acts = _acts(["Psychic Terrain", "Tailwind", "Stealth Rock", "ember"])
+    a = S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Stealth Rock"
+    acts2 = _acts(["Psychic Terrain", "Tailwind", "ember"])
+    b = S.choose_action(ctx, acts2, fmt="gen9ou", calc_fn=calc)
+    assert b["move"] == "Tailwind"
 
 
 def test_rank_empty_moves():

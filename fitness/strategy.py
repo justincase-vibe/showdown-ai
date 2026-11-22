@@ -51,10 +51,13 @@ _HAZARD_FIELD = {
     "stealthrock": ("stealthrock", "bool"),
     "spikes": ("spikes", "layers"),
     "toxicspikes": ("toxicspikes", "layers"),
+    "stickyweb": ("stickyweb", "bool"),  # belief DOES track it (per-side bool)
 }
 
-#: hazard id -> opponent TYPES immune to it (type-based only; ability
-#: immunities like Levitate are not in the ctx — degrade: attempt anyway).
+#: field-setup id -> opponent TYPES immune / not-affected (type-based only;
+#: ability immunities like Levitate are not in the ctx — degrade: attempt
+#: anyway). Empty set = universally applicable (tailwind / terrain / screens
+#: "work" on everyone; they just help different types more).
 _HAZARD_IMMUNE_TYPES = {
     "stealthrock": frozenset({"Flying"}),
     "spikes": frozenset({"Flying"}),
@@ -62,7 +65,38 @@ _HAZARD_IMMUNE_TYPES = {
     "stickyweb": frozenset(),
     "stickybarb": frozenset(),
     "stickybarbedsteel": frozenset(),
+    "tailwind": frozenset(),
+    "reflect": frozenset(),
+    "lightscreen": frozenset(),
+    "auroraveil": frozenset(),
+    "grassytterrain": frozenset(),
+    "psychicterrain": frozenset(),
+    "mistyterrain": frozenset(),
 }
+
+#: Declarative field-setup table — the ONE place that knows which move sets
+#: which field state and HOW to read "already up" from ctx['field'] (the
+#: belief tracks ALL of these: stickyweb/safeguard per-side bool, spikes/TS
+#: per-side layers, tailwind_side, terrain, screens per-side bool).
+#: ``kind``: "side" = per-side key (clean iff p1 is not set); "shared" = one
+#: global key (terrain) — set by EITHER side, so the opponent's terrain also
+#: blocks ours (re-setting it is a wasted turn).
+#: ORDER = priority when several setup moves are legal (hazards carry the
+#: highest match-long value; screens are free damage reduction; terrain is the
+#: most situation-dependent).
+_FIELD_SETUP_RULES = (
+    ("stealthrock",   ("stealthrock", "stealth rock"),                       "side",   "stealthrock"),
+    ("spikes",        ("spikes",),                                           "side",   "spikes"),
+    ("toxicspikes",   ("toxicspikes", "toxic spikes"),                       "side",   "toxicspikes"),
+    ("stickyweb",     ("stickyweb", "sticky web", "sticky barb", "sticky barbed steel"), "side", "stickyweb"),
+    ("tailwind",      ("tailwind",),                                         "side",   "tailwind_side"),
+    ("reflect",       ("reflect",),                                          "side",   "reflect"),
+    ("lightscreen",   ("lightscreen", "light screen"),                       "side",   "lightscreen"),
+    ("auroraveil",    ("auroraveil", "aurora veil"),                         "side",   "auroraveil"),
+    ("grassytterrain", ("grassytterrain", "grassy terrain", "grassy field"), "shared", "terrain"),
+    ("psychicterrain", ("psychicterrain", "psychic terrain"),                "shared", "terrain"),
+    ("mistyterrain",   ("mistyterrain", "misty terrain"),                    "shared", "terrain"),
+)
 
 
 def _norm_move(name: Any) -> str:
@@ -70,21 +104,25 @@ def _norm_move(name: Any) -> str:
     return str(name or "").lower().replace(" ", "").replace("-", "")
 
 
-def _hazard_id(name: Any, move_db: Optional[Any] = None) -> Optional[str]:
-    """Resolve a move name to a canonical hazard id, or None if not a hazard.
+def _field_setup_id(name: Any, move_db: Optional[Any] = None) -> Optional[str]:
+    """Resolve a move name to a canonical field-setup id (hazard/screen/
+    tailwind/terrain), or None if the move sets no tracked field state.
 
-    Primary: the canonical name set (hermetic, covers the toxicspikes DB gap).
-    Fallback: an injectable ``move_db(name, gen)`` — its ``is_hazard`` flag
-    catches hazards the name set doesn't know (future-proof). Never raises.
+    Primary: the declarative table (hermetic, covers the DB flag gaps —
+    e.g. toxicspikes is missing from legality.HAZARDS). Fallback: an
+    injectable ``move_db`` — its ``is_hazard`` / ``is_screen`` /
+    ``is_tailwind`` flags catch setups the table doesn't know. Never raises.
     """
     n = _norm_move(name)
-    if n in _HAZARD_NAMES:
-        return n
+    for fid, names, _kind, _key in _FIELD_SETUP_RULES:
+        if n in names:
+            return fid
     if move_db is not None:
         try:
-            if (move_db(n, 9) or {}).get("is_hazard"):
+            d = move_db(n, 9) or {}
+            if d.get("is_hazard") or d.get("is_screen") or d.get("is_tailwind"):
                 return n
-        except Exception:  # noqa: BLE001 — a lookup failure is "not a hazard"
+        except Exception:  # noqa: BLE001 — a lookup failure is "not a setup"
             pass
     return None
 
@@ -100,25 +138,41 @@ def _opp_species(ctx: Dict) -> List[str]:
     return out
 
 
-def _hazard_field_clean(hid: str, ctx: Dict) -> bool:
-    """Is the hazard NOT already up on OUR side (p1)? Untracked hazards
-    (sticky web) count as clean — setting them is free value."""
-    spec = _HAZARD_FIELD.get(hid)
-    if spec is None:
+def _field_setup_clean(fid: str, ctx: Dict) -> bool:
+    """Is the field state NOT already established?
+
+    ``side`` setups (hazards/screens/tailwind): clean iff OUR side (p1) has
+    not set them (the opponent's rocks don't block ours). ``shared`` setups
+    (terrain): clean iff the global key is empty — the OPPONENT'S terrain also
+    blocks ours (re-setting it would be a wasted turn).
+    Unknown ids (a move_db fallback) degrade to clean: attempt anyway.
+    """
+    rule = next((r for r in _FIELD_SETUP_RULES if r[0] == fid), None)
+    if rule is None:
         return True
-    key, kind = spec
-    val = ((ctx.get("field") or {}).get(key) or {}).get("p1")
-    if kind == "bool":
+    _fid, _names, kind, key = rule
+    f = ctx.get("field") or {}
+    if kind == "side":
+        raw = f.get(key)
+        if key == "tailwind_side":
+            # belief stores the SIDE as a string ("p1"/"p2"/None), not a dict
+            return raw != "p1"
+        val = (raw or {}).get("p1")
+    else:  # shared (terrain)
+        val = f.get(key)
+    if isinstance(val, bool):
         return not val
-    return int(val or 0) <= 0
+    if isinstance(val, int):
+        return val <= 0
+    return not val  # terrain string / missing -> not established
 
 
-def _hazard_broadly_effective(hid: str, ctx: Dict, gen: int) -> bool:
+def _hazard_broadly_effective(fid: str, ctx: Dict, gen: int) -> bool:
     """≥ half of the KNOWN opponent species are not type-immune to the hazard.
 
     No known species (or all lookups fail) -> True: hazards are free value
     with no info, so a teacher still sets them (6.1 design note)."""
-    immune_to = _HAZARD_IMMUNE_TYPES.get(hid, frozenset())
+    immune_to = _HAZARD_IMMUNE_TYPES.get(fid, frozenset())
     if not immune_to:
         return True
     known: List[bool] = []
@@ -133,27 +187,32 @@ def _hazard_broadly_effective(hid: str, ctx: Dict, gen: int) -> bool:
 
 def _pick_hazard(moves: List, ctx: Dict, threat: str,
                  gen: int = 9, move_db: Optional[Any] = None) -> Optional[Dict]:
-    """Rule 1 (Step 6.2): the best legal HAZARD action, or None.
+    """Rule 1 (Step 6.2, completed): the best legal FIELD-SETUP action
+    (hazard / tailwind / screen / terrain), or None. Name kept for
+    compatibility; the rule covers the whole field-setup family.
 
     ``moves`` is the ``[(action_dict, move_name), ...]`` list from
-    :func:`choose_action`. A hazard is chosen when: it is legal, its field is
-    not already up on OUR side, it is broadly effective against the known
-    opponent (active + bench), and I am NOT guaranteed-KO'd this turn (a
-    guaranteed threat -> attack/switch instead; a can_ko risk for free hazard
-    value is acceptable — conservative per the 6.1 design note). Pure +
-    degrading: any lookup failure just skips that candidate; never raises.
+    :func:`choose_action`. Chosen when: a setup move is legal, its field state
+    is not already established (per-side setups: not on OUR side; terrain:
+    no terrain at all), it is broadly effective against the known opponent
+    (hazards only; screens/tailwind/terrain affect everyone), and I am NOT
+    guaranteed-KO'd this turn (a guaranteed threat -> attack/switch instead;
+    a can_ko risk for free field value is acceptable — 6.1 design note).
+    Priority among several legal setups: hazards > tailwind > screens >
+    terrain (match-long value ordering). Pure + degrading: any lookup failure
+    just skips that candidate; never raises.
     """
     if threat == "guaranteed_ko":
         return None
-    for act, name in moves:
-        hid = _hazard_id(name, move_db)
-        if hid is None:
-            continue
-        if not _hazard_field_clean(hid, ctx):
-            continue
-        if not _hazard_broadly_effective(hid, ctx, gen):
-            continue
-        return act
+    for fid, _names, _kind, _key in _FIELD_SETUP_RULES:  # priority order
+        for act, name in moves:
+            if _field_setup_id(name, move_db) != fid:
+                continue
+            if not _field_setup_clean(fid, ctx):
+                continue
+            if not _hazard_broadly_effective(fid, ctx, gen):
+                continue
+            return act
     return None
 
 #: per-gen cached species -> display-types (lazy; avoids a net.legality import
