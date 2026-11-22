@@ -161,7 +161,7 @@ def test_gui_league_fields_build_and_config(shared_root):
     assert app._current_mode == "league"
     # every field exists
     for attr in ("_league_fmt", "_league_pairing", "_league_best_of",
-                 "_league_greedy", "_league_learning", "_league_device",
+                 "_league_greedy_eval", "_league_greedy_train", "_league_learning", "_league_device",
                  "_league_n_servers", "_league_per_server", "_league_port_base",
                  "_league_max_steps", "_league_seed", "_league_tree"):
         assert getattr(app, attr) is not None, attr

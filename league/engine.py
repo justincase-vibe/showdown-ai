@@ -23,8 +23,10 @@ Semantics (pinned by tests):
     NO ELO update — it is counted in the summary, not silently a draw;
   * ``a1_won XOR a2_won`` decides the winner; both/neither = DRAW
     (max_steps hit or an undecided end state) — standard ELO score 0.5;
-  * default ``greedy=True`` (argmax) so ELO reflects the checkpoints' actual
-    strength, not sampling noise.
+  * collection mode: EVAL/elo measurement is argmax (``greedy_eval``, default
+    True — deterministic ELO); LEARNING-mode collection SAMPLES
+    (``greedy_train``, default False) — PPO on argmax-collected data collapses
+    the policy onto its strongest move (review Step 1, 2026-11-22).
 
 CPU-first: no torch at import time (``net`` is pulled lazily, same discipline
 as ``pool`` / ``control.selfplay``).
@@ -59,7 +61,9 @@ class LeagueConfig:
     battle_format: str = "gen9ou"
     seed: int = 20261119
     max_steps: int = 200
-    greedy: bool = True                   # argmax policy (deterministic ELO)
+    greedy_eval: bool = True              # argmax for ELO/eval (deterministic measurement)
+    greedy_train: bool = False            # learning-mode collection: SAMPLE (PPO needs a
+                                          # stochastic policy — argmax data collapses)
     device: str = "cpu"                   # agent inference device (cpu|cuda)
     # ── the learning loop (D103) ───────────────────────────────────────
     learning: bool = True                 # True: bots buffer experience (the league
@@ -99,6 +103,16 @@ class LeagueConfig:
     def from_dict(cls, d: Dict[str, Any]) -> "LeagueConfig":
         known = {f.name for f in dataclasses.fields(cls)}
         return cls(**{k: v for k, v in (d or {}).items() if k in known})
+
+
+def collection_greedy(cfg: LeagueConfig) -> bool:
+    """The argmax/sample mode for DECISION COLLECTION at the battle seam.
+
+    Learning mode collects SAMPLED decisions — PPO needs a stochastic
+    policy; training on argmax-collected data collapses the net onto its
+    strongest move (review Step 1, 2026-11-22). Eval-only mode stays argmax:
+    ELO measures the checkpoints' actual strength, not sampling noise."""
+    return cfg.greedy_train if cfg.learning else cfg.greedy_eval
 
 
 class LeagueRun:
@@ -251,7 +265,7 @@ class LeagueRun:
                 return play_agent_battle_on(
                     server_cfg, agent_a=agent_a, agent_b=agent_b,
                     fmt=fmt, seed=seed, vocabs=vocabs, max_steps=max_steps,
-                    greedy=self.cfg.greedy, log=self.log, on_finish=on_finish,
+                    greedy=collection_greedy(self.cfg), log=self.log, on_finish=on_finish,
                     # D102 guard: N back-to-back decision errors -> the battle
                     # FAILS LOUD (trips the run's max_consecutive_errors) instead
                     # of silently pass-festing all n_battles (the device bug).
@@ -301,7 +315,7 @@ class LeagueRun:
                 return play_agent_battle_on(
                     server_cfg, agent_a=agent_a, agent_b=agent_b,
                     fmt=fmt, seed=seed, vocabs=vocabs, max_steps=max_steps,
-                    greedy=self.cfg.greedy, log=self.log, on_finish=on_finish,
+                    greedy=collection_greedy(self.cfg), log=self.log, on_finish=on_finish,
                     max_decision_errors=self.cfg.max_consecutive_errors,
                     # the collection seam: each side's real decisions land in
                     # its bot's collector (finalize + buffer in _on_battle).

@@ -48,7 +48,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     runstate.write_status(rd, state="starting", pid=os.getpid())
     log(f"start run={rd.name} fmt={cfg.battle_format} pairing={cfg.pairing} "
-        f"best_of={cfg.best_of} greedy={cfg.greedy} device={cfg.device} "
+        f"best_of={cfg.best_of} learning={cfg.learning} "
+        f"greedy_eval={cfg.greedy_eval} greedy_train={cfg.greedy_train} "
+        f"device={cfg.device} "
         f"servers={cfg.n_servers}x{cfg.per_server} port_base={cfg.port_base}")
 
     run = LeagueRun(cfg, run_dir=rd, log=log)

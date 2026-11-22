@@ -399,7 +399,11 @@ class DesktopApp:
             r, 0, "Pairing:", "round_robin",
             "combo", values=["round_robin", "elo_weighted"]); r += 1
         self._league_best_of = self._add_field(r, 0, "Best of:", 1, "int"); r += 1
-        self._league_greedy = self._add_field(r, 0, "Greedy:", True, "bool"); r += 1
+        # Review Step 1 (2026-11-22): split the collection mode — EVAL/elo stays
+        # argmax (deterministic); LEARNING-mode collection must SAMPLE (PPO on
+        # argmax-collected data collapses the policy onto its strongest move).
+        self._league_greedy_eval = self._add_field(r, 0, "Greedy (eval/ELO):", True, "bool"); r += 1
+        self._league_greedy_train = self._add_field(r, 0, "Greedy (training):", False, "bool"); r += 1
         # D103: the league IS the self-improving loop (bots buffer experience);
         # uncheck for the legacy eval-only run (rank checkpoints, no capture).
         self._league_learning = self._add_field(
@@ -880,7 +884,8 @@ class DesktopApp:
                 "battle_format": self._league_fmt.get(),
                 "pairing": self._league_pairing.get(),
                 "best_of": self._league_best_of.get(),
-                "greedy": self._league_greedy.get(),
+                "greedy_eval": self._league_greedy_eval.get(),
+                "greedy_train": self._league_greedy_train.get(),
                 "learning": self._league_learning.get(),
                 # D103 step 3: the round-end PPO knobs (fields added in
                 # _build_league_fields; LeagueConfig carries the same names).

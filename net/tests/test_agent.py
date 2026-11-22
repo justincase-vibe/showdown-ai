@@ -167,3 +167,28 @@ def test_action_is_list_member_at_index(net, obs):
     for _ in range(50):
         d = a.act(obs, ACTIONS)
         assert d.action is ACTIONS[d.action_index]
+
+
+# ── collection contract (review Step 1, 2026-11-22) ─────────────────────
+# The league's PPO data must come from SAMPLED decisions: with a FIXED net,
+# 200 sampled decisions must include non-argmax actions and carry entropy
+# > 0, while argmax (eval/ELO) decisions stay fully deterministic. A net
+# trained on argmax-collected data collapses onto its strongest move.
+def test_collection_sampling_diversity_and_entropy(vocabs):
+    obs = encode_context(make_ctx(), vocabs, ACTIONS)
+    a = PokeAgent(make_random_net(vocabs, "cpu", seed=4321), seed=101)
+    argmax = a.act(obs, ACTIONS, deterministic=True).action_index
+
+    sampled = [a.act(obs, ACTIONS, deterministic=False).action_index
+               for _ in range(200)]
+    assert any(i != argmax for i in sampled), \
+        f"all 200 sampled decisions were argmax {argmax} — no exploration data"
+    assert len(set(sampled)) >= 2, "sampling produced only one action"
+
+    entropies = [a.act(obs, ACTIONS, deterministic=False).entropy
+                 for _ in range(20)]
+    assert all(e > 0.0 for e in entropies), f"entropy must be > 0, got {entropies}"
+
+    greedy = [a.act(obs, ACTIONS, deterministic=True).action_index
+              for _ in range(200)]
+    assert len(set(greedy)) == 1, "eval (argmax) decisions must stay deterministic"

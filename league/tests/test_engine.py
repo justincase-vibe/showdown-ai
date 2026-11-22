@@ -442,7 +442,8 @@ def test_eval_mode_run_has_no_learning_side_effects(tmp_path):
 
 
 def test_config_roundtrip():
-    cfg = LeagueConfig(pairing="elo_weighted", best_of=2, greedy=False,
+    cfg = LeagueConfig(pairing="elo_weighted", best_of=2,
+                       greedy_eval=False, greedy_train=True,
                        device="cuda", n_workers=4, max_consecutive_errors=7,
                        learning=False)
     same = LeagueConfig.from_dict(cfg.to_dict())
