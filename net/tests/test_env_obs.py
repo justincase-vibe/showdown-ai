@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from net.env import _zero_obs, build_obs, my_side
+from net.env import _zero_obs, build_ctx, build_obs, my_side
 from net.tests.test_s41 import make_ctx, make_vocabs
 
 
@@ -85,6 +85,20 @@ def test_build_obs_defensive_on_garbage_log():
     assert set(obs.keys()) == set(_zero_obs().keys())
     for arr in obs.values():
         assert np.isfinite(arr.astype(float)).all()
+
+
+def test_build_ctx_returns_snapshot_or_degrades_never_raises():
+    # build_ctx is the belief half of build_obs (ONE pipeline, ONE source of
+    # truth — the ctx-based brain in fitness.strategy_agent reuses it). It
+    # returns the get_context() snapshot (top-level keys always present) or
+    # None on a broken log — never raises (the caller degrades).
+    b = _FakeBattle(active=_FakeMon("garchomp", moves=["outrage"]),
+                    avail_moves=["outrage"])
+    ctx = build_ctx(b, "gen9ou", "p1")
+    assert isinstance(ctx, dict)
+    for key in ("turn", "fainted", "active", "field", "own", "opponent"):
+        assert key in ctx
+    assert build_ctx(_FakeBattle(log=RuntimeError("boom")), "gen9ou", "p1") is None
 
 
 def test_build_obs_raises_when_vocabs_is_none():

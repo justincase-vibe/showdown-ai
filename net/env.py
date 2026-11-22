@@ -326,6 +326,36 @@ def _gen_from_format(fmt: str) -> int:
     return int(m.group(1)) if m else 9
 
 
+def build_ctx(battle: Any, fmt: str, side: str = "p1") -> Optional[Dict]:
+    """The belief ``get_context()`` snapshot for ``battle`` from ``side``'s POV.
+
+    The belief half of :func:`build_obs`, factored into a free function so a
+    decision policy that consumes the STRUCTURED context (the ctx-based brain
+    in ``fitness.strategy_agent``) reuses the EXACT belief pipeline the
+    observation uses — one source of truth, no second replay-log parser.
+    ``side`` uses the same p1/p2 semantics as :func:`build_obs` (a p2 player's
+    log is side-swapped first). Returns ``None`` on any failure (the caller
+    decides how to degrade) — never raises.
+    """
+    try:
+        text = battle._build_replay_log()
+        if side == "p2":
+            text = swap_sides(text)
+        lines = [ln for ln in text.split("\n") if ln.strip()]
+        own_team = _own_team_from_battle(battle) or _own_team_from_log(lines)
+        belief = BeliefState(fmt, own_team=own_team)
+        adapter = LogAdapter()
+        for line in lines:
+            ev = adapter.feed_line(line)
+            if ev is None or isinstance(ev, Unknown):
+                continue
+            belief.update(ev)
+        return belief.get_context()
+    except Exception as exc:  # noqa: BLE001 — the caller degrades, never dies
+        log.warning("build_ctx failed (%s: %s)", type(exc).__name__, exc)
+        return None
+
+
 def build_obs(battle: Any, fmt: str, vocabs: Any, side: str = "p1") -> Dict[str, np.ndarray]:
     """The net's observation for ``battle`` from ``side``'s perspective.
 
@@ -352,20 +382,10 @@ def build_obs(battle: Any, fmt: str, vocabs: Any, side: str = "p1") -> Dict[str,
             "(e.g. net.vocab_db.build_vocabs()). None is a wiring error, not a "
             "transient data gap; degrading to a blind zero-obs here would "
             "silently play a bot that sees nothing (the A3 self-check bug).")
+    ctx = build_ctx(battle, fmt, side)
+    if ctx is None:
+        return _zero_obs()
     try:
-        text = battle._build_replay_log()
-        if side == "p2":
-            text = swap_sides(text)
-        lines = [ln for ln in text.split("\n") if ln.strip()]
-        own_team = _own_team_from_battle(battle) or _own_team_from_log(lines)
-        belief = BeliefState(fmt, own_team=own_team)
-        adapter = LogAdapter()
-        for line in lines:
-            ev = adapter.feed_line(line)
-            if ev is None or isinstance(ev, Unknown):
-                continue
-            belief.update(ev)
-        ctx = belief.get_context()
         actions = build_action_list(battle)
         # Step 3 (review 2026-11-22): precompute the mon/move static features
         # (legality DB) AND the per-action damage/KO/speed block (the ONE calc
