@@ -72,6 +72,8 @@ _HAZARD_IMMUNE_TYPES = {
     "grassytterrain": frozenset(),
     "psychicterrain": frozenset(),
     "mistyterrain": frozenset(),
+    "trickroom": frozenset(),
+    "wonderroom": frozenset(),
 }
 
 #: Declarative field-setup table — the ONE place that knows which move sets
@@ -96,6 +98,13 @@ _FIELD_SETUP_RULES = (
     ("grassytterrain", ("grassytterrain", "grassy terrain", "grassy field"), "shared", "terrain"),
     ("psychicterrain", ("psychicterrain", "psychic terrain"),                "shared", "terrain"),
     ("mistyterrain",   ("mistyterrain", "misty terrain"),                    "shared", "terrain"),
+    # pseudo-weather / field-wide rooms (SHARED booleans in the belief): last
+    # in priority — the most team-committing setups (a teacher should only
+    # show them when nothing better is legal). NOTE: the net sees the TR flag
+    # as an obs channel, but `damage.calc.compare_speed` is NOT TR-aware (see
+    # OPEN_DESIGN_CHOICES) — the outspeed feature is stale under TR.
+    ("trickroom",      ("trickroom", "trick room"),                          "shared", "trickroom"),
+    ("wonderroom",     ("wonderroom", "wonder room"),                        "shared", "wonderroom"),
 )
 
 
@@ -199,8 +208,10 @@ def _pick_hazard(moves: List, ctx: Dict, threat: str,
     guaranteed-KO'd this turn (a guaranteed threat -> attack/switch instead;
     a can_ko risk for free field value is acceptable — 6.1 design note).
     Priority among several legal setups: hazards > tailwind > screens >
-    terrain (match-long value ordering). Pure + degrading: any lookup failure
-    just skips that candidate; never raises.
+    terrain > rooms (Trick/Wonder Room last — the most team-committing
+    setups, so a teacher only shows them when nothing better is legal).
+    Pure + degrading: any lookup failure just skips that candidate;
+    never raises.
     """
     if threat == "guaranteed_ko":
         return None

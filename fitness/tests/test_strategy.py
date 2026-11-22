@@ -377,6 +377,65 @@ def test_hazard_rule_priority_hazards_over_tailwind_over_terrain():
     assert b["move"] == "Tailwind"
 
 
+def test_hazard_rule_sets_aurora_veil_when_clean():
+    # auroraveil: per-side bool in the belief; clean -> free value (Ice wall)
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    a = S.choose_action(ctx, _acts(["Aurora Veil", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Aurora Veil"
+
+
+def test_hazard_rule_skips_aurora_veil_when_already_our_side():
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    ctx["field"]["auroraveil"] = {"p1": True}
+    a = S.choose_action(ctx, _acts(["Aurora Veil", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_hazard_rule_sets_trick_room_when_clean():
+    # trick room: SHARED boolean in the belief; no room -> legal to set
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    ctx["field"]["trickroom"] = False
+    a = S.choose_action(ctx, _acts(["Trick Room", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Trick Room"
+
+
+def test_hazard_rule_skips_trick_room_when_already_active():
+    # TR active (either side set it) -> re-setting is a wasted turn
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    ctx["field"]["trickroom"] = True
+    a = S.choose_action(ctx, _acts(["Trick Room", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_hazard_rule_skips_wonder_room_when_active():
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    ctx["field"]["wonderroom"] = True
+    a = S.choose_action(ctx, _acts(["Wonder Room", "ember"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "ember"
+
+
+def test_hazard_rule_rooms_rank_below_hazards_and_terrain():
+    # priority: hazard > terrain > room — Trick Room is the LAST resort setup
+    calc, _ = fake_calc({"ember": (10, 20, 15)})
+    ctx = _full_ctx(opp_moves=())
+    acts = _acts(["Trick Room", "Stealth Rock", "ember"])
+    a = S.choose_action(ctx, acts, fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Stealth Rock"
+    acts2 = _acts(["Trick Room", "Psychic Terrain", "ember"])
+    b = S.choose_action(ctx, acts2, fmt="gen9ou", calc_fn=calc)
+    assert b["move"] == "Psychic Terrain"
+
+
 def test_rank_empty_moves():
     r = S.rank_moves(_ctx(), "p1a", "p2a", [], fmt="gen9ou",
                      calc_fn=lambda *a, **k: _dmg(0, 0, 0))

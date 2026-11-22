@@ -2045,3 +2045,24 @@ External review of the current position; decisions recorded:
   global (a legal Stealth Rock always beats a legal Tailwind). A human might
   tailwind in a speed race even with rocks available. Acceptable for a
   teacher; revisit if the A/B (6.6) shows it hurting.
+
+### Step 6.2 audit — stat buffs / Aurora Veil / Trick Room (user-requested)
+- **Aurora Veil:** belief tracks it (per-side bool, event handler covers it);
+  rule table had it BUT no test pinned it (same gap class as sticky web) —
+  now covered: set-when-clean + skip-when-ours tests.
+- **Trick Room / Wonder Room:** belief tracks both (field-wide booleans via
+  the generic no-side handler) but the rule table was MISSING them — the bot
+  could never set them. Now added as SHARED-kind setups, LAST in priority
+  (most team-committing).
+- **Stat buffs (own setup, e.g. Swords Dance): NOT YET IMPLEMENTED — that is
+  rule 3, scheduled as Step 6.4** (designed in the 6.1 note: positive
+  `boosts` in the per-gen move DB + threat=='safe' gate). Observing the
+  OPPONENT's boosts IS already handled (belief boost facts -> ctx -> calc).
+- **OPEN (flagged, not fixed in 6.2):** `damage.calc.compare_speed` is NOT
+  Trick-Room-aware — under active TR the net's outspeed feature
+  (`action_features._active_outspeed`) is stale (says "I'm faster" when I
+  actually move second). The net sees the TR obs flag and could compensate,
+  but the GIVEN fact is wrong. Fix belongs in the calc (pass field/TR in) —
+  schedule with the damage-calc work, not the teacher rules. Low blast radius
+  today: TR is rare in OU, and the rule above only makes the TEACHER set TR
+  when nothing else is legal.
