@@ -17,21 +17,21 @@
 
 | # | Decision | My lean | Blocks | One-line consequence |
 |---|----------|---------|--------|----------------------|
-| **OC-6** | `step` world-model fidelity | **(a)** minimal bookkeeping (HP+switch+faint; status/boosts via the calc) + a sim-agreement gate | M2b `step` (last big piece) | Fast, API-reachable search; the sim stays ground-truth via the gate |
-| **OC-9** | p2-POV posterior handling | **(a)** deterministic top-1 (argmax-posterior as p2's "own") | wiring `_flip_pov` into `_orient` (p2-POV obs) | In-distribution for the net; an honest approximation the value head refines |
-| **OC-7** | decider-in-state design | confirm the design M2a is built on (ctx + `decider`; heads on decider POV; value→root) | (already assumed) | needed for the double-switch / opponent-reply scenarios |
-| **OC-8** | tera in the search | omit for now (rare in our target formats) | `step` action-list | avoids illegal repeated-tera across a multi-ply search |
+| **OC-6** | `step` world-model fidelity | ✅ **LOCKED (2026-11-22, USER): (b) RICH** — statuses + stat boosts + hazards + screens tracked in `step`, effect metadata sourced from the fork's move data (one source), probabilistic effects OUT of the deterministic model (the value head learns them); sim-agreement gate covers them | M2b `step` | Search sees attrition/setup games; the sim stays ground-truth via the gate |
+| **OC-9** | p2-POV posterior handling | ✅ **LOCKED (2026-11-22, USER): (b) CARRY-OPAQUE** — posterior rides along at the p2 flip and stays VISIBLE to the net. Impl: own-side posterior routed into the existing posterior channels (zero schema change, old checkpoints load); dedicated own-posterior channels deferred to the second-POV training build | wiring `_flip_pov` into `_orient` (p2-POV obs) | Honest uncertainty to the value head; learnable once second-POV data exists |
+| **OC-7** | decider-in-state design | ✅ **VERIFIED BUILT + CONFIRMED (2026-11-22)**: `State=ctx+decider`; `value()`/`policy()` run heads on the decider POV via `_orient`; `_map_value` maps to root (pure, both-decider tested); `_flip_pov` core proven (round-trip identity) | (assumption holds) | the double-switch / opponent-reply scenarios are expressible |
+| **OC-8** | tera/mega in the search | ✅ **LOCKED (2026-11-22, USER): FORMAT-CONDITIONAL** — tera only where the format has it (gen9+), mega only in mega gens (6/7). Where present: in the action list WITH a once-per-mon used-flag. Where absent: not in the list at all | `step` action-list | no illegal repeated-tera; no phantom actions in formats without the mechanic |
 | OC-2 | re-baseline the value head before it's the MCTS leaf? | re-verify the best checkpoint's value head is sane (M3) | M3 quality (not the M2b build) | a weak leaf makes MCTS weaker; cheap to check |
 | OC-3 | MCTS inference budget (iterations/decision) | start ~400 live, higher in training | a tuning knob | strength vs latency |
 | OC-4 | role of the hand-coded `choose_action` | **(c)** fold its signals into M4 learned obs; retire it as a path | M4 (not M2b) | one decision path — no two workflows |
 | OC-1 | MCTS vs pure value-learning | MCTS (in progress) | — | the direct engine for win-condition / double-switch / threat |
 | OC-5 | scenario priority / M1→M5 order | keep search-first (M1→M5) | sequencing | phases are swappable if you'd rather start elsewhere |
 
-**To unblock the engine: pick OC-6 + OC-9** (or "go with your lean"); OC-7/OC-8
-are confirmations; OC-1/2/3/4/5 are later (M3/M4/tuning). The decision-
-inDEPENDENT structural de-risk is already DONE (perspective contract, `State`
-isolation, `_flip_pov` permutation) — so a decision unblocks a short build, not
-a re-derivation.
+**DECISIONS LOCKED (2026-11-22):** OC-6=(b) rich, OC-9=(b) carry-opaque, OC-7
+verified+confirmed, OC-8 format-conditional — all user-ruled. OC-1/2/3/4/5
+remain later (M3/M4/tuning). The structural de-risk was already DONE (perspective
+contract, `State` isolation, `_flip_pov` permutation) — so the engine build is
+unblocked: the revised M2b checklist (7 steps) below is the execution order.
 
 ---
 
@@ -1227,7 +1227,10 @@ Net suite 143 passed / 0 failed (CPU). So when OC-6 + OC-9 are picked, `step`
 WIREs these in + the batched calc + the posterior refinement — it does NOT
 re-derive the structural mechanics.
 
-**M2b BUILD PLAN — mechanical checklist (execute on OC-6 + OC-9 pick).**
+**M2b BUILD PLAN — mechanical checklist (REVISED 2026-11-22 for the locked
+decisions: OC-6=(b) rich, OC-9=(b) carry-opaque, OC-7 verified, OC-8
+format-conditional). 7 steps, each GREEN before the next, commit per sub-step,
+CPU-only, `live` deselected, explicit `git add <file>` (never `-A`).**
 Everything below is ALREADY committed + green (verified this session):
 `maxhp` in `get_context` (`ef86f08`); the transform primitives (`bad2cf7`);
 `State.copy` (`dfa7753`); `_map_value` both-decider (`8286b35`); `_flip_pov`
@@ -1236,48 +1239,61 @@ M1 length guard (`02f3a9b`); the ONE damage pipeline + `calc_damage_many` batch.
 So this is a WIRING pass, not a re-derivation. Steps, in order (each ships with
 a test; `live` deselected; CPU-only; no GPU):
 
-1. **Wire `_flip_pov` into `_orient(ctx, "p2")`** — replace the
-   `NotImplementedError` with `return _flip_pov(ctx)` + the OC-9 posterior
-   refinement (branch below). *Test:* `test_orient_p2_round_trips_to_identity`
-   (orient p1→p2→p1 == identity) + the OC-9-refinement test.
-2. **Implement `step(state, action)`** in `PokeWorldModel`:
+1. **p2 orientation + posterior visibility (OC-9b, LOCKED).** Wire `_flip_pov`
+   into `_orient(ctx, "p2")` (replace the `NotImplementedError`) — the posterior
+   RIDES ALONG (no top-1 collapse). Make the encoder's posterior channels carry
+   "the uncertain side's distribution" (opponent at p1-POV, own at p2-POV) so
+   p2's own posterior is VISIBLE to the net. Zero schema change; old
+   checkpoints load. *Tests:* `test_orient_p2_round_trips_to_identity`;
+   p1 obs unchanged (checksum); p2 obs shows the own-side posterior; p1's
+   own-posterior channels stay zero.
+2. **Move-effect table (OC-6b, LOCKED).** Source deterministic effect
+   metadata (status inflicted, stat boosts, hazard set/clear, screens up,
+   tailwind) from the pokemon-showdown fork's move data — ONE source, no
+   hand list. Probabilistic effects EXCLUDED from the deterministic model
+   (the value head learns them; the sim gate keeps the sim as ground truth).
+   *Tests:* lookup pins for the T1 effect-movers (Wish/Protect, Stealth Rock,
+   Spikes, Swords Dance, Will-O-Wisp, Reflect/Light Screen, Tailwind, Rapid
+   Spin/Defog) in the target formats.
+3. **Format-aware action list (OC-8, LOCKED).** `PokeWorldModel` takes the
+   format spec (has_tera: gen9+; has_mega: gens 6/7) at construction.
+   `_actions_from_own` includes the tera/mega action ONLY where the format has
+   it, with per-mon `tera_used`/`mega_used` ctx flags (additive keys) gating
+   repeats. *Tests:* gen8 ctx -> no tera action; gen9 ctx -> tera present,
+   then absent after one use; mega gen6 same shape.
+4. **`step(state, action)` in `PokeWorldModel`:**
    * `child = state.copy(decider=flip_decider(state.decider))` (the safe deep-copy);
    * branch the action's effect via the transforms — `apply_switch` (a switch
      action) / `apply_hp_delta` + `apply_faint` (a move action: damage from the
-     batched calc; faint if the victim's hp_frac hits 0);
+     batched calc; faint if the victim's hp_frac hits 0) + the step-2 effect
+     updates (statuses/boosts/hazards/screens) on the child ctx;
    * the damage number comes from the **ONE** pipeline: `calc_damage_many` (batch
      every child damage in one round-trip) — own spread = team spec, opp spread =
-     posterior top-1 (OC-9(a)) or carried (OC-9(b));
-   * OC-6 branch: **(a) minimal** = HP/switch/faint only (no status/boost
-     tracking); **(b) richer** = + status/boost updates (the calc knows them);
+     posterior top-1 FOR THE CALC ONLY (the net keeps the full posterior — OC-9b);
    * `reward = _map_value(leaf_win_prob, child.decider, self.root_decider)`;
      `done = (either side is 0-6 / 6-0)`.
    * *Test:* `test_step_move_produces_p2_child` (a move -> a p2-turn child, the
-     victim's hp_frac drops by damage/maxhp, the decider flipped, the parent's
-     ctx provably unchanged).
-3. **World-model-vs-sim agreement test** (the OC-6 gate): a scripted sequence
-   through the real sim vs. the world model's predicted outcomes (hp_frac /
-     fainted / active) — they must AGREE (the sim is ground truth). *Test:* the
-   CPU `live`-deselected agreement test.
-4. **MCTS 2-ply smoke:** `MCTS.best_action` now runs a real 2-ply tree (root p1
+     victim's hp_frac drops by damage/maxhp, status/boost applied where the move
+     has one, the decider flipped, the parent's ctx provably unchanged).
+5. **World-model-vs-sim agreement test (the OC-6 gate, now RICH):** a scripted
+   sequence through the real sim vs. the world model's predicted outcomes
+   (hp_frac / fainted / active / statuses / boosts / hazards) — they must
+   AGREE (the sim is ground truth). *Test:* the CPU `live`-deselected
+   agreement test.
+6. **MCTS 2-ply smoke:** `MCTS.best_action` now runs a real 2-ply tree (root p1
    + reply p2). *Test:* `test_mcts_two_ply_tree_is_nontrivial_and_legal`.
-5. **Efficiency (the flagged landmine):** cache the forward result per state so
+7. **Efficiency (the flagged landmine):** cache the forward result per state so
    one `forward_obs` feeds BOTH value + policy (do this inside `step`'s child
    eval). Not a correctness bug — a latency win once the tree is real.
 
-**OC-6 BRANCH:** (a) minimal [lean] = HP/switch/faint + batched calc (own
-spec / opp posterior-top-1 spread). (b) richer = + status/boost. (c) full sim
-= REJECTED (round-trips defeat fast local search).
+**BRANCHES LOCKED (2026-11-22, user-ruled):** OC-6=(b) rich; OC-9=(b)
+carry-opaque (top-1 used ONLY as the calc's spread input); OC-8
+format-conditional (tera gen9+, mega gens 6/7, once-per-mon flags). Full
+reasoning preserved in the (now-superseded) section below.
 
-**OC-9 BRANCH:** (a) top-1 [lean] = `_orient(ctx,"p2")` replaces the posterior
-with the argmax candidate (p2's "own" becomes fully known). (b) carry-opaque =
-the posterior rides along (p2's "own" stays a posterior).
-
-**On pick:** I execute steps 1-5 in ONE short, tested pass (each step green
-before the next), then report the gate result. No GPU, no `git add -A`, commit
-per sub-step.
-
-**Your call still needed to unblock M2b (re-stated for a fast decision):**
+**SUPERSEDED (2026-11-22): the calls below are LOCKED — OC-6=(b), OC-7
+verified+confirmed, OC-8 format-conditional, OC-9=(b) — see the board at the
+top of this file. Kept only as the reasoning record:**
 * **OC-6 — world-model fidelity of `step`:** (a) minimal bookkeeping
   (HP+switch+faint; status/boosts via the calc where it knows them) + a
   world-model-vs-sim agreement gate [my lean]; (b) richer; (c) full sim
