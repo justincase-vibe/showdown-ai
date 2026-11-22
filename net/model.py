@@ -1,9 +1,14 @@
 """S4.2 — network core + heads (PLAN.md §3c S4.2 / D60).
 
 The S4.2 spec (user-approved depth 3–4):
-  * **4×GRU-512** over the turn sequence + a **per-mon encoder (128)**;
-  * LayerNorm between layers; **GRU state reset per battle** (each battle is
-    its own sequence with a fresh hidden state — no cross-battle leak);
+  * a **trunk** over the encoded timestep + a **per-mon encoder (128)**;
+    (the original 4×GRU-512 was replaced by a residual MLP trunk in Step 2
+    of the 2026-11-22 review — the GRU always ran at T=1 with a zero hidden
+    state, so it never was recurrent: 6M+ params spent on gated attenuators
+    over a feed-forward problem. Residual blocks of the same width keep the
+    capacity where it helps — the MLP — and drop the dead gates.);
+  * LayerNorm (pre-norm) inside every block; **state reset per battle**
+    (each battle is its own sequence — no cross-battle leak);
   * **policy head** = logits over the per-state legal-action list (D60 compact
     enumeration). Illegal actions are excluded by a MASKED SOFTMAX, so their
     probability is **exactly 0.0** (``exp(-inf) == 0``) — structural, not a
@@ -50,9 +55,12 @@ from .vocab import Vocabs
 EMBED_DIM = 32
 #: per-mon encoder width (the S4.2 spec's "per-mon encoder (128)").
 MON_DIM = 128
-#: GRU width + depth (the S4.2 spec's "4×GRU-512").
-GRU_DIM = 512
-GRU_LAYERS = 4
+#: trunk width + depth. The width is the SAME as the old GRU's (512), so the
+#: policy/value heads keep their input shape; the depth (4 residual blocks)
+#: is the S4.2 spec's "depth 3-4". Step 2 of the 2026-11-22 review swapped
+#: the 4×GRU stack for these blocks (see module docstring).
+TRUNK_DIM = 512
+TRUNK_BLOCKS = 4
 #: policy / value head hidden width.
 HEAD_DIM = 256
 #: D70 pointer-head intent width (the state->intent vector the per-action
@@ -128,12 +136,33 @@ class MonEncoder(nn.Module):
         return self.mlp(torch.cat([slot, emb], dim=-1))
 
 
+class ResidualBlock(nn.Module):
+    """One pre-norm residual MLP block: ``x + Linear(GELU(Linear(LN(x))))``.
+
+    Pre-norm + the identity skip keep a 4-block stack trainable: the gradient
+    path through the skip never attenuates, and the LayerNorm keeps every
+    block's input well-conditioned regardless of how large ``x`` grows.
+    (This is what the old zero-state GRU stack could not do at T=1 — its
+    gates had no clean gradient path to open.)"""
+
+    def __init__(self, dim: int) -> None:
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.fc1 = nn.Linear(dim, dim)
+        self.fc2 = nn.Linear(dim, dim)
+        self.act = nn.GELU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.act(self.fc1(self.norm(x)))
+        return x + self.fc2(h)
+
+
 class PokeNet(nn.Module):
     """The S4.2 policy/value net over encoded battle sequences.
 
     Batch layout: every registry field is a tensor ``(B, T, *field.shape)`` and
     ``battle_mask`` is ``(B, T)`` (1.0 = a real timestep, 0.0 = padding). The
-    GRU runs over T with a FRESH hidden state per battle (reset per battle).
+    trunk is per-timestep (fresh state per battle — no cross-battle leak).
     Outputs are per-timestep: ``logits (B,T,MAX_ACTIONS)`` and
     ``value (B,T,1)``.
     """
@@ -162,16 +191,17 @@ class PokeNet(nn.Module):
         in_dim = 2 * side_dim + ctx_dim
 
         self.input_proj = nn.Sequential(
-            nn.Linear(in_dim, GRU_DIM),
-            nn.LayerNorm(GRU_DIM),
+            nn.Linear(in_dim, TRUNK_DIM),
+            nn.LayerNorm(TRUNK_DIM),
         )
-        self.gru = nn.GRU(GRU_DIM, GRU_DIM, num_layers=GRU_LAYERS,
-                          batch_first=True)
-        # LayerNorm between the GRU layers is applied to the stacked output;
-        # nn.GRU does not expose per-layer hooks, so we normalize the final
-        # hidden stream (and rely on LayerNorm at the input + heads for the
-        # between-layer conditioning the spec asks for).
-        self.gru_norm = nn.LayerNorm(GRU_DIM)
+        # Step 2 (review 2026-11-22): residual MLP trunk in place of the
+        # 4×GRU stack. Same width (512), same depth (4) — but every block is
+        # a trainable feed-forward layer with a clean gradient path, instead
+        # of GRU gates that, at the T=1 the project actually runs, could only
+        # attenuate the signal (the D60-era collapse the old residual skip
+        # was papering over).
+        self.trunk = nn.Sequential(
+            *[ResidualBlock(TRUNK_DIM) for _ in range(TRUNK_BLOCKS)])
 
         # D70: identity-aware (pointer) policy head. logits[i] = score(state,
         # action_i), so the net selects the correct action by IDENTITY
@@ -180,12 +210,12 @@ class PokeNet(nn.Module):
         # could learn state->position but NOT "use Ice Beam wherever it sits"
         # — structurally unable to do identity-based action selection.
         self.policy_intent = nn.Sequential(
-            nn.Linear(GRU_DIM, HEAD_DIM), nn.ReLU(),
+            nn.Linear(TRUNK_DIM, HEAD_DIM), nn.ReLU(),
             nn.Linear(HEAD_DIM, INTENT_DIM),
         )
         self.policy_act_proj = nn.Linear(action_dim, INTENT_DIM)
         self.value_head = nn.Sequential(
-            nn.Linear(GRU_DIM, HEAD_DIM), nn.ReLU(),
+            nn.Linear(TRUNK_DIM, HEAD_DIM), nn.ReLU(),
             nn.Linear(HEAD_DIM, 1), nn.Sigmoid(),
         )
 
@@ -255,17 +285,12 @@ class PokeNet(nn.Module):
             torch.zeros_like(b["opp_species"]), b["opp_moves"],
             b["opp_slot"][:, :, :, _active])
         ctx = self._context_repr(b, T)
-        x = self.input_proj(torch.cat([own, opp, ctx], dim=-1))   # (B,T,GRU)
-        g, _ = self.gru(x)                                          # (B,T,GRU)
-        # RESIDUAL skip: the current turn-start state ``x`` must reach the head
-        # directly. A plain stacked GRU over a short (often T=1) sequence with a
-        # zero hidden state acts as a stack of gated attenuations -- each
-        # ``(1-z)*tanh(...)`` cell with closed gates kills the signal, and the net
-        # then cannot learn to open the gates (no signal -> no gradient), so it
-        # collapses to a constant (target-averaging) policy. The skip makes the
-        # state the primary signal and lets the GRU contribute only the temporal
-        # DELTA (``g``); this is what lets the net state-condition at all.
-        h = self.gru_norm(g + x)
+        x = self.input_proj(torch.cat([own, opp, ctx], dim=-1))   # (B,T,D)
+        # The trunk is RESIDUAL by construction (every block is
+        # ``x + f(LN(x))``), so the encoded state always reaches the heads
+        # unattenuated — the structural fix for the old GRU stack's collapse
+        # to a constant (target-averaging) policy at T=1.
+        h = self.trunk(x)                                          # (B,T,D)
         # D70: pointer head — score each action by its identity against the
         # state intent (position-independent action selection, so the shuffled
         # action order cannot be shortcut and the net must pick the right move
@@ -327,6 +352,14 @@ class PokeNet(nn.Module):
         into the fresh CPU params — so the net SILENTLY stays on CPU while a
         CUDA agent feeds it CUDA tensors (the D102 league pass-fest bug)."""
         net = cls(vocabs)
+        sd = payload.get("state_dict") or {}
+        if any(k.startswith("gru.") for k in sd):
+            raise ValueError(
+                "This checkpoint was trained with the OLD GRU trunk "
+                "(pre Step 2, review 2026-11-22). The trunk is now a residual "
+                "MLP and the old weights cannot be loaded. To USE the old net, "
+                "check out git tag 'pre-mlp-trunk'; to use it as a comparison "
+                "baseline, evaluate it against that tag.")
         saved_sizes = payload.get("vocab_sizes", {})
         live = {
             "species": len(vocabs.species), "ability": len(vocabs.ability),

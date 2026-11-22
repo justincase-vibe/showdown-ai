@@ -161,7 +161,14 @@ def test_real_checkpoint_bridge_is_sane():
     if not os.path.exists(ckpt):
         pytest.skip("real checkpoint not present (scratch artifact)")
     vocabs = build_vocabs()
-    net = PokeNet.load_file(ckpt, vocabs, device="cpu")
+    try:
+        net = PokeNet.load_file(ckpt, vocabs, device="cpu")
+    except ValueError as e:
+        # Step 2 (review 2026-11-22) swapped the GRU trunk for a residual MLP;
+        # pre-Step-2 scratch checkpoints (like this one) are intentionally
+        # rejected by PokeNet.load. The bridge is covered by the random-net
+        # tests above until a NEW-architecture real checkpoint exists.
+        pytest.skip(f"checkpoint predates the current architecture: {e}")
     wm = PokeWorldModel(PokeAgent(net, seed=1, device="cpu"), vocabs)
     st = State(make_ctx(), "p1")
     val = wm.value(st)
