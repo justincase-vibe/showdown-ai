@@ -74,6 +74,12 @@ class TrainConfig:
     # ── P4.3 (GUI) ────────────────────────────────────────────────────
     n_rounds: int = 10               # how many rounds a GUI-launched run executes
     resume_from: Optional[str] = None  # checkpoint path to resume from (PokeNet.load)
+    battle_timeout: int = 240          # per-battle watchdog (s); 0 = disabled. A battle
+                                       # stuck inside env.step()/reset() (a network
+                                       # wait that never resolves) is killed after this
+                                       # and SKIPPED, so one hung battle can never stall
+                                       # the whole run (the 2026-11-22 hang, a transient
+                                       # server contention, is the motivating case).
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -229,7 +235,8 @@ class SelfPlayTrainer:
         n = self.cfg.battles_per_round if n_battles is None else int(n_battles)
         summary: Dict[str, Any] = {"battles": 0, "transitions": 0, "crashed": 0,
                                   "draws": 0, "a1_wins": 0, "a1_losses": 0,
-                                  "n_illegal": 0, "errors": [], "stopped_early": False}
+                                  "n_illegal": 0, "errors": [], "n_timeouts": 0,
+                                  "stopped_early": False}
         for i in range(n):
             if stop_check is not None and stop_check():
                 summary["stopped_early"] = True
@@ -237,8 +244,12 @@ class SelfPlayTrainer:
             if battle_hook is not None:
                 battle_hook(i)
             seed = self.cfg.seed + self.round * 1000 + i
-            r = play_and_collect(self.agent, self.cfg.battle_format, seed,
-                                 max_steps=self.cfg.max_steps)
+            r = self._play_with_watchdog(seed)
+            if r.get("timed_out"):
+                summary["crashed"] += 1
+                summary["n_timeouts"] += 1
+                summary["errors"].append(r["error"])
+                continue
             if r["crashed"]:
                 summary["crashed"] += 1
                 summary["errors"].append(r["error"])
@@ -253,6 +264,50 @@ class SelfPlayTrainer:
             summary["a1_losses"] += 1 if (r["a2_won"] and not r["a1_won"]) else 0
             summary["n_illegal"] += r["n_illegal"]
         return summary
+
+    # ── per-battle watchdog (robustness: one hung battle must never stall a run) ──
+    def _play_with_watchdog(self, seed: int) -> Dict[str, Any]:
+        """Run ONE battle under a watchdog (``cfg.battle_timeout`` seconds).
+
+        ``play_and_collect`` is a synchronous block that can HANG inside
+        ``env.step()``/``reset()`` (a network wait that never resolves — the
+        ``max_steps`` cap can't help because the stall is INSIDE a single step
+        call). The 2026-11-22 hang (a transient server contention) stalled a
+        160-battle run for 14+ min until it was killed by hand. This watchdog
+        runs the battle on a daemon thread and, if it exceeds the timeout,
+        reports it as a crashed (SKIPPED) battle so the round still completes.
+
+        ``battle_timeout=0`` disables the watchdog (direct call, the old path).
+        Trade-off (documented): a timed-out battle leaks its daemon thread (a
+        stuck thread can't be killed in-process); that thread's server
+        connection is orphaned and the server times it out. For a bounded run
+        that's a few leaked threads at most — acceptable, and far better than a
+        run that hangs forever. (A fully clean kill would need per-battle
+        process isolation, which is a larger change.)
+        """
+        timeout_s = int(getattr(self.cfg, "battle_timeout", 0) or 0)
+        if timeout_s <= 0:
+            return play_and_collect(self.agent, self.cfg.battle_format, seed,
+                                    max_steps=self.cfg.max_steps)
+        import threading
+        result: Dict[str, Any] = {}
+
+        def run() -> None:
+            try:
+                result.update(play_and_collect(self.agent, self.cfg.battle_format,
+                                               seed, max_steps=self.cfg.max_steps))
+            except Exception as exc:  # noqa: BLE001
+                result.update({"crashed": True,
+                               "error": f"{type(exc).__name__}: {exc}"})
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        t.join(timeout_s)
+        if t.is_alive():
+            return {"crashed": True, "timed_out": True, "traj": [], "steps": 0,
+                    "error": (f"battle TIMEOUT after {timeout_s}s (killed) — "
+                             "a transient server/network stall")}
+        return result
 
     # ── update ──────────────────────────────────────────────────────────
     def update(self) -> Dict[str, float]:

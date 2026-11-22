@@ -133,3 +133,93 @@ def test_rollout_stop_check_halts_between_battles(monkeypatch):
     assert out["stopped_early"] is True and out["battles"] == 0
     assert out.get("skipped") is True  # 0 transitions -> no partial update
     assert len(calls) == 7  # the stopped round attempted nothing
+
+
+# ── per-battle watchdog (2026-11-22: one hung battle must never stall a run) ──
+def test_watchdog_kills_hung_battle(monkeypatch):
+    """A battle stuck inside play_and_collect (a network wait that never
+    resolves) must be KILLED after cfg.battle_timeout and reported as a
+    crashed+timed_out battle — NOT hang the run. This is the exact bug that
+    stalled the 2026-11-22 160-battle run for 14+ min."""
+    import time
+    import net.trainer as nt
+
+    ctx = make_ctx(); v = make_vocabs(ctx)
+    net = make_random_net(v, "cpu")
+    tr = SelfPlayTrainer(net, TrainConfig(battle_timeout=1))  # 1s watchdog
+
+    def fake_hang(agent, fmt, seed, max_steps=500, **kw):
+        time.sleep(4)  # longer than the 1s watchdog -> must be killed
+        return {"crashed": False, "traj": [], "steps": 1, "n_illegal": 0}
+    monkeypatch.setattr(nt, "play_and_collect", fake_hang)
+
+    t0 = time.time()
+    r = tr._play_with_watchdog(seed=123)
+    elapsed = time.time() - t0
+    assert r.get("timed_out") is True and r.get("crashed") is True
+    assert elapsed < 3.5, f"watchdog did not kill the hang (elapsed {elapsed:.1f}s > ~1s timeout)"
+
+
+def test_watchdog_allows_fast_battle(monkeypatch):
+    """A battle that finishes INSIDE the timeout must pass through UNCHANGED
+    (the watchdog only fires on a real hang) — no spurious kills."""
+    import net.trainer as nt
+
+    ctx = make_ctx(); v = make_vocabs(ctx)
+    net = make_random_net(v, "cpu")
+    tr = SelfPlayTrainer(net, TrainConfig(battle_timeout=5))
+
+    def fake_fast(agent, fmt, seed, max_steps=500, **kw):
+        return {"crashed": False, "traj": [], "steps": 3,
+                "a1_won": True, "a2_won": False, "n_illegal": 0, "draw": False}
+    monkeypatch.setattr(nt, "play_and_collect", fake_fast)
+
+    r = tr._play_with_watchdog(seed=7)
+    assert not r.get("timed_out") and r["crashed"] is False
+    assert r["steps"] == 3 and r["a1_won"] is True
+
+
+def test_watchdog_disabled_when_timeout_zero(monkeypatch):
+    """battle_timeout=0 disables the watchdog (the old direct-call path) —
+    the battle runs inline, no thread, and a hang would (as before) block."""
+    import net.trainer as nt
+
+    ctx = make_ctx(); v = make_vocabs(ctx)
+    net = make_random_net(v, "cpu")
+    tr = SelfPlayTrainer(net, TrainConfig(battle_timeout=0))
+
+    saw = {}
+    def fake_inline(agent, fmt, seed, max_steps=500, **kw):
+        saw["called"] = True
+        return {"crashed": False, "traj": [], "steps": 2, "n_illegal": 0}
+    monkeypatch.setattr(nt, "play_and_collect", fake_inline)
+
+    r = tr._play_with_watchdog(seed=1)
+    assert saw.get("called") is True and r["steps"] == 2 and not r.get("timed_out")
+
+
+def test_rollout_counts_watchdog_timeouts(monkeypatch):
+    """A rollout where a battle hangs must still COMPLETE (the round doesn't
+    stall) and record the timeout in n_timeouts — the run-level guarantee."""
+    import time
+    import net.trainer as nt
+
+    ctx = make_ctx(); v = make_vocabs(ctx)
+    net = make_random_net(v, "cpu")
+    tr = SelfPlayTrainer(net, TrainConfig(battles_per_round=3, battle_timeout=1))
+
+    state = {"i": 0}
+    def fake(agent, fmt, seed, max_steps=500, **kw):
+        state["i"] += 1
+        if state["i"] == 2:
+            time.sleep(4)  # battle 2 hangs -> watchdog kills it
+            return {"crashed": False, "traj": [], "steps": 1,
+                    "a1_won": True, "a2_won": False, "draw": False, "n_illegal": 0}
+        return {"crashed": False, "traj": [], "steps": 1, "a1_won": True,
+                "a2_won": False, "draw": False, "n_illegal": 0}
+    monkeypatch.setattr(nt, "play_and_collect", fake)
+
+    summary = tr.rollout()
+    assert summary["n_timeouts"] == 1, f"n_timeouts={summary.get('n_timeouts')} (want 1)"
+    assert summary["crashed"] == 1
+    assert summary["stopped_early"] is False  # the round ran to the end, not stuck
