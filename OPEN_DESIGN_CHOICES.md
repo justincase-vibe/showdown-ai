@@ -2084,3 +2084,24 @@ External review of the current position; decisions recorded:
   asserted "never the status toxic" (pre-6.3 intent); under rule 2 the correct
   pick in that scenario IS toxic — the assertion was updated to the new
   design intent (the test still proves real ctx + real calc feed the brain).
+
+### Step 6.4 — rule 3: stat-boost setup (implemented, 2026-11-22)
+- `_boosts_for(name, gen, move_db)`: per-gen `boosts` dict from the injected
+  `move_db` or the real DB (`legality.lookup.get_move`); unknown move / lookup
+  failure -> None (degrade, never raise). Self-boosts are positive entries;
+  opponent-lowering moves (Growl, `atk: -1`) have NO positive entry and are
+  filtered out by `_pick_setup` — they are weakeners, not setup.
+- `_pick_setup(moves, threat, gen, move_db)`: returns the strongest single
+  POSITIVE boost, ONLY when `threat == 'safe'` (strict: not can_ko, not
+  unknown — a teacher does not gamble a setup turn). Ties keep legal order.
+  Wired as step 3.6 in `choose_action` (hazards > setup > status > attack).
+- **BUG CAUGHT (test-fixture fidelity, not production):** the 3 "should NOT
+  setup" tests failed because `fake_calc` (test double) did an EXACT-CASE
+  table lookup while the real calc + `strategy._norm_move` are
+  case/space/hyphen-insensitive. Capitalized names in `_acts` ("Flamethrower")
+  missed lowercase table keys -> both moves scored 0 -> stable sort picked
+  the first. The 3 failing tests were exactly the ones that fall through to
+  `rank_moves` (setup correctly skipped). Fixed by normalizing `fake_calc`
+  lookups to mirror production; no production code was wrong.
+  **Lesson: a test double stricter than production hides real behavior —
+  keep fakes faithful to the contract they stand in for.**

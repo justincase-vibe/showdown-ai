@@ -34,16 +34,37 @@ def _dmg(min_pct, max_pct, exp_pct, immune=False):
             "immune": immune}
 
 
-def fake_calc(table):
+def _norm_lookup(name):
+    """Normalize a move name for the fake table lookup.
+
+    Mirrors the REAL calc's case-insensitive move-name resolution (the Node
+    calc accepts "Flamethrower" / "Flame Thrower" / "flamethrower" alike) and
+    the production ``strategy._norm_move`` (lowercase, strip spaces/dashes).
+    Without this the test double is stricter than production: a capitalized
+    display name in ``_acts`` (e.g. "Flamethrower") would miss a lowercase
+    table key ("flamethrower") and silently degrade to 0 damage, masking the
+    move under test. Normalizing keeps the fake faithful to the real pipeline.
+    """
+    return str(name or "").lower().replace(" ", "").replace("-", "")
+
+
+def fake_calc(table, *, normalized_keys=True):
     """A calc_fn that maps move-name -> (min,max,exp) pct (deterministic).
     Unknown moves degrade to 0 damage (no KO) so choose_action tests can mix
-    known and unknown moves."""
+    known and unknown moves.
+
+    Lookup is case/space/hyphen-insensitive (see :func:`_norm_lookup`) to match
+    the real damage calc. Pass ``normalized_keys=False`` only if a test wants
+    exact-case semantics (none currently do).
+    """
     calls = {"n": 0}
+    norm_table = {_norm_lookup(k): v for k, v in table.items()} if normalized_keys else dict(table)
 
     def _calc(attacker, defender, move, fmt=None, gen=None):
         name = move if isinstance(move, str) else move.get("name")
         calls["n"] += 1
-        m, x, e = table.get(name, (0, 0, 0))
+        key = _norm_lookup(name) if normalized_keys else name
+        m, x, e = norm_table.get(key, (0, 0, 0))
         return _dmg(m, x, e)
 
     return _calc, calls
@@ -535,6 +556,97 @@ def test_status_rule_ignores_bench_statuses():
     a = S.choose_action(ctx, _acts(["Will-O-Wisp", "ember"]),
                         fmt="gen9ou", calc_fn=calc)
     assert a["move"] == "Will-O-Wisp"
+
+
+# ══ Step 6.4 — rule 3: stat-boost setup (hermetic; fake calc + stub move_db) ══
+
+def _setup_db(table):
+    """move_db stub: name -> {'boosts': ...} (None when the name is absent)."""
+    def _db(name, gen):
+        return {"boosts": table.get(name)}
+    return _db
+
+
+def test_setup_rule_swords_dance_when_safe():
+    # safe (opp ember 5-10-8 can't touch my 80% HP) -> setup over a 30% attack
+    calc, _ = fake_calc({"ember": (5, 10, 8), "flamethrower": (20, 40, 30)})
+    ctx = _full_ctx(opp_moves=("ember",))
+    db = _setup_db({"swordsdance": {"atk": 2}})
+    a = S.choose_action(ctx, _acts(["Swords Dance", "Flamethrower"]),
+                        fmt="gen9ou", calc_fn=calc, move_db=db)
+    assert a["move"] == "Swords Dance"
+
+
+def test_setup_rule_skips_when_can_ko_threat():
+    # can_ko (max 85 >= 80) -> a setup turn is NOT worth it -> attack
+    calc, _ = fake_calc({"hammer": (30, 85, 55), "flamethrower": (20, 40, 30)})
+    ctx = _full_ctx(own_hp=0.8, opp_moves=("hammer",))
+    db = _setup_db({"swordsdance": {"atk": 2}})
+    a = S.choose_action(ctx, _acts(["Swords Dance", "Flamethrower"]),
+                        fmt="gen9ou", calc_fn=calc, move_db=db)
+    assert a["move"] == "Flamethrower"
+
+
+def test_setup_rule_skips_when_threat_unknown():
+    # unknown threat (no opp move info) -> the teacher does NOT gamble setup
+    calc, _ = fake_calc({"flamethrower": (20, 40, 30)})
+    ctx = _full_ctx(opp_moves=())
+    db = _setup_db({"swordsdance": {"atk": 2}})
+    a = S.choose_action(ctx, _acts(["Swords Dance", "Flamethrower"]),
+                        fmt="gen9ou", calc_fn=calc, move_db=db)
+    assert a["move"] == "Flamethrower"
+
+
+def test_setup_rule_strongest_boost_first():
+    # +2 (Swords Dance) beats +1/+1 (Work Up); ties would keep legal order
+    calc, _ = fake_calc({"ember": (5, 10, 8), "flamethrower": (20, 40, 30)})
+    ctx = _full_ctx(opp_moves=("ember",))
+    db = _setup_db({"workup": {"atk": 1, "spa": 1}, "swordsdance": {"atk": 2}})
+    a = S.choose_action(ctx, _acts(["Work Up", "Swords Dance", "Flamethrower"]),
+                        fmt="gen9ou", calc_fn=calc, move_db=db)
+    assert a["move"] == "Swords Dance"
+
+
+def test_setup_rule_negative_boosts_never_qualify():
+    # Growl (opponent -1 atk) is a WEAKENER, not setup -> attack instead
+    calc, _ = fake_calc({"ember": (5, 10, 8), "flamethrower": (20, 40, 30)})
+    ctx = _full_ctx(opp_moves=("ember",))
+    db = _setup_db({"growl": {"atk": -1}})
+    a = S.choose_action(ctx, _acts(["Growl", "Flamethrower"]),
+                        fmt="gen9ou", calc_fn=calc, move_db=db)
+    assert a["move"] == "Flamethrower"
+
+
+def test_setup_rule_ranks_below_hazards():
+    # priority: hazard > setup (6.1 design order)
+    calc, _ = fake_calc({"ember": (5, 10, 8), "flamethrower": (20, 40, 30)})
+    ctx = _full_ctx(opp_moves=("ember",))
+    db = _setup_db({"swordsdance": {"atk": 2}})
+    a = S.choose_action(
+        ctx, _acts(["Swords Dance", "Stealth Rock", "Flamethrower"]),
+        fmt="gen9ou", calc_fn=calc, move_db=db)
+    assert a["move"] == "Stealth Rock"
+
+
+def test_setup_rule_ranks_above_status():
+    # priority: setup > status (6.1 design order)
+    calc, _ = fake_calc({"ember": (5, 10, 8), "flamethrower": (20, 40, 30)})
+    ctx = _full_ctx(opp_moves=("ember",))
+    db = _setup_db({"swordsdance": {"atk": 2}})
+    a = S.choose_action(
+        ctx, _acts(["Swords Dance", "Will-O-Wisp", "Flamethrower"]),
+        fmt="gen9ou", calc_fn=calc, move_db=db)
+    assert a["move"] == "Swords Dance"
+
+
+def test_setup_rule_default_db_path():
+    # NO move_db injected -> the real legality DB resolves 'Swords Dance'
+    # (boosts {atk:2}) — pins the default lookup path end to end.
+    calc, _ = fake_calc({"ember": (5, 10, 8), "flamethrower": (20, 40, 30)})
+    ctx = _full_ctx(opp_moves=("ember",))
+    a = S.choose_action(ctx, _acts(["Swords Dance", "Flamethrower"]),
+                        fmt="gen9ou", calc_fn=calc)
+    assert a["move"] == "Swords Dance"
 
 
 def test_rank_empty_moves():

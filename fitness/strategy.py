@@ -213,6 +213,55 @@ def _hazard_broadly_effective(fid: str, ctx: Dict, gen: int) -> bool:
     return (sum(known) / len(known)) <= 0.5
 
 
+def _boosts_for(name: Any, gen: int, move_db: Optional[Any]) -> Optional[Dict]:
+    """A move's ``boosts`` dict (per-gen from the DB / injected stub), or None.
+
+    The DB ``boosts`` describe the change the move applies (self-boosts are
+    positive; opponent-lowering moves like Growl are NEGATIVE and therefore
+    never qualify as setup — the caller checks for positive entries). Unknown
+    move or lookup failure -> None (degrade, never raise).
+    """
+    n = _norm_move(name)
+    try:
+        if move_db is not None:
+            d = move_db(n, gen) or {}
+        else:
+            from legality.lookup import get_move  # lazy: keep module import cheap
+            d = get_move(n, gen) or {}
+    except Exception:  # noqa: BLE001 — an unknown move is "no setup"
+        return None
+    b = d.get("boosts")
+    return b if isinstance(b, dict) else None
+
+
+def _pick_setup(moves: List, threat: str, gen: int = 9,
+                move_db: Optional[Any] = None) -> Optional[Dict]:
+    """Rule 3 (Step 6.4): the strongest legal SELF-BOOST action, or None.
+
+    Chosen ONLY when ``threat == 'safe'`` (strict — not even can_ko, and NOT
+    'unknown': a wasted setup turn is worse than chip, and a teacher should
+    not gamble on an unassessed opponent — 6.1 design note). Among candidates,
+    the strongest single positive boost wins (Swords Dance +2 over Work Up +1);
+    ties keep legal order. Moves with only negative boosts (Growl) never
+    qualify. Per-gen data (the DB override makes e.g. gen-1 Light Screen a
+    boost, which this rule then treats as setup — correct for that gen).
+    Pure + degrading; never raises.
+    """
+    if threat != "safe":
+        return None
+    best_act, best_str = None, 0
+    for act, name in moves:
+        b = _boosts_for(name, gen, move_db)
+        if not b:
+            continue
+        strength = max((v for v in b.values()
+                        if isinstance(v, (int, float)) and v > 0),
+                       default=0)
+        if strength > best_str:  # strict -> ties keep the earlier legal move
+            best_act, best_str = act, strength
+    return best_act
+
+
 def _status_already_on(block: Optional[Dict], code: str) -> bool:
     """Does the mon already have this status? Raw Showdown codes (brn/par/
     slp/tox) from the belief; "leechseed" would check the volatiles list
@@ -521,7 +570,11 @@ def choose_action(
          already up on our side, the known opponent is not majority-immune,
          and I am not guaranteed-KO'd -> set the hazard (free match-long value;
          the concept the net must learn to value).
-      3.6 (Step 6.3) status — a status move (Wisp/Thunder Wave/Toxic/sleep
+      3.6 (Step 6.4) setup — a self-boost move (Swords Dance / Calm Mind / ...)
+         is legal and threat is EXACTLY 'safe' -> the strongest boost
+         (setup-sweeper value; a teacher only gambles setup on a known-safe
+         turn).
+      3.7 (Step 6.3) status — a status move (Wisp/Thunder Wave/Toxic/sleep
          moves/Glare) is legal, the opponent active lacks that status and is
          not type-immune, and I am not guaranteed/can-KO'd -> apply the status
          (match-long damage/pace value; the concept the net must learn to value).
@@ -584,10 +637,17 @@ def choose_action(
     if hazard is not None:
         return hazard
 
-    # 3.6) status (Step 6.3, rule 2): burn/paralyze/sleep/toxify when legal,
+    # 3.6) setup boosts (Step 6.4, rule 3): the strongest self-boost when
+    # legal AND threat is exactly 'safe' (a setup turn must be near-safe;
+    # unknown threat -> don't gamble) — SWORDSDANCE & co, the setup-sweeper
+    # concept the net must learn to recognize and value.
+    setup = _pick_setup(moves, threat, gen, move_db=move_db)
+    if setup is not None:
+        return setup
+
+    # 3.7) status (Step 6.3, rule 2): burn/paralyze/sleep/toxify when legal,
     # the opponent active lacks it, isn't type-immune, and I am not in
-    # guaranteed/can-KO range. (Rule 3 — setup boosts — lands here in 6.4,
-    # BETWEEN hazards and status, per the 6.1 priority.)
+    # guaranteed/can-KO range.
     status = _pick_status(moves, ctx, opp_slot, threat, gen)
     if status is not None:
         return status
