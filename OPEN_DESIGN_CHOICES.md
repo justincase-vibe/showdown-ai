@@ -1766,3 +1766,46 @@ Pokemon turns are SIMULTANEOUS.
 - S5-D3: how to log mixed-strategy action for PPO (sampled action + logprob from
   mix, vs. policy head fallback).
 - S5-D4: belief-sampling strategy (average mixes vs sample-state-then-solve).
+
+### SPIKE RESULTS (2026-11-22, gen9bss3v3 + gen9ou) — prerequisite verified ✅
+Script: `scratch/step5_spike/roundtrip.js` (node, uses fork `dist/sim`).
+- **Round-trip fidelity: PASS.** Mid-battle state (damage dealt, Stealth Rock up,
+  Light Screen up, burn, Dragon Dance boosts) serialized via `State.serializeBattle`
+  / `State.deserializeBattle` and back: ALL fingerprinted fields agree
+  (per-mon hp/maxhp/status/boosts/volatiles/item/ability, side conditions,
+  field weather/terrain/pseudoweather, PRNG seed). Both gen9bss3v3 and gen9ou.
+- **Clone is fully playable:** deserialized clone accepts `makeChoices`, plays a
+  full turn, end-of-turn effects fire (Black Sludge tick), boosts/hazards persist.
+  => Forward-model option A (sim clone) is VIABLE. Option B (calc depth-1) is now
+  only a fallback, not a necessity.
+- **Cost (CPU, training running in parallel):** serialize ~0.2-0.4ms,
+  deserialize ~0.4-1.1ms, clone+1 turn ~0.5-0.6ms median.
+  36 cells x 20 belief samples ≈ **1.0-1.5 s/turn** — acceptable. Re-measure on GPU
+  machine without CPU contention before finalizing K (S5-D2).
+- **LP solve (scipy linprog, highs):** verified against analytic 2x2 solutions
+  (symmetric v=2 p=(0.5,0.5); asymmetric v=1.5). ~0.8ms per 2x2 solve.
+- **NEW DEPENDENCY:** `scipy` (installed 1.17.x via pip 2026-11-22). NOT yet pinned
+  in any requirements file (bot/requirements.txt is dirty/uncommitted — pin with the
+  user when it is next touched).
+
+### SIM API FINDINGS (do not re-discover at build time)
+- Fork already ships `sim/state.ts`: `State.serializeBattle(battle)` (AnyObject) and
+  `State.deserializeBattle(obj|str)`. `Battle.toJSON()` / `Battle.fromJSON()` wrap them.
+- `State` is NOT re-exported by `dist/sim/index.js` — require `dist/sim/state.js` directly.
+- Battle ctor: `new Battle({ format: Dex.formats.get('gen9bss3v3'), p1:{name,team}, p2:{...} })`
+  (pass the FORMAT OBJECT, or use `formatid`). Team sets use object EVs
+  (`evs:{hp,atk,def,spa,spd,spe}`).
+- Ctor leaves the battle in **team preview**: answer with `battle.makeChoices('team 3','team')`
+  ('team N' = lead with slot N, 1-indexed).
+- Choices are STRINGS: `side.choose('move <id>')`, `'switch N'`, `'team N'`.
+  `battle.makeChoices(p1str, p2str)` = both sides choose + commit.
+  `pokemon.moves` is an array of move IDs (strings).
+- `side.active` is the active-Pokemon array; the `pokemon.active` flag does NOT exist.
+  Side: `side.requestState` ('move'|'switch'|'teampreview'|'').
+- **Quirk (found, not chased):** U-turn / forced-switch flows can leave the OTHER side
+  with `requestState===''` (serialized requests) and `switch 1` can reject when the
+  desired target is flagged active. For the matrix-game build, forced-switch states
+  should be handled explicitly (they are low-entropy: the switcher's options are the
+  bench) — do not assume both sides always have a 'move' request simultaneously.
+- `commitChoices()` throws "Not all choices done" if a side's request is empty —
+  guard with `requestState` checks.
