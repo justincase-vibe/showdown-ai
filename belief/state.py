@@ -711,9 +711,15 @@ class BeliefState:
             for c in sb.candidates:
                 for m in c["moves"]:
                     move_counts[m] = move_counts.get(m, 0) + c["weight"]
-            block["top_moves"] = [
-                m for m, _ in sorted(move_counts.items(), key=lambda x: -x[1])[:4]
-            ]
+            _sorted_mc = sorted(move_counts.items(), key=lambda x: -x[1])[:4]
+            block["top_moves"] = [m for m, _ in _sorted_mc]
+            # 6.5b (OC, 2026-11-22): the marginal per-move posterior WEIGHTS, in
+            # the SAME ORDER as top_moves. Additive CONTEXT (like `maxhp`) — the
+            # encoder reads `top_moves` (the id channel) and IGNORES this key, so
+            # the registry checksum is unchanged and existing checkpoints stay
+            # loadable. Consumed by fitness.strategy's rule-4 resist weighting so
+            # a belief that exposes it stops running uniform-weighted (OC-6.5b).
+            block["top_move_weights"] = [round(w, 4) for _, w in _sorted_mc]
             # confidence (1 - normalized entropy), clamped to [0,1] so a
             # floating-point entropy a hair above 1.0 can't render as -0.0 / >1.0
             import math
@@ -746,6 +752,10 @@ class BeliefState:
                 "last_move_failed": False, "stockpile": 0, "used_protect": False,
                 "volatiles": [], "species": sp, "fainted": False,
                 "posterior": [], "top_moves": [], "confidence": 0.0,
+                # 6.5b: the marginal weights key is present (empty) so every
+                # mon block shares one schema — consumers never KeyError on a
+                # bench slot (the same contract as ``maxhp`` below).
+                "top_move_weights": [],
                 # bench placeholders have no observed max HP yet — keep the key
                 # present (maxhp None) so every mon block shares one schema and
                 # consumers (the MCTS step) never KeyError on a bench slot.

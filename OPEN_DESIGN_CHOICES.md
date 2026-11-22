@@ -35,6 +35,60 @@ unblocked: the revised M2b checklist (7 steps) below is the execution order.
 
 ---
 
+## 2026-11-22 — M1 GATE (single-learner experiment) — OC rulings + build plan
+
+**DIRECTION (USER, 2026-11-22):** go for the **M1 gate** (single-learner
+experiment), NOT M2b. M2b stays parked until the gate result is in. The earlier
+OC-6/7/8/9 rulings still stand.
+
+**OC RULINGS (USER, 2026-11-22):**
+- **6.5a** — keep the `max(1.0, eff)` clamp (resist ties neutral). Revisit only
+  once belief weights make expected-damage ranking possible.
+- **6.5b** — **DO** expose `top_move_weights` in `belief/state.py` (additive,
+  encoder-ignored, registry checksum unchanged). ✅ **IMPLEMENTED (A1):** the
+  marginal per-move weights now ride in `get_context()` in the SAME order as
+  `top_moves` (and on the bench placeholder, empty, for schema parity). The
+  encoder reads `top_moves` (id channel) and ignores the weights, so the
+  checksum pin (`net/tests/test_s41.py::test_checksum_pin`) stays green and old
+  checkpoints load. `_opp_move_type_weights` (rule-4) already consumed the key
+  when present — so exposing it upgrades rule 4 from uniform to belief-weighted.
+  Surface test: `belief/tests/test_top_move_weights_surface.py`.
+- **6.6a** — **DO** pass the posterior top-1 overrides to the strategy bot
+  BEFORE the gate, so both sides see the same information. Keep `strategy` as
+  the yardstick (UNCHANGED); add a SECOND variant `strategy_posterior` and
+  report the net against BOTH; re-measure `strategy_posterior` vs the old
+  heuristic once (its baseline). *(A2 — pending.)*
+- **6.6b** — skip the n=100 re-run; the gate is the real measurement.
+
+**M1 GATE EXPERIMENT (approved to launch):**
+- ONE main learner vs a pool: frozen snapshots of itself, `strategy`,
+  `strategy_posterior`, the old `heuristic`, `random`.
+- **Arm A** = PPO from scratch. **Arm B** = BC warm start from the strategy
+  bot (plan Step 4f: clone its decisions, own side fully known, then PPO with an
+  annealed KL penalty to it) + PPO. Run both if compute allows. (NOTE:
+  `net/bc.py` is the REPLAY-corpus BC (S4.3) — the strategy-bot BC arm is NOT
+  built yet and must be constructed for Arm B.)
+- Track with 100-battle evals every few rounds + scenario suite + Step-8 health.
+- **FINAL gate:** ≥400 battles per opponent (`strategy` AND
+  `strategy_posterior`), sampled AND argmax, 95% CI.
+- **Decision rule** (lower CI bound of win-rate vs `strategy_posterior`):
+  ≥40% → PASS, propose M2b; 25–40% → keep training, report which Step-8 check
+  lags; <25% → stop, run feature ablation + entropy/action-mix diagnostics,
+  write which step looks wrong. Do NOT train longer blindly.
+- **Stop rules:** entropy collapse, switch share <3% for 3 rounds, or KL
+  blow-up → stop and report.
+
+**SMALL ADDITIONS (CPU-light, parallel):**
+1. Regression test over EVERY format in `legality.formats`: `engine_key`
+   resolves + calc-vs-sim agree on a few reference damages; WARN on silent
+   fallback. *(B1 — pending.)*
+2. `tools/decision_view.py`: print every legal action with policy %, expected
+   damage, KO flag, value estimate; run on scenario states. *(B2 — pending.)*
+3. Report the exact "~1–1.5 s/turn" sim-clone cost: time for ONE clone+advance,
+   + parallelism feasibility. *(B3 — pending.)*
+
+---
+
 Pipeline audited this pass:
 `dashboard → POST /api/train/start → launcher.start_trainer → validate → spawn
 detached → entry main → run → runstate protocol → stop/status` **and** the
