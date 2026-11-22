@@ -122,13 +122,24 @@ def play_vs_checkpoint(main_agent: PokeAgent, opp_agent: PokeAgent,
                     actions[a1] = np.int64(pe)
                     pending = (obs_dict, d.action_index, float(d.logprob), float(d.value))
             if env.agent2_to_move:
-                obs2 = obs.get(a2, {}).get("observation") if isinstance(obs, dict) else None
-                if obs2 is not None:
-                    acts2 = build_action_list(env.battle2)
-                    d2 = opp_agent.act(obs2, acts2)
-                    if d2 is not None and d2.action is not None:
-                        pe2 = action_to_pe(d2.action, env.battle2)
+                if getattr(opp_agent, "decides_from_battle", False):
+                    # C1b: ctx brain (strategy / strategy_posterior) decides from
+                    # the BATTLE (the belief pipeline), not the encoded obs — the
+                    # SAME call the harness/driver route these through. The frozen
+                    # opponent never learns, so only its LEGAL action matters here.
+                    act2 = opp_agent.decide(battle=env.battle2, fmt=fmt, vocabs=vocabs)
+                    if act2 is not None:
+                        pe2 = action_to_pe(act2, env.battle2)
                         actions[a2] = np.int64(pe2) if pe2 >= 0 else np.int64(-2)
+                else:
+                    # net (random / self-snapshot) or the old heuristic: .act over obs
+                    obs2 = obs.get(a2, {}).get("observation") if isinstance(obs, dict) else None
+                    if obs2 is not None:
+                        acts2 = build_action_list(env.battle2)
+                        d2 = opp_agent.act(obs2, acts2)
+                        if d2 is not None and d2.action is not None:
+                            pe2 = action_to_pe(d2.action, env.battle2)
+                            actions[a2] = np.int64(pe2) if pe2 >= 0 else np.int64(-2)
                 if actions[a2].item() == -2 and env.battle2 is not None:
                     from net.env import random_action
                     act2 = random_action(env.battle2)

@@ -95,3 +95,26 @@ def test_pool_includes_snapshots_in_order(tmp_path):
     assert names[4:6] == ["self_1", "self_2"], names
     # a snapshot agent is a PokeAgent (the learner's own frozen copy)
     assert isinstance(ladder.get("self_1").agent(seed=0), PokeAgent)
+
+
+def test_pool_ctx_brains_are_decide_drivable():
+    """C1b: the trainer drives ``decides_from_battle`` opponents via
+    ``.decide(battle, fmt, vocabs)`` (the NEW branch in ``play_vs_checkpoint``).
+    Confirm the pool's strategy / strategy_posterior agents return a LEGAL action
+    (or a pass) from a real fake battle — the EXACT call the C3 loop will make, so
+    the full pool is usable WITHOUT a real battle. (The net / old-heuristic ``.act``
+    path is already covered by ``league.tests.test_driver`` + the ``heuristic``
+    reference tests.)"""
+    from net.tests.test_env_obs import _FakeBattle, _FakeMon
+    from net.env import build_action_list
+    v = _vocabs()
+    ladder = build_m1_pool(fmt="gen9ou", vocabs=v)
+    b = _FakeBattle(active=_FakeMon("garchomp", moves=["outrage", "earthquake"]),
+                    avail_moves=["outrage", "earthquake"], tera=True)
+    acts = build_action_list(b)
+    assert acts, "the fake battle must offer legal actions"
+    for name in ("strategy", "strategy_posterior"):
+        agent = ladder.get(name).agent(seed=0)
+        assert getattr(agent, "decides_from_battle", False) is True
+        got = agent.decide(battle=b, fmt="gen9ou", vocabs=v)
+        assert got is None or got in acts, (name, got, acts)
