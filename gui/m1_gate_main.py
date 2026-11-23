@@ -33,28 +33,52 @@ def _finite(row: Dict[str, Any]) -> None:
 
 
 # ── Degenerate-training guard (WARN, never a hard stop) ─────────────────────
-# Thresholds are tunable here. The point is to WAKE the user to a dead net
-# (loud log line + status flag), NOT to kill a possibly-good run — a hard stop
-# on a threshold false-positive would cost a whole overnight run.
-DEG_ENTROPY_FLOOR = 0.30      # policy entropy below this = near-deterministic
-DEG_KL_WARN = 0.50            # per-round KL at/above this = unstable (warn)
-DEG_KL_HARD = 1.00            # ...at/above this = severe (warn harder)
-DEG_VALUE_STD_FLOOR = 0.02    # value-head std below this = collapsed (no signal)
-DEG_NO_PROGRESS_ROUNDS = 5    # 5 straight rounds of 0 training wins
-DEG_FLAT_YARDSTICK_EVALS = 3  # 3 straight evals at exactly 0.0 wr
+# The point is to WAKE the user to a dead net (loud log + status flag), NOT to
+# kill a possibly-good run — a hard-stop false-positive would cost an overnight
+# run, a warning false-positive is cheap.
+#
+# Signals split into IMMEDIATE (a single severe step is always meaningful) and
+# SUSTAINED (must persist for ``DEG_SUSTAINED`` rounds). The split exists because
+# a YOUNG net has naturally volatile KL and a low-spread value head during warmup
+# (rounds 1-3); reacting to a single noisy early round is cry-wolf. A young net
+# is high-entropy, so the entropy rule can't falsely fire on warmup and stays
+# immediate.
+DEG_ENTROPY_FLOOR = 0.30      # IMMEDIATE: entropy below this = near-deterministic
+DEG_KL_HARD = 1.00            # IMMEDIATE: per-round KL at/above this = blow-up
+DEG_KL_WARN = 0.50            # SUSTAINED: KL at/above this (creeping)
+DEG_VALUE_STD_FLOOR = 0.02    # SUSTAINED: value std below this (no win/loss)
+DEG_SUSTAINED = 2             # consecutive rounds a soft signal must hold
+DEG_NO_PROGRESS_ROUNDS = 5    # straight rounds of 0 training wins
+DEG_FLAT_YARDSTICK_EVALS = 3  # straight evals at exactly 0.0 wr
+
+
+def _streak(rows: list, pred) -> int:
+    """Count the trailing rows (from the latest backwards) that satisfy ``pred``.
+
+    A single non-matching row breaks the streak, so this measures *persistence*,
+    not just "the latest round is bad".
+    """
+    n = 0
+    for r in reversed(rows):
+        if pred(r):
+            n += 1
+        else:
+            break
+    return n
 
 
 def _degenerate_check(rows: list) -> list:
-    """Human-readable degenerate-training warnings for the LATEST round.
+    """Human-readable degenerate-training warnings, based on the recent ``rows``.
 
-    Pure function of the recent ``rows`` (no side effects -> unit-testable
-    without torch). Returns ``[]`` when healthy. Rules:
+    Pure function (no side effects -> unit-testable without torch). Returns ``[]``
+    when healthy. Rules:
 
-    * **entropy collapse** — latest ``entropy`` < ``DEG_ENTROPY_FLOOR``;
-    * **KL blow-up** — latest ``kl_approx`` >= ``DEG_KL_WARN`` (severe at
-      ``DEG_KL_HARD``);
-    * **value-head collapse** — latest ``value_std`` < ``DEG_VALUE_STD_FLOOR``
-      (the net predicts ~the same value for every state = no win/loss signal);
+    * **entropy collapse** — latest ``entropy`` < ``DEG_ENTROPY_FLOOR`` (immediate);
+    * **KL blow-up** — latest ``kl_approx`` >= ``DEG_KL_HARD`` (immediate);
+    * **KL sustained** — ``kl_approx`` >= ``DEG_KL_WARN`` for ``DEG_SUSTAINED``+
+      consecutive rounds (creeping divergence);
+    * **value-head collapse** — ``value_std`` < ``DEG_VALUE_STD_FLOOR`` for
+      ``DEG_SUSTAINED``+ rounds (no win/loss signal);
     * **no progress** — ``DEG_NO_PROGRESS_ROUNDS`` straight rounds of 0 wins;
     * **flat yardstick** — ``DEG_FLAT_YARDSTICK_EVALS`` straight evals at 0.0.
     """
@@ -63,41 +87,44 @@ def _degenerate_check(rows: list) -> list:
         return warns
     last = rows[-1]
 
-    def _finite_num(v: Any) -> bool:
+    def _num(v: Any) -> bool:
         return v is not None and isinstance(v, (int, float)) \
             and math.isfinite(float(v))
 
+    # 1. entropy collapse — immediate (a young net is high-entropy, so this
+    #    cannot falsely fire on warmup; low entropy is always a real signal).
     ent = last.get("entropy")
-    if _finite_num(ent) and ent < DEG_ENTROPY_FLOOR:
+    if _num(ent) and ent < DEG_ENTROPY_FLOOR:
         warns.append(f"entropy collapse: entropy={ent:.3f} < {DEG_ENTROPY_FLOOR} "
                      f"(policy is near-deterministic)")
 
+    # 2. KL — severe single-step blow-up is immediate; a softer elevation must
+    #    persist (one big PPO step is not degeneration, sustained is).
     kl = last.get("kl_approx")
-    if _finite_num(kl) and kl >= DEG_KL_WARN:
-        sev = "KL blow-up" if kl >= DEG_KL_HARD else "KL elevated"
-        thr = DEG_KL_HARD if kl >= DEG_KL_HARD else DEG_KL_WARN
-        warns.append(f"{sev}: kl_approx={kl:.3f} >= {thr} "
-                     f"({'updates are diverging' if kl >= DEG_KL_HARD else 'watch for divergence'})")
+    if _num(kl) and kl >= DEG_KL_HARD:
+        warns.append(f"KL blow-up: kl_approx={kl:.3f} >= {DEG_KL_HARD} "
+                     f"(updates diverging)")
+    elif _streak(rows, lambda r: _num(r.get("kl_approx")) and r["kl_approx"] >= DEG_KL_WARN) >= DEG_SUSTAINED:
+        warns.append(f"KL sustained: kl_approx={kl:.3f} >= {DEG_KL_WARN} for "
+                     f"{DEG_SUSTAINED}+ rounds (watch for divergence)")
 
+    # 3. value-head collapse — sustained low spread (warmup is naturally low).
     vs = last.get("value_std")
-    if _finite_num(vs) and vs < DEG_VALUE_STD_FLOOR:
+    if _num(vs) and _streak(rows, lambda r: _num(r.get("value_std")) and r["value_std"] < DEG_VALUE_STD_FLOOR) >= DEG_SUSTAINED:
         warns.append(f"value-head collapse: value_std={vs:.4f} < {DEG_VALUE_STD_FLOOR} "
-                     f"(net can't distinguish winning vs losing states)")
+                     f"for {DEG_SUSTAINED}+ rounds (no win/loss signal)")
 
-    recent = rows[-DEG_NO_PROGRESS_ROUNDS:]
-    if len(recent) == DEG_NO_PROGRESS_ROUNDS and all(
-            r.get("a1_wins", 0) == 0 and r.get("a1_losses", 0) > 0
-            for r in recent):
+    # 4. no progress — N straight rounds of 0 training wins.
+    if _streak(rows, lambda r: r.get("a1_wins", 0) == 0
+               and r.get("a1_losses", 0) > 0) >= DEG_NO_PROGRESS_ROUNDS:
         warns.append(f"no progress: 0 training wins for "
-                     f"{DEG_NO_PROGRESS_ROUNDS} straight rounds")
+                     f"{DEG_NO_PROGRESS_ROUNDS}+ straight rounds")
 
-    evals = [r for r in rows
-             if "eval_wr" in r and _finite_num(r.get("eval_wr"))]
-    recent_evals = evals[-DEG_FLAT_YARDSTICK_EVALS:]
-    if len(recent_evals) == DEG_FLAT_YARDSTICK_EVALS and all(
-            r.get("eval_wr") == 0.0 for r in recent_evals):
+    # 5. flat yardstick — N straight evals at exactly 0.0 wr.
+    evals = [r for r in rows if "eval_wr" in r and _num(r.get("eval_wr"))]
+    if _streak(evals, lambda r: r.get("eval_wr") == 0.0) >= DEG_FLAT_YARDSTICK_EVALS:
         warns.append(f"flat yardstick: eval_wr=0.0 for "
-                     f"{DEG_FLAT_YARDSTICK_EVALS} straight evals (not learning)")
+                     f"{DEG_FLAT_YARDSTICK_EVALS}+ straight evals (not learning)")
 
     return warns
 
