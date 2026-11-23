@@ -197,12 +197,12 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
                     battle_hook, stop_check) -> Dict[str, Any]:
     """One PPO round: play n_battles against the M1 pool, GAE, update."""
     import numpy as np
+    import torch
     from net.ppo import fill_gae, steps_to_batch, chosen_logprobs, PPOTrainer
     from net.ppo import RolloutStep, RolloutBuffer
     from net.env import (ShowdownEnv, StrongTeamBuilder, build_action_list,
                          build_obs, action_to_pe, random_action)
     from pool import PoolConfig, ResourcePool
-    import random as _random
 
     # Start the pool
     pool_cfg = PoolConfig(
@@ -222,8 +222,12 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
             if battle_hook:
                 battle_hook(i)
 
-            # Pick a random opponent from the pool
-            opp_ref = pool.sample(seed=trainer.round * 1000 + i)
+            # Pick a random opponent from the pool (weighted by ladder weights)
+            import random as _rnd
+            _rng = _rnd.Random(trainer.round * 1000 + i)
+            refs = pool.all()
+            weights = [r.weight for r in refs]
+            opp_ref = _rng.choices(refs, weights=weights, k=1)[0]
             opp_agent = opp_ref.make_agent(seed=trainer.round * 1000 + i)
 
             with srv_pool.battle_slot() as server_cfg:
@@ -282,10 +286,14 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
         metrics["draws"] = n_draws
         metrics["crashed"] = n_crashed
 
-    # Checkpoint
+    # Checkpoint — the standard self-play format (net.trainer.save_checkpoint):
+    # {"net": state_for_save(), "round": int} — resume (main) and load_file
+    # (pool snapshots / league) both read exactly this.
     ckpt_path = Path(trainer.cfg.checkpoint_dir or "checkpoints") / \
         f"m1gate_round{trainer.round + 1}.pt"
-    PokeNet.save(trainer.net, str(ckpt_path), round=trainer.round + 1)
+    ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"net": trainer.net.state_for_save(),
+                "round": trainer.round + 1}, str(ckpt_path))
     metrics["checkpoint"] = str(ckpt_path)
     metrics["round"] = trainer.round + 1
     trainer.round += 1
