@@ -2406,3 +2406,56 @@ an infrastructure flake, not a logic bug. Pair-1 (50 battles) completed and is
 the data above.
 
 **Status:** D3-cap fix ✅ (`b0fb765`). Self-stall rate = OPEN (user decision).
+
+---
+
+## M1 Gate CPU smoke test (2026-11-23, session after D6)
+
+**Task (user: "continue with the proposed CPU smoke test"):** prove
+`gui/m1_gate_main.py` (M1 Gate / C2 Arm A) works end-to-end. 2 rounds × 10
+battles, CPU-only, pool = random + heuristic (weights 1:2), 1 server × 1 slot,
+port 49990, `CUDA_VISIBLE_DEVICES=-1`.
+
+**Two real bugs found and fixed (commit `b3e62e6`), both in the checkpoint
+step — i.e. BOTH prior smoke attempts crashed AFTER all 10 battles + the PPO
+update had already run:**
+
+1. `NameError: name 'PokeNet' is not defined` — `_train_round_m1` is a
+   module-level function; `PokeNet` was only imported in `main()`'s local
+   scope.
+2. `AttributeError: type object 'PokeNet' has no attribute 'save'` — the
+   code called a method that does not exist. The project's save API is
+   `torch.save({"net": net.state_for_save(), "round": n}, path)` (the
+   `net.trainer.save_checkpoint` format; `PokeNet.load_file`/`unwrap_payload`
+   and the m1_gate resume path both read exactly this).
+
+Plus the prior agent's uncommitted fix (same commit): `Ladder` has no
+`.sample()` — pool sampling now uses seeded weighted `random.choices`.
+
+**PASS (run `runs/20261123T140000Z-smoke3`, wall 842s):**
+- 20 battles, **0 crashed, 0 draws**, 5 wins / 15 losses (a random-init net
+  vs random+heuristic — expected territory for a 2-round net).
+- transitions 628 + 556; ALL metrics finite in both rounds (loss 0.376 →
+  0.035, entropy 1.48 → 1.31, kl 0.103 → 0.243) — the `_finite` guard held.
+- 2 checkpoints written (12 MB each); **round-trip verified** via the exact
+  resume path (`torch.load` → `unwrap_payload` → `PokeNet.load`,
+  `round==2`, 2,997,505 params).
+- `status.json`: `state=completed`, `exit_code=0`; pool shut down cleanly;
+  no leftover processes (one pre-existing python.exe = the user's GUI).
+
+**Notes / open:**
+- The `strategy` / `strategy_posterior` opponent branches were NOT exercised
+  by this smoke (kept the pool small per the handoff); they remain covered by
+  the D6 gate runs (strategy agents live-tested there, `decide` signature
+  verified against the `_play_one_battle` call site).
+- ~40-45 s/battle on CPU with 1 server → the 1600-battle C4 gate on CPU would
+  be ~18-20 h single-stream; the GPU run (user-launched via GUI) is the plan.
+- Pre-existing, unrelated: `fitness/tests/test_harness.py::
+  test_evaluate_bot_beats_random_live` requests format `gen9bss3v3` which is
+  absent from `bot/team_pools.json` (has `gen9championsou`). Fails identically
+  with my changes stashed — data/test mismatch, not a regression.
+- The self-stall open question (a/b/c, section above) is still PENDING the
+  user's pick.
+
+**Status:** M1 Gate pipeline smoke ✅ (`b3e62e6`). Next per the handout:
+C2 Arm B (BC warm start) / C3 periodic evals — NOT started (not approved).
