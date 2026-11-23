@@ -2459,3 +2459,55 @@ Plus the prior agent's uncommitted fix (same commit): `Ladder` has no
 
 **Status:** M1 Gate pipeline smoke ✅ (`b3e62e6`). Next per the handout:
 C2 Arm B (BC warm start) / C3 periodic evals — NOT started (not approved).
+
+---
+
+## C3 yardstick eval — built (2026-11-23, commit `f3661c9`)
+
+**Task (user: "yeah lets do b" — instrument the big GPU run with the yardstick
+from round 1):** the CURRENT net (GREEDY/argmax) plays `eval_battles` vs the
+frozen `strategy` reference, every `eval_every` rounds + ALWAYS the final round.
+This is the learning-signal instrument — without it, the 2000-battle run would
+finish with no measurable answer to "is it learning?" (round-1→2 numbers at
+n=16 are noise).
+
+**Implementation (additive, 6.6a discipline respected):**
+- `gui/m1_gate_main.py::_eval_round_m1` — same thread-per-battle worker
+  pattern as `_train_round_m1`, but: no PPO update, no checkpoint bump;
+  GREEDY play via a `_Greedy` wrapper delegating to `PokeAgent.act(...,
+  deterministic=True)` (the learner's training agent stays the stochastic
+  one); seeds in a DISJOINT space (`1_000_000 + round*1000 + i`) so eval never
+  re-samples training battles; opponent from `full_pool` (the yardstick
+  exists even if `strategy` was excluded from the TRAINING pool);
+  W/L/D reported SEPARATELY (the D4 draw=-1.0 rule is training-reward only);
+  `eval_wr = wins/(w+l+d)` (nan if 0 played).
+- Metric keys are additive: `eval_opp, eval_battles, eval_w, eval_l, eval_d,
+  eval_crashed, eval_wr` — the existing row contract (`battles`, `transitions`,
+  `loss`, …) is untouched, so nothing downstream of `metrics.jsonl` changes.
+- GUI (`gui/desktop/app.py`): "Yardstick eval (C3)" fields — `eval_every`
+  (default 10), `eval_battles` (default 100), `eval_opp` combo (default
+  `strategy`; 0 on `eval_every` disables).
+
+**CPU smoke run (numbers):** `runs/20261123T170000Z-c3smoke` — 2 rounds × 4
+training battles + 2 evals × 4 battles (eval_every=1), 4 servers × 1, CPU-only,
+`CUDA_VISIBLE_DEVICES=-1`. **PASS, exit 0, wall 278 s:**
+- `metrics.jsonl`: 2 rows, BOTH with the full `eval_*` set (eval_every=1
+  triggers round 1 AND the final round — both fire, correct);
+- eval sums: W/L/D = 1/3/0 in both rounds, W+L+D = eval_battles = 4, 0
+  eval crashes;
+- `pytest fitness/tests/test_m1_pool.py`: 6/6 pass; AST parse both files OK.
+- Baseline yardstick number at a random-init net: **wr = 0.25 vs strategy**
+  (n=4 per round — noise, but the instrument is producing the series).
+
+**Design notes (for the user):**
+- Eval play = greedy/argmax (deterministic policy; battle RNG still unseeded
+  → 100-battle WR ≈ ±10 pt 95% CI — enough to see a TREND, not a verdict; the
+  verdict is the C4 final gate at ≥400 battles, sampled AND argmax).
+- The strategy yardstick was NOT redefined (6.6a): `strategy` stays as-is,
+  `strategy_posterior` stays a separate opponent; the eval just adds a series.
+- Cost: each eval = one extra pool boot + `eval_battles` battles. At the
+  big-run settings (100 rounds, eval_every=10, 100 battles) that is 11 evals
+  ≈ +1100 battles ≈ +30–40 % wall-time — the price of knowing.
+
+**Status:** C3 built + smoke ✅ (`f3661c9`). Pending: the big GPU run
+(100 rounds × 20 battles, 8×2, `device=cuda`, launcher paste) — USER launches.
