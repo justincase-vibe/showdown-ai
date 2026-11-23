@@ -329,7 +329,8 @@ class LeagueRun:
         the bots' buffers (the bot's OWN POV: a1 = pairing[0]).
 
         Reward shape = ``gae()``'s sparse-terminal model: winner +1, loser
-        −1, draw 0 — on the LAST decision of the battle (``collect.finalize``).
+        −1, draw −1 (2026-11-23 ruling) — on the LAST decision of the battle
+        (``collect.finalize``).
         A side that never acted contributes nothing (empty collector)."""
         coll_a, coll_b = self._collectors.get(idx, (None, None))
         if coll_a is None and coll_b is None:

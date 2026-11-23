@@ -24,7 +24,8 @@ DESIGN (net-agnostic + testable WITHOUT a net or a live sim)
   ``policy(state, actions)``. The real one wraps the sim + damage calc +
   PokeNet (M2); a mock one powers the unit tests. MCTS itself is game-agnostic.
 * Reward space: the SAME (−1, +1) zero-sum convention as ``net/ppo.py``
-  (win +1 / loss −1 / draw 0). The net's value head emits a (0,1) win-prob and
+  (win +1 / loss −1 / draw −1, 2026-11-23 ruling). The net's value head
+  emits a (0,1) win-prob and
   is mapped to reward space as ``2V − 1`` at the WorldModel boundary (M2) —
   identical to ppo.py's contract, so there is NO second convention.
 * Selection: **PUCT** (AlphaZero's UCB-with-prior):

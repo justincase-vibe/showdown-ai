@@ -13,7 +13,8 @@ semantics — the league feeds the same ``net.ppo`` machinery):
 * ``old_logprob`` / ``old_value`` are the decision-time numbers; ``old_value``
   stays RAW (0,1) — the ``2V-1`` reward-space mapping belongs to the GAE
   step (``SelfPlayTrainer.apply_gae``), exactly as in the solo trainer;
-* the terminal reward (winner +1 / loser −1 / draw 0) lands on the LAST step
+* the terminal reward (winner +1 / loser −1 / draw −1, 2026-11-23 ruling)
+  lands on the LAST step
   only — ``gae()``'s sparse-terminal model; all earlier steps stay 0.0;
 * a battle that ERRORED (infra) is DROPPED, never finalized: a partial
   trajectory with no decided outcome is poison for PPO (the engine discards
@@ -64,7 +65,8 @@ class TrajectoryCollector:
                  lam: float = 0.95) -> "TrajectoryCollector":
         """Attach the decided outcome to the trajectory AND GAE it.
 
-        ``outcome``: +1 (win) / −1 (loss) / 0 (draw) from the bot's own POV.
+        ``outcome``: +1 (win) / −1 (loss) / −1 (draw, 2026-11-23 ruling)
+        from the bot's own POV.
         Lands on the LAST step (sparse-terminal, what ``gae()`` expects) with
         ``done=True``; earlier steps keep reward 0.0. Empty trajectories
         (a side never acted) finalize to nothing — the buffer is untouched.

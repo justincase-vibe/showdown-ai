@@ -18,8 +18,9 @@ What this adds over the P3.4 smoke gate:
     device + checkpoint dir) with ``to_dict``/``from_dict`` so the GUI can
     serialize/edit it;
   * **on-policy** rounds (fresh rollouts + 1–2 epochs per update);
-  * **draw-tolerant** collection (a draw is reward 0, still buffered — the P3.4
-    gate's ``|reward|=1`` terminal assumption was a smoke simplification);
+  * **draw-tolerant** collection (a draw is reward −1, 2026-11-23 ruling,
+    still buffered — the P3.4 gate's ``|reward|=1`` terminal assumption was
+    a smoke simplification);
   * **checkpoint save/resume** (``state_for_save`` + config + round) so a long
     GPU run is safe and resumable;
   * **GPU-ready sampling** (the P2 agent's sampling generator now lives on the
