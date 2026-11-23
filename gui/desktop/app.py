@@ -383,6 +383,10 @@ class DesktopApp:
         ttk.Checkbutton(self._fields_frame, text="strategy (new)", variable=self._m1_opp_strategy).grid(row=r, column=0, sticky="w"); r += 1
         self._m1_opp_posterior = tk.BooleanVar(value=True)
         ttk.Checkbutton(self._fields_frame, text="strategy_posterior (informed)", variable=self._m1_opp_posterior).grid(row=r, column=0, sticky="w"); r += 1
+        ttk.Label(self._fields_frame, text="Yardstick eval (C3): 0 = disabled").grid(row=r, column=0, sticky="w", pady=(8, 0)); r += 1
+        self._m1_eval_every = self._add_field(r, 0, "Eval every N rounds:", 10, "int"); r += 1
+        self._m1_eval_battles = self._add_field(r, 0, "Eval battles:", 100, "int"); r += 1
+        self._m1_eval_opp = self._add_field(r, 0, "Eval opponent:", "strategy", "combo", values=["strategy", "strategy_posterior", "heuristic", "random"]); r += 1
         self._m1_resume = self._ckpt_field(r, 0, "Resume from (optional):", optional=True); r += 1
 
     def _build_bc_fields(self) -> None:
@@ -914,6 +918,9 @@ class DesktopApp:
                 "opp_heuristic": self._m1_opp_heuristic.get(),
                 "opp_strategy": self._m1_opp_strategy.get(),
                 "opp_posterior": self._m1_opp_posterior.get(),
+                "eval_every": self._m1_eval_every.get(),
+                "eval_battles": self._m1_eval_battles.get(),
+                "eval_opp": self._m1_eval_opp.get(),
                 "resume_from": (self._resolve_ckpt(self._m1_resume) or None),
             }
         elif mode == "bc":
