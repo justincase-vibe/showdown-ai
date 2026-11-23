@@ -53,8 +53,9 @@ def snapshot_reference(path, vocabs: Any, device: str = "cpu",
 
     Loads the net LAZILY (first ``make_agent``) and CACHES it (one disk read;
     the frozen net is shared across battles — inference-only, never trained, so
-    sharing is safe under the M1 gate's sequential play). Each battle still gets
-    a FRESH :class:`~net.agent.PokeAgent` (fresh RNG per battle).
+    sharing is safe even with the M1 gate's thread-per-battle workers: the net
+    is read-only during collection). Each battle still gets a FRESH
+    :class:`~net.agent.PokeAgent` (fresh RNG per battle).
     """
     path = os.fspath(path)
     cache: dict = {}

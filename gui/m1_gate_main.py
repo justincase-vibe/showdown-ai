@@ -195,11 +195,24 @@ def main(argv: Optional[list] = None) -> int:
 def _train_round_m1(trainer, pool, fmt, vocabs, device,
                     n_battles, max_steps, n_servers, per_server, port_base,
                     battle_hook, stop_check) -> Dict[str, Any]:
-    """One PPO round: play n_battles against the M1 pool, GAE, update."""
+    """One PPO round: play n_battles against the M1 pool, GAE, update.
+
+    Thread-per-battle — the pool's design front (D93.2: the Phase 0 gate ran
+    24 concurrent battles on 8 servers; the slot core is thread-based
+    specifically so poke-env's sync step() can be called from worker threads).
+    ``min(n_battles, n_servers*per_server)`` workers each pull the next battle
+    index, take a slot, play ONE battle, release. The main learner's NET is
+    shared READ-ONLY (eval mode, no state mutation during collection); each
+    battle gets a FRESH PokeAgent (fresh per-battle RNG — the same isolation
+    contract the opponents use, and it keeps the shared torch.Generator from
+    being touched by two threads at once). The PPO update runs
+    single-threaded AFTER all battles — on-policy, exactly as before."""
     import numpy as np
+    import threading
     import torch
     from net.ppo import fill_gae, steps_to_batch, chosen_logprobs, PPOTrainer
     from net.ppo import RolloutStep, RolloutBuffer
+    from net.agent import PokeAgent
     from net.env import (ShowdownEnv, StrongTeamBuilder, build_action_list,
                          build_obs, action_to_pe, random_action)
     from pool import PoolConfig, ResourcePool
@@ -212,52 +225,92 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
     srv_pool.start(wait_healthy=True)
 
     all_steps: list = []
-    n_wins = n_losses = n_draws = 0
-    n_crashed = 0
+    records: list = []      # one per battle: {a1_won, a2_won, crashed}
+    lock = threading.Lock()
+    next_idx = {"i": 0}
+    stop_evt = threading.Event()
 
-    try:
-        for i in range(n_battles):
-            if stop_check():
-                break
+    def _worker() -> None:
+        while True:
+            if stop_evt.is_set() or stop_check():
+                stop_evt.set()
+                return
+            with lock:
+                if next_idx["i"] >= n_battles:
+                    return
+                i = next_idx["i"]
+                next_idx["i"] += 1
+
             if battle_hook:
                 battle_hook(i)
 
-            # Pick a random opponent from the pool (weighted by ladder weights)
+            # Pick an opponent from the pool (weighted by ladder weights) —
+            # SAME (round, battle) seeding as the old sequential loop, so
+            # opponent choice stays deterministic under a seed.
             import random as _rnd
             _rng = _rnd.Random(trainer.round * 1000 + i)
             refs = pool.all()
             weights = [r.weight for r in refs]
             opp_ref = _rng.choices(refs, weights=weights, k=1)[0]
             opp_agent = opp_ref.make_agent(seed=trainer.round * 1000 + i)
+            # FRESH agent per battle (fresh RNG per battle; the shared net is
+            # read-only here — eval mode, no parameter/state mutation).
+            my_agent = PokeAgent(trainer.net, seed=trainer.round * 1000 + i,
+                                 device=device)
 
-            with srv_pool.battle_slot() as server_cfg:
-                try:
-                    traj, a1_won, a2_won, n_steps = _play_one_battle(
-                        trainer.agent, opp_agent, fmt, vocabs, device,
+            a1_won = a2_won = None
+            crashed = False
+            traj: list = []
+            try:
+                with srv_pool.battle_slot() as server_cfg:
+                    traj, a1_won, a2_won, _n = _play_one_battle(
+                        my_agent, opp_agent, fmt, vocabs, device,
                         server_cfg, trainer.round * 1000 + i, max_steps)
-                except Exception as exc:
-                    n_crashed += 1
-                    print(f"  battle {i}: CRASHED ({type(exc).__name__}: {exc})",
-                          flush=True)
-                    continue
+            except Exception as exc:
+                crashed = True
+                print(f"  battle {i}: CRASHED ({type(exc).__name__}: {exc})",
+                      flush=True)
 
-            if a1_won and not a2_won:
-                n_wins += 1
-                terminal_reward = 1.0
-            elif a2_won and not a1_won:
-                n_losses += 1
-                terminal_reward = -1.0
-            else:
-                n_draws += 1
-                terminal_reward = -1.0  # D4: draw = -1.0
+            if not crashed:
+                if a1_won and not a2_won:
+                    terminal_reward = 1.0
+                elif a2_won and not a1_won:
+                    terminal_reward = -1.0
+                else:
+                    terminal_reward = -1.0  # D4: draw = -1.0
+                if traj:
+                    traj[-1].reward = terminal_reward
+                    traj[-1].done = True
+                    fill_gae(traj, gamma=trainer.cfg.gamma, lam=trainer.cfg.lam)
 
-            if traj:
-                traj[-1].reward = terminal_reward
-                traj[-1].done = True
-                fill_gae(traj, gamma=trainer.cfg.gamma, lam=trainer.cfg.lam)
-                all_steps.extend(traj)
+            with lock:
+                records.append({"a1_won": a1_won, "a2_won": a2_won,
+                                "crashed": crashed})
+                if not crashed:
+                    all_steps.extend(traj)
+
+    n_workers = max(1, min(n_battles, n_servers * per_server))
+    print(f"[m1gate] {n_battles} battles x {n_workers} workers "
+          f"on {n_servers} server(s) x {per_server} slot(s)", flush=True)
+    try:
+        threads = [threading.Thread(target=_worker, name=f"m1gate-w{k}",
+                                    daemon=True) for k in range(n_workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
     finally:
+        stop_evt.set()
         srv_pool.shutdown()
+
+    # Aggregate exactly as the sequential loop did (same win/loss/draw rules)
+    n_wins = sum(1 for r in records if r["a1_won"] and not r["a2_won"])
+    n_losses = sum(1 for r in records if r["a2_won"] and not r["a1_won"])
+    n_draws = sum(1 for r in records
+                  if not r["crashed"]
+                  and not (r["a1_won"] and not r["a2_won"])
+                  and not (r["a2_won"] and not r["a1_won"]))
+    n_crashed = sum(1 for r in records if r["crashed"])
 
     # PPO update
     metrics = {"battles": n_battles, "transitions": len(all_steps),
