@@ -2339,3 +2339,70 @@ hysteresis, but the EXISTING captured data may still contain them).
 
 **Status:** D1 ✅ (`e502f3b`), D2 ✅ (`45ea5eb`), D3 ✅ (`26a5ac8`),
 D4 ✅ (`707b22b`), D5 = this note. D6 (50-battle regression gate) is next.
+
+---
+
+## 2026-11-23 — D6-draw investigation → D3 cap was DEAD in real battles (FIXED) + self-stall open question
+
+**Task:** investigate the D6 battle #17 draw (strategy_vs_heuristic, 200-step cap).
+
+**Finding (root cause):** the D3 no-progress cap (the user's ruling #2, "20
+no-progress turns → draw") was **silently dead in every real battle**. It only
+ever "worked" in fake-env unit tests, which never emit the fork's real log
+artifacts. Three defects in `league/driver.py` (all fixed, commit `b0fb765`):
+
+1. **`upkeep` mis-listed as a progress tag.** This fork emits a bare `|upkeep|`
+   phase marker on EVERY turn unconditionally (`sim/battle.ts` `residual` case;
+   SIM-PROTOCOL.md: "Signals the upkeep phase of the turn"). It carries no HP
+   payload. Listing it as progress reset the no-progress streak every single
+   turn. Real item upkeep arrives as `-damage/-heal ... [from] item:` (already
+   in the tag list). `belief/log_events.py` already treats `upkeep` as noise.
+2. **Signature not switch-invariant.** It included per-slot mon state, which
+   flips on every switch in singles (the active slot carries the data, the
+   benched mon is a 0/None placeholder). A pure switch ping-pong — exactly the
+   stall the cap exists to end — therefore NEVER confirmed (baseline vs trip
+   always mismatched) and reset forever. **New contract:** the SCANNER owns
+   per-mon progress (HP/status/boost/volatile — generous ground-truth tag
+   list); the belief SIGNATURE confirms only the switch-invariant clauses
+   (KO + field/hazards/weather/rooms). This is a deliberate narrowing, not a
+   loss: per-mon state is unreliable in the belief across switches, so it was
+   the wrong tool for the confirmation.
+3. **Baseline skipped.** Captured at `streak==1` exactly, but the first feed
+   batch contains several `|turn|` boundaries (streak jumps 0→2, skipping 1),
+   so the first trip was unconfirmable and blind-reset. Now captured at first
+   opportunity (`streak>=1`, baseline unset).
+
+**Verified:** forced switch-ping-pong (decide= override, both sides switch-only)
+now ends at the 20-turn cap as a draw (19 steps; previously ran to 200). 39/39
+driver tests pass (new: `test_tracker_fork_upkeep_phase_marker_is_NOT_progress`,
+`test_signature_invariant_to_switch_ping_pong`, `test_signature_confirms_ko_and_field`).
+D6 re-run shows the cap firing on real strategy-vs-strategy stalls.
+
+**OPEN QUESTION (for the user) — strategy-bot self-stall rate.** The D6
+re-run (post-fix) pair-1 (strategy_vs_strategy) shows ~18% draws (7
+cap-ended stalls out of 50) vs 0% in the pre-fix run. The cap fix did NOT
+change the stall rate (it only changes WHEN a stall ends: 20 turns vs 200
+steps — either way a draw). The pre-fix 0-draw result was a lucky random
+sample (battles carry unseeded server RNG: crits/accuracy/switch order). The
+strategy bot appears to have a **residual self-stall tendency of ~5–15%** —
+playing itself, it sometimes mutual-stalls (both avoid damage,
+switch/protect) after some back-and-forth. This is ABOVE the D6 5%
+threshold, so a representative D6 run would FAIL pair-1 on draw rate.
+
+This is a strategy-bot behaviour question, not a cap bug. Options:
+- (a) Accept the ~10% draw rate as legitimate stalls (the cap ending them as
+  draws is the correct outcome per the D3 ruling).
+- (b) Tighten the strategy bot's anti-stall (e.g., after N safe turns with no
+  progress, force a committal move) to push the rate under 5%.
+- (c) Re-run D6 with a larger sample (n=200/pair) to pin the true rate before
+  deciding (a) vs (b).
+MY LEAN: (c) first — the 50-battle gate is underpowered to distinguish 5%
+from 10% (±~4pt at 95% CI), and the pre-fix 0/50 was a tail event. Then (b)
+only if the true rate is clearly above 5%.
+
+**Also noted:** the D6 re-run crashed at pair-2 battle ~4 with a websocket
+`ConnectionResetError` (server-teardown instability under the 2-server pool),
+an infrastructure flake, not a logic bug. Pair-1 (50 battles) completed and is
+the data above.
+
+**Status:** D3-cap fix ✅ (`b0fb765`). Self-stall rate = OPEN (user decision).
