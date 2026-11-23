@@ -524,6 +524,24 @@ def test_tracker_switch_spam_is_no_progress():
     assert t.tripped
 
 
+def test_tracker_fork_upkeep_phase_marker_is_NOT_progress():
+    # 2026-11-23 regression (D6-draw investigation): THIS FORK emits a bare
+    # ``|upkeep`` phase marker on EVERY turn unconditionally (sim/battle.ts
+    # ``residual`` case; SIM-PROTOCOL.md: "Signals the upkeep phase of the
+    # turn"). It is NOT game-state progress. Listing it as a progress tag
+    # reset the streak every single turn and silently disabled the D3 cap in
+    # every real battle (the fake-env tests never emitted the marker, so they
+    # stayed green). Real item upkeep arrives as ``-damage/-heal [from] item``
+    # — covered by the existing tests.
+    t = NoProgressTracker(limit=3)
+    for i in (1, 2, 3):
+        t.feed_lines([f"|turn|{i}|",
+                      "|switch|p1a: Garchomp|183/183|",
+                      "|switch|p2a: Blastoise|190/190|",
+                      "|upkeep"])   # the fork's per-turn phase marker
+    assert t.streak == 3 and t.tripped
+
+
 def test_tracker_progress_resets_the_streak():
     # a turn's progress is judged at the NEXT boundary (a turn is over only
     # once the following |turn| line arrives) — the semantics the loop uses
@@ -610,22 +628,73 @@ def test_signature_invariant_to_action_history():
     assert progress_signature(v) == base
 
 
-def test_signature_changes_on_state_changes():
+def test_signature_invariant_to_switch_ping_pong():
+    # 2026-11-23 regression (D6-draw investigation): the belief is NOT
+    # switch-invariant — in singles every switch-in lands on the active field
+    # slot, so the active mon's block carries real data and the benched mon's
+    # block is a 0/None placeholder, and the two FLIP on every switch (two
+    # mons with different maxhp, as in the real ping-pong repro). The
+    # signature must be IDENTICAL in both phases, else the cap can never
+    # confirm in the exact stall it exists to end (it reset forever and the
+    # battle ran to the 200-step cap — the D6 battle #17 draw).
+    import copy
+    a = _ctx_base()
+    a["own"] = {  # phase A: mon X (maxhp 386) active in p1a
+        "p1a": {"hp_frac": 1.0, "statuses": [], "boosts": {}, "moves": [],
+                "tera": "", "last_hit": 0, "hit_this_turn": False,
+                "last_move_failed": False, "stockpile": 0,
+                "used_protect": False, "volatiles": [], "maxhp": 386},
+        "p1b": {"hp_frac": 0.0, "statuses": [], "boosts": {}, "moves": [],
+                "tera": "", "last_hit": 0, "hit_this_turn": False,
+                "last_move_failed": False, "stockpile": 0,
+                "used_protect": False, "volatiles": [], "maxhp": None},
+    }
+    b = copy.deepcopy(a)
+    b["own"] = {  # phase B: mon Y (maxhp 321) active in p1a, X benched
+        "p1a": {"hp_frac": 1.0, "statuses": [], "boosts": {}, "moves": [],
+                "tera": "", "last_hit": 0, "hit_this_turn": False,
+                "last_move_failed": False, "stockpile": 0,
+                "used_protect": False, "volatiles": [], "maxhp": 321},
+        "p1b": {"hp_frac": 0.0, "statuses": [], "boosts": {}, "moves": [],
+                "tera": "", "last_hit": 0, "hit_this_turn": False,
+                "last_move_failed": False, "stockpile": 0,
+                "used_protect": False, "volatiles": [], "maxhp": None},
+    }
+    b["opponent"]["p2a"]["maxhp"] = 999   # opponent side flips too
+    b2 = copy.deepcopy(b)
+    b2["opponent"]["p2a"]["maxhp"] = 100
+    assert progress_signature(a) == progress_signature(b)
+    assert progress_signature(b) == progress_signature(b2)
+
+
+def test_signature_confirms_ko_and_field():
+    # the new contract (2026-11-23): the signature is the belief safety net
+    # for the ruling's switch-invariant clauses — a KO (fainted count) or a
+    # hazard/screen/weather/room change MUST change it; per-mon HP/status/
+    # boost/volatile changes are the SCANNER's job (tag list) and do NOT
+    # change the signature (they flip on every switch in the belief, which is
+    # exactly why they were removed from it).
     import copy
     base = progress_signature(_ctx_base())
-    v = copy.deepcopy(_ctx_base()); v["own"]["p1a"]["hp_frac"] = 0.9
-    assert progress_signature(v) != base
-    v = copy.deepcopy(_ctx_base())
-    v["opponent"]["p2a"]["statuses"] = ["par"]
-    assert progress_signature(v) != base
-    v = copy.deepcopy(_ctx_base()); v["own"]["p1a"]["boosts"] = {"atk": 2}
-    assert progress_signature(v) != base
+    v = copy.deepcopy(_ctx_base()); v["fainted"] = {"p1": 1, "p2": 0}
+    assert progress_signature(v) != base          # KO -> confirmed change
     v = copy.deepcopy(_ctx_base())
     v["field"]["stealthrock"] = {"p1": 1}
-    assert progress_signature(v) != base
+    assert progress_signature(v) != base          # hazard set -> change
+    v = copy.deepcopy(_ctx_base())
+    v["field"]["weather"] = "RainDance"
+    assert progress_signature(v) != base          # weather -> change
+    # per-mon state: the scanner's territory, NOT in the signature
+    v = copy.deepcopy(_ctx_base()); v["own"]["p1a"]["hp_frac"] = 0.9
+    assert progress_signature(v) == base
+    v = copy.deepcopy(_ctx_base())
+    v["opponent"]["p2a"]["statuses"] = ["par"]
+    assert progress_signature(v) == base
+    v = copy.deepcopy(_ctx_base()); v["own"]["p1a"]["boosts"] = {"atk": 2}
+    assert progress_signature(v) == base
     v = copy.deepcopy(_ctx_base())
     v["opponent"]["p2a"]["volatiles"] = ["curse"]
-    assert progress_signature(v) != base
+    assert progress_signature(v) == base
 
 
 def test_signature_none_ctx_is_none():

@@ -154,8 +154,8 @@ def policy_action(agent: Any, battle: Any, fmt: str, vocabs: Any,
 #: a no-progress turn. The tag vocabulary is built from THIS FORK's own
 #: belief adapter (``belief/log_events.py::_map`` — the ground-truth parser,
 #: D29), including tags the belief IGNORES but that still change state
-#: (``upkeep`` = Life Orb chip, ``-clear*boost`` resets, ``-mustrecharge``
-#: locks, forme/item state). Deliberately GENEROUS: over-counting progress
+#: (``-clear*boost`` resets, ``-mustrecharge`` locks, forme/item state).
+#: Deliberately GENEROUS: over-counting progress
 #: only DELAYS the cap (the 200-step cap still ends a stall as a draw — the
 #: status quo), while a scanner MISS is caught by the belief-signature
 #: confirmation below, so both failure modes degrade to today's outcome.
@@ -163,10 +163,22 @@ def policy_action(agent: Any, battle: Any, fmt: str, vocabs: Any,
 #: movefail / -miss / -block, switch / drag / replace / leave, turn, the
 #: damage-modifier lines (-immune / -resisted / -supereffective / -crit /
 #: -ohko), and every battle-meta tag.
+#:
+#: CRITICAL (2026-11-23 bug fix, D6-draw investigation): ``upkeep`` is NOT a
+#: progress tag in THIS FORK. The fork emits a bare ``|upkeep`` phase marker
+#: on EVERY turn unconditionally (sim/battle.ts ``residual`` case — SIM-
+#: PROTOCOL.md: "Signals the upkeep phase of the turn"). It carries no HP
+#: payload. Real item upkeep damage arrives as ``-damage ... [from] item:
+#: Life Orb`` / ``-heal ... [from] item: Leftovers`` — both already listed
+#: below. (belief/log_events.py correctly treats ``upkeep`` as noise.)
+#: Listing ``upkeep`` here reset the no-progress streak every single turn,
+#: silently disabling the D3 cap in every real battle (the D6 battle #17
+#: 200-step draw was the symptom; the cap only ever "worked" in fake-env
+#: unit tests that never emit the fork's per-turn marker).
 _PROGRESS_TAGS = frozenset({
-    # HP change, any source (move hit, drain/recoil as context, item upkeep,
-    # hazard chip)
-    "-damage", "-heal", "-sethp", "-side damage", "upkeep",
+    # HP change, any source (move hit, drain/recoil as context, item chip via
+    # ``[from] item:`` payloads, hazard chip)
+    "-damage", "-heal", "-sethp", "-side damage",
     # a KO
     "faint",
     # status applied / removed
@@ -193,42 +205,44 @@ _PROGRESS_TAGS = frozenset({
 def progress_signature(ctx: Optional[Dict]) -> Optional[tuple]:
     """D3: the game-state key that the NO-PROGRESS confirmation compares.
 
-    Includes EXACTLY the state the ruling treats as progress: per-slot HP,
-    statuses, boosts, volatiles, tera, stockpile, revealed max HP; the
-    fainted counts; and the whole field (weather, terrain, rooms, screens,
-    hazards). EXCLUDED (not progress under the ruling, and must NOT keep the
-    cap from firing): the turn counter, the active slots (switch ping-pong is
-    the stall the cap exists to end), ``moves`` (moves_used — Protect spam),
-    the opponent's ``posterior`` / ``top_moves`` (inference + revealed moves,
-    not game state), and the per-turn flags (``hit_this_turn`` /
-    ``used_protect`` / ``last_move_failed`` / ``last_hit``).
+    Division of labour (2026-11-23 bug fix, D6-draw investigation — the cap
+    was silently DEAD in every real battle before this):
+
+    * the SCANNER (``_PROGRESS_TAGS`` + :class:`NoProgressTracker`) is
+      responsible for per-mon progress: HP change, status, boost, volatile,
+      tera, stockpile, item state — a generous tag list built from the fork's
+      own belief adapter (D29 ground truth).
+    * this SIGNATURE confirms the ruling's two clauses that are RELIABLY
+      switch-invariant in the belief: **no KO** (fainted counts) and **no
+      hazard/screen/weather/room change** (the whole field).
+
+    WHY NOT per-mon state here (the original design): the belief is NOT
+    switch-invariant — in singles every switch-in lands on the active field
+    slot, so the active mon's block (and only that block) carries real data
+    at any instant, and it FLIPS on every switch (verified 2026-11-23: a
+    forced ping-pong produced two alternating signatures, baseline and trip
+    always mismatched, the cap reset forever and ran to the 200-step cap).
+    A signature that includes per-mon state can therefore never confirm in a
+    pure switch ping-pong — exactly the stall D3 exists to end. Per-mon
+    changes stay the scanner's job; the signature keeps the safety net where
+    it is both reliable and highest-value (a hidden KO or a silently-set
+    hazard would otherwise false-positive the draw).
+
+    EXCLUDED (must NOT keep the cap from firing): the turn counter, the
+    active slots, ``moves`` (Protect spam), the opponent's
+    ``posterior``/``top_moves`` (inference, not game state), and the per-turn
+    flags (``hit_this_turn`` / ``used_protect`` / ``last_move_failed`` /
+    ``last_hit``).
+
     ``None`` ctx (belief unavailable) -> ``None`` (the caller treats that as
     'cannot confirm' — the cap does NOT trip; the step cap backstops).
     """
     if not isinstance(ctx, dict):
         return None
 
-    def _mon_key(b: Optional[Dict]) -> tuple:
-        b = b or {}
-        return (
-            b.get("hp_frac"),
-            tuple(sorted(b.get("statuses") or [])),
-            tuple(sorted((b.get("boosts") or {}).items())),
-            tuple(sorted(b.get("volatiles") or [])),
-            b.get("tera") or "",
-            b.get("stockpile") or 0,
-            b.get("maxhp"),
-        )
-
-    def _side_key(side: Optional[Dict]) -> tuple:
-        side = side or {}
-        return tuple(sorted((slot, _mon_key(side.get(slot))) for slot in side))
-
     f = ctx.get("field") or {}
     return (
         tuple(sorted((ctx.get("fainted") or {}).items())),
-        _side_key(ctx.get("own")),
-        _side_key(ctx.get("opponent")),
         (
             f.get("weather"), f.get("terrain"),
             bool(f.get("trickroom")), bool(f.get("wonderroom")),
@@ -359,7 +373,15 @@ def _step_loop(env: Any, decide_a: Callable[[Any], Any],
         if len(lines) > seen_lines:
             cap.feed_lines(lines[seen_lines:])
             seen_lines = len(lines)
-        if cap.streak == 1:
+        # Baseline = the belief state at the START of this streak. Captured at
+        # the FIRST opportunity (streak >= 1), NOT exactly at streak == 1:
+        # one feed batch can contain several |turn| boundaries (the initial
+        # replay-log chunk always does), so the streak can jump 0 -> 2 and
+        # skip 1, leaving the baseline unset — which made the first trip
+        # unconfirmable and forced a blind reset (2026-11-23 bug fix, D6-draw
+        # investigation). Within one streak the state is (by definition)
+        # unchanged, so capturing it at any point in the streak is valid.
+        if baseline is None and cap.streak >= 1:
             baseline = _cap_signature(env, fmt)
         if cap.tripped:
             sig = _cap_signature(env, fmt)
