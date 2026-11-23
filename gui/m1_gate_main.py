@@ -32,6 +32,76 @@ def _finite(row: Dict[str, Any]) -> None:
                 f"non-finite metric {k}={v!r} in round {row.get('round')!r}")
 
 
+# ── Degenerate-training guard (WARN, never a hard stop) ─────────────────────
+# Thresholds are tunable here. The point is to WAKE the user to a dead net
+# (loud log line + status flag), NOT to kill a possibly-good run — a hard stop
+# on a threshold false-positive would cost a whole overnight run.
+DEG_ENTROPY_FLOOR = 0.30      # policy entropy below this = near-deterministic
+DEG_KL_WARN = 0.50            # per-round KL at/above this = unstable (warn)
+DEG_KL_HARD = 1.00            # ...at/above this = severe (warn harder)
+DEG_VALUE_STD_FLOOR = 0.02    # value-head std below this = collapsed (no signal)
+DEG_NO_PROGRESS_ROUNDS = 5    # 5 straight rounds of 0 training wins
+DEG_FLAT_YARDSTICK_EVALS = 3  # 3 straight evals at exactly 0.0 wr
+
+
+def _degenerate_check(rows: list) -> list:
+    """Human-readable degenerate-training warnings for the LATEST round.
+
+    Pure function of the recent ``rows`` (no side effects -> unit-testable
+    without torch). Returns ``[]`` when healthy. Rules:
+
+    * **entropy collapse** — latest ``entropy`` < ``DEG_ENTROPY_FLOOR``;
+    * **KL blow-up** — latest ``kl_approx`` >= ``DEG_KL_WARN`` (severe at
+      ``DEG_KL_HARD``);
+    * **value-head collapse** — latest ``value_std`` < ``DEG_VALUE_STD_FLOOR``
+      (the net predicts ~the same value for every state = no win/loss signal);
+    * **no progress** — ``DEG_NO_PROGRESS_ROUNDS`` straight rounds of 0 wins;
+    * **flat yardstick** — ``DEG_FLAT_YARDSTICK_EVALS`` straight evals at 0.0.
+    """
+    warns: list = []
+    if not rows:
+        return warns
+    last = rows[-1]
+
+    def _finite_num(v: Any) -> bool:
+        return v is not None and isinstance(v, (int, float)) \
+            and math.isfinite(float(v))
+
+    ent = last.get("entropy")
+    if _finite_num(ent) and ent < DEG_ENTROPY_FLOOR:
+        warns.append(f"entropy collapse: entropy={ent:.3f} < {DEG_ENTROPY_FLOOR} "
+                     f"(policy is near-deterministic)")
+
+    kl = last.get("kl_approx")
+    if _finite_num(kl) and kl >= DEG_KL_WARN:
+        sev = "KL blow-up" if kl >= DEG_KL_HARD else "KL elevated"
+        thr = DEG_KL_HARD if kl >= DEG_KL_HARD else DEG_KL_WARN
+        warns.append(f"{sev}: kl_approx={kl:.3f} >= {thr} "
+                     f"({'updates are diverging' if kl >= DEG_KL_HARD else 'watch for divergence'})")
+
+    vs = last.get("value_std")
+    if _finite_num(vs) and vs < DEG_VALUE_STD_FLOOR:
+        warns.append(f"value-head collapse: value_std={vs:.4f} < {DEG_VALUE_STD_FLOOR} "
+                     f"(net can't distinguish winning vs losing states)")
+
+    recent = rows[-DEG_NO_PROGRESS_ROUNDS:]
+    if len(recent) == DEG_NO_PROGRESS_ROUNDS and all(
+            r.get("a1_wins", 0) == 0 and r.get("a1_losses", 0) > 0
+            for r in recent):
+        warns.append(f"no progress: 0 training wins for "
+                     f"{DEG_NO_PROGRESS_ROUNDS} straight rounds")
+
+    evals = [r for r in rows
+             if "eval_wr" in r and _finite_num(r.get("eval_wr"))]
+    recent_evals = evals[-DEG_FLAT_YARDSTICK_EVALS:]
+    if len(recent_evals) == DEG_FLAT_YARDSTICK_EVALS and all(
+            r.get("eval_wr") == 0.0 for r in recent_evals):
+        warns.append(f"flat yardstick: eval_wr=0.0 for "
+                     f"{DEG_FLAT_YARDSTICK_EVALS} straight evals (not learning)")
+
+    return warns
+
+
 def main(argv: Optional[list] = None) -> int:
     ap = argparse.ArgumentParser(prog="gui.m1_gate_main")
     ap.add_argument("--config", required=True)
@@ -160,6 +230,7 @@ def main(argv: Optional[list] = None) -> int:
 
     t0 = time.time()
     state_final = "completed"
+    history: list = []   # recent metric rows -> the degenerate guard's input
     try:
         for round_no in range(rounds):
             if stop_check():
@@ -192,6 +263,18 @@ def main(argv: Optional[list] = None) -> int:
                     f"W/L/D={ev.get('eval_w')}/{ev.get('eval_l')}/"
                     f"{ev.get('eval_d')} wr={ev.get('eval_wr')}")
             runstate.append_metric(rd, row)
+            # Degenerate-training guard (WARN, never a hard stop): a dead net
+            # must be LOUD in the log + status.json so the user is woken, not
+            # left with a silent garbage checkpoint. Pure fn of recent rows.
+            history.append(row)
+            warns = _degenerate_check(history[-5:])
+            if warns:
+                for w in warns:
+                    log(f"*** DEGENERATE (round {row.get('round')}): {w}")
+                runstate.write_status(rd, degenerate_warnings=warns,
+                                      degenerate_round=row.get("round"))
+            else:
+                runstate.write_status(rd, degenerate_warnings=[])
             log(f"round {row.get('round')}: battles={row.get('battles')} "
                 f"transitions={row.get('transitions')} "
                 f"loss={row.get('loss')} "
@@ -344,6 +427,12 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
         with torch.no_grad():
             batch["old_logprob"] = chosen_logprobs(trainer.net, batch).clone()
             batch["old_value"] = trainer.net(batch)["value"][:, 0, 0].clone()
+            # value_std: spread of the value head's predictions across this
+            # batch. Near-0 = the net assigns ~the same value to every state
+            # (no win/loss discrimination) — the most insidious degenerate
+            # mode, so it gets its own metric + the degenerate guard.
+            value_std = (float(batch["old_value"].std().item())
+                         if len(batch["old_value"]) > 1 else 0.0)
         ppo = PPOTrainer(trainer.net, lr=trainer.cfg.lr,
                          clip_eps=trainer.cfg.clip_eps,
                          vf_coef=trainer.cfg.vf_coef,
@@ -360,6 +449,7 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
         metrics["a1_losses"] = n_losses
         metrics["draws"] = n_draws
         metrics["crashed"] = n_crashed
+        metrics["value_std"] = round(value_std, 5)
 
     # Checkpoint — the standard self-play format (net.trainer.save_checkpoint):
     # {"net": state_for_save(), "round": int} — resume (main) and load_file

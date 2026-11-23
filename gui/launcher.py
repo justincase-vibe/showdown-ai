@@ -642,6 +642,7 @@ def status(runs_dir: Optional[Path] = None, metrics_tail: int = 5) -> Dict[str, 
         "heartbeat_age_s": None,
         "error": None, "stop_requested": False,
         "metrics_tail": [], "checkpoints": [], "cuda_available": cuda_available(),
+        "degenerate_warnings": [],
     }
     runs_list = runstate.list_runs(runs)
     if not runs_list:
@@ -665,6 +666,7 @@ def status(runs_dir: Optional[Path] = None, metrics_tail: int = 5) -> Dict[str, 
         "metrics_tail": runstate.read_metrics(rd, metrics_tail),
         "checkpoints": runstate.checkpoints(rd),
         "started": st.get("started"),
+        "degenerate_warnings": st.get("degenerate_warnings", []),
     })
     return out
 
