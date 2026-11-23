@@ -2559,3 +2559,34 @@ rules are the real degenerate signals and are conservative.
 **Status:** guard built + tested + smoke ✅ (`1431f5b`). The big 1500-battle
 GPU run is now instrumented: C3 yardstick (learning trend) + the degenerate
 guard (dead-net alarm) + `value_std` (collapse detector).
+
+### Guard refinement — immediate vs sustained (cry-wolf fix)
+
+**Trigger:** the 2-round GPU test (`runs/20261123T153322Z`) FIRED the guard at
+round 2 — `KL elevated (0.797 >= 0.5)` + `value-head collapse (0.0152 < 0.02)`. In
+context that was **warmup noise, not degeneration**: eval was IMPROVING (0.1 → 0.3),
+entropy healthy and rising (1.40 → 1.48), and it's a random-init net at round 2
+whose value head is barely trained (low `value_std` + a volatile KL step are
+EXPECTED early). Reacting to one noisy early round would make the alarm
+unreliable (cry-wolf) — the exact failure the guard exists to avoid.
+
+**Fix (principled, minimal):** split signals into IMMEDIATE (a single severe
+step is always meaningful) vs SUSTAINED (must persist `DEG_SUSTAINED`=2 rounds):
+
+| signal | was | now |
+|---|---|---|
+| entropy collapse | single < 0.30 | single < 0.30 (immediate — a young net is high-entropy, can't false-fire) |
+| KL | single ≥ 0.5 | **immediate** if ≥ 1.0 (blow-up); **sustained** ≥ 0.5 for 2 rounds |
+| value-head | single < 0.02 | **sustained** < 0.02 for 2 rounds |
+| no progress | 5 rounds | 5 rounds (unchanged) |
+| flat yardstick | 3 evals | 3 evals (unchanged) |
+
+New `_streak(rows, pred)` helper measures *persistence* (a single good round
+breaks the streak), so "the latest round is bad" no longer triggers the soft
+rules. Rationale: one big PPO step ≠ degeneration; a young net's low value
+spread is warmup, not collapse.
+
+**Verification:** 16 guard tests (was 13), including the regression
+`test_real_round2_case_no_false_positive` (the exact round-2 metrics that fired
+before now produce **no** warning) and per-rule fire/boundary cases. 16/16 pass,
+AST clean.
