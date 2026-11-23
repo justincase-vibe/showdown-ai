@@ -31,7 +31,10 @@ from league.driver import (
     _step_loop,
     play_agent_battle_on,
     policy_action,
+    NoProgressTracker,
+    progress_signature,
 )
+from league import driver  # noqa: E402  (monkeypatch target for _cap_signature)
 
 
 # ── fake battle / fake env ──────────────────────────────────────────────────
@@ -430,3 +433,256 @@ def test_policy_action_ctx_brain_error_degrades_to_pass():
                         greedy=True, log=warnings.append)
     assert got is None                  # the brain's raise degrades to a pass
     assert any("decision error" in w for w in warnings)
+
+
+# ── D3 (2026-11-23) — the no-progress cap ───────────────────────────────────
+
+class _StallBattle:
+    """A battle whose log is a PROTECT-SPAM stall: turn after turn of
+    |move|Protect with NO progress lines (the exact stall D3 must end)."""
+
+    def __init__(self):
+        self.finished = False
+        self.won = False
+        self.active_pokemon = _Mon(moves=("tackle", "protect"))
+        self.team = {"p1a": _Mon()}
+        self._turn = 0
+        self._log = ["|gen9|", "|tier|Gen 9 OU", "|start|"]
+
+    def _emit_turn(self):
+        self._turn += 1
+        self._log.append(f"|turn|{self._turn}|")
+        self._log.append("|move|p1a: Garchomp|Protect|p1a: Garchomp")
+        self._log.append("|move|p2a: Blastoise|Protect|p2a: Blastoise")
+
+    def _build_replay_log(self):
+        return "\n".join(self._log)
+
+
+class _DamageBattle(_StallBattle):
+    """The same stall but with a -damage line EVERY turn (legit play — the
+    cap must never trip)."""
+
+    def _emit_turn(self):
+        super()._emit_turn()
+        self._log.append("|-damage|p2a: Blastoise|80%|")
+
+
+class _StallEnv:
+    """The ShowdownEnv surface, scripted: every step emits one full stall
+    turn on the log; term fires at ``max_turns`` steps."""
+
+    def __init__(self, max_turns: int = 100):
+        self.possible_agents = ("A1", "A2")
+        self.battle1 = _StallBattle()
+        self.battle2 = _StallBattle()
+        self.agent1_to_move = True
+        self.agent2_to_move = True
+        self._max_turns = max_turns
+        self._steps = 0
+        self.closed = 0
+        self.reset_calls = 0
+
+    def reset(self):
+        self.reset_calls += 1
+        return {}, None
+
+    def step(self, actions):
+        self._steps += 1
+        self.battle1._emit_turn()
+        self.battle2._emit_turn()
+        term = {"A1": self._steps >= self._max_turns,
+                "A2": self._steps >= self._max_turns}
+        return {}, None, term, {"A1": False, "A2": False}, None
+
+    def close(self, force: bool = True, wait: bool = True):
+        self.closed += 1
+
+
+# ── NoProgressTracker (the pure state machine) ─────────────────────────────
+
+def test_tracker_protect_spam_accumulates_and_trips():
+    t = NoProgressTracker(limit=3)
+    for _ in range(2):
+        t.feed_lines(["|turn|1|", "|move|p1a|Protect|p1a",
+                      "|move|p2a|Protect|p2a"])
+    assert t.streak == 2 and not t.tripped
+    t.feed_lines(["|turn|3|", "|move|p1a|Protect|p1a"])
+    assert t.streak == 3 and t.tripped
+
+
+def test_tracker_switch_spam_is_no_progress():
+    # a switch ping-pong (|switch|/|setactive|) is exactly the stall the cap
+    # exists to end — it must NOT count as progress
+    t = NoProgressTracker(limit=2)
+    for i in (1, 2):
+        t.feed_lines([f"|turn|{i}|",
+                      "|switch|p1a: Garchomp|183/183|",
+                      "|setactive|Garchomp",
+                      "|switch|p2a: Blastoise|190/190|",
+                      "|setactive|Blastoise"])
+    assert t.tripped
+
+
+def test_tracker_progress_resets_the_streak():
+    # a turn's progress is judged at the NEXT boundary (a turn is over only
+    # once the following |turn| line arrives) — the semantics the loop uses
+    t = NoProgressTracker(limit=3)
+    t.feed_lines(["|turn|1|", "|move|p1a|Protect|p1a"])
+    assert t.streak == 1
+    t.feed_lines(["|turn|2|", "|-damage|p2a|Blastoise|80%|"])  # turn 2's damage
+    t.feed_lines(["|turn|3|", "|switch|p1a|Garchomp|183/183|"])
+    assert t.streak == 0                    # ...resets at the turn-3 boundary
+    t.feed_lines(["|turn|4|", "|-status|p2a|par|"])             # turn 4's status
+    t.feed_lines(["|turn|5|", "|move|p1a|Protect|p1a"])
+    assert t.streak == 0                    # ...resets at the turn-5 boundary
+    for i in (6, 7, 8):                     # build a full streak again
+        t.feed_lines([f"|turn|{i}|", "|move|p1a|Protect|p1a"])
+    assert t.streak == 3 and t.tripped
+
+
+def test_tracker_hazard_boost_and_chip_are_progress():
+    t = NoProgressTracker(limit=5)
+    t.feed_lines(["|turn|1|", "|move|p1a|Stealth Rock|p1a"])       # announce
+    t.feed_lines(["|turn|2|", "|-sidestart|p1|Stealth Rock|"])     # field set
+    t.feed_lines(["|turn|3|", "|-boost|p1a|atk|2|"])               # boost
+    t.feed_lines(["|turn|4|", "|-side damage|p2a|Blastoise|90%|"]) # chip
+    t.feed_lines(["|turn|5|", "|move|p1a|Protect|p1a"])
+    assert t.streak == 0                # each progress turn reset at its next boundary
+
+
+def test_tracker_junk_lines_are_ignored():
+    t = NoProgressTracker(limit=1)
+    t.feed_lines(["", "not a line", "|", "||", None, "   "])
+    assert t.streak == 0 and not t.tripped
+
+
+def test_tracker_limit_floor():
+    assert NoProgressTracker(limit=0).limit == 1   # max(1, ...) floor
+    assert NoProgressTracker(limit=-5).limit == 1
+
+
+# ── progress_signature (the belief-diff confirmation) ───────────────────────
+
+def _ctx_base():
+    return {
+        "turn": 5,
+        "fainted": {"p1": 0, "p2": 0},
+        "active": {"p1": "p1a", "p2": "p2a"},
+        "field": {"weather": "", "terrain": "", "trickroom": False,
+                  "wonderroom": False, "tailwind_side": "",
+                  "reflect": {}, "lightscreen": {}, "auroraveil": {},
+                  "spikes": {}, "toxicspikes": {}, "stealthrock": {},
+                  "stickyweb": {}, "safeguard": {}},
+        "own": {"p1a": {"hp_frac": 1.0, "statuses": [], "boosts": {},
+                        "moves": ["ember"], "tera": "", "last_hit": 0,
+                        "hit_this_turn": False, "last_move_failed": False,
+                        "stockpile": 0, "used_protect": True,
+                        "volatiles": [], "maxhp": 183}},
+        "opponent": {"p2a": {"species": "blastoise", "hp_frac": 0.5,
+                             "statuses": [], "boosts": {}, "moves": [],
+                             "tera": "", "last_hit": 0,
+                             "hit_this_turn": False,
+                             "last_move_failed": False, "stockpile": 0,
+                             "used_protect": False, "volatiles": [],
+                             "maxhp": 183,
+                             "posterior": [{"ability": "torrent",
+                                            "weight": 1.0}],
+                             "top_moves": ["surf"],
+                             "top_move_weights": [1.0]}},
+    }
+
+
+def test_signature_invariant_to_action_history():
+    # turn counter, moves_used (Protect spam), the active slots (switch
+    # ping-pong), the per-turn flags and the opponent's posterior/top_moves
+    # are NOT progress — none of them may change the signature
+    import copy
+    base = progress_signature(_ctx_base())
+    v = copy.deepcopy(_ctx_base())
+    v["turn"] = 99
+    v["own"]["p1a"]["moves"] = ["ember", "protect", "protect"]
+    v["own"]["p1a"]["used_protect"] = False
+    v["own"]["p1a"]["hit_this_turn"] = True
+    v["active"] = {"p1": "p1b", "p2": "p2b"}
+    v["opponent"]["p2a"]["top_moves"] = ["surf", "icebeam"]
+    v["opponent"]["p2a"]["posterior"] = []
+    assert progress_signature(v) == base
+
+
+def test_signature_changes_on_state_changes():
+    import copy
+    base = progress_signature(_ctx_base())
+    v = copy.deepcopy(_ctx_base()); v["own"]["p1a"]["hp_frac"] = 0.9
+    assert progress_signature(v) != base
+    v = copy.deepcopy(_ctx_base())
+    v["opponent"]["p2a"]["statuses"] = ["par"]
+    assert progress_signature(v) != base
+    v = copy.deepcopy(_ctx_base()); v["own"]["p1a"]["boosts"] = {"atk": 2}
+    assert progress_signature(v) != base
+    v = copy.deepcopy(_ctx_base())
+    v["field"]["stealthrock"] = {"p1": 1}
+    assert progress_signature(v) != base
+    v = copy.deepcopy(_ctx_base())
+    v["opponent"]["p2a"]["volatiles"] = ["curse"]
+    assert progress_signature(v) != base
+
+
+def test_signature_none_ctx_is_none():
+    assert progress_signature(None) is None
+
+
+# ── _step_loop integration (fake env + injected signature) ──────────────────
+
+def test_step_loop_cap_ends_a_protect_stall_early(monkeypatch):
+    monkeypatch.setattr(driver, "_cap_signature", lambda env, fmt: ("state",))
+    env = _StallEnv()
+    logs: list = []
+    n = _step_loop(env, lambda b: None, lambda b: None, max_steps=200,
+                   no_progress_limit=3, log=logs.append)
+    assert n == 3                       # tripped on the 3rd no-progress turn
+    assert not env.battle1.won and not env.battle2.won   # -> a DRAW
+    # (close() is play_agent_battle_on's contract, not _step_loop's)
+    assert any("no-progress cap" in w for w in logs)
+
+
+def test_step_loop_cap_respects_progress(monkeypatch):
+    monkeypatch.setattr(driver, "_cap_signature", lambda env, fmt: ("state",))
+    env = _StallEnv()
+    env.battle1 = _DamageBattle()      # a -damage line every turn
+    n = _step_loop(env, lambda b: None, lambda b: None, max_steps=8,
+                   no_progress_limit=2)
+    assert n == 8                      # the streak never builds up
+
+
+def test_step_loop_cap_confirms_a_scanner_miss(monkeypatch):
+    # the belief shows a state change the scanner missed -> the streak RESETS
+    # and the battle keeps running (no false-positive draw)
+    calls = {"n": 0}
+
+    def _sig(env, fmt):
+        calls["n"] += 1
+        return ("state", calls["n"])   # a different signature every call
+
+    monkeypatch.setattr(driver, "_cap_signature", _sig)
+    env = _StallEnv()
+    n = _step_loop(env, lambda b: None, lambda b: None, max_steps=10,
+                   no_progress_limit=3)
+    assert n == 10                     # confirmation never agreed -> no cap
+
+
+def test_step_loop_cap_needs_a_confirmed_signature(monkeypatch):
+    # belief unavailable (signature None) -> the cap must NOT trip (the step
+    # cap backstops the stall as a draw, exactly as today)
+    monkeypatch.setattr(driver, "_cap_signature", lambda env, fmt: None)
+    env = _StallEnv()
+    n = _step_loop(env, lambda b: None, lambda b: None, max_steps=10,
+                   no_progress_limit=3)
+    assert n == 10
+
+
+def test_step_loop_cap_disabled():
+    env = _StallEnv()
+    n = _step_loop(env, lambda b: None, lambda b: None, max_steps=10,
+                   no_progress_limit=0)
+    assert n == 10                     # the step cap alone governs

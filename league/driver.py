@@ -25,7 +25,8 @@ from typing import Any, Callable, Dict, Optional, Tuple
 #: (``None`` = pass/wait, no legal action this moment — the loop sends -2).
 DecideFn = Callable[..., Any]
 
-__all__ = ["play_agent_battle_on", "policy_action", "DecisionGuard", "DecideFn"]
+__all__ = ["play_agent_battle_on", "policy_action", "DecisionGuard", "DecideFn",
+           "NoProgressTracker", "progress_signature"]
 
 
 class DecisionGuard:
@@ -147,14 +148,187 @@ def policy_action(agent: Any, battle: Any, fmt: str, vocabs: Any,
     return d.action
 
 
+#: D3 (2026-11-23 ruling): the log tags that constitute GAME-STATE PROGRESS.
+#: The ruling: "no HP change from any source (damage, poison/burn, hazards,
+#: weather), no status applied, no boost change and no hazard/screen set" is
+#: a no-progress turn. The tag vocabulary is built from THIS FORK's own
+#: belief adapter (``belief/log_events.py::_map`` — the ground-truth parser,
+#: D29), including tags the belief IGNORES but that still change state
+#: (``upkeep`` = Life Orb chip, ``-clear*boost`` resets, ``-mustrecharge``
+#: locks, forme/item state). Deliberately GENEROUS: over-counting progress
+#: only DELAYS the cap (the 200-step cap still ends a stall as a draw — the
+#: status quo), while a scanner MISS is caught by the belief-signature
+#: confirmation below, so both failure modes degrade to today's outcome.
+#: EXCLUDED on purpose (action history, not state): move / -fail / cant /
+#: movefail / -miss / -block, switch / drag / replace / leave, turn, the
+#: damage-modifier lines (-immune / -resisted / -supereffective / -crit /
+#: -ohko), and every battle-meta tag.
+_PROGRESS_TAGS = frozenset({
+    # HP change, any source (move hit, drain/recoil as context, item upkeep,
+    # hazard chip)
+    "-damage", "-heal", "-sethp", "-side damage", "upkeep",
+    # a KO
+    "faint",
+    # status applied / removed
+    "-status", "-curestatus",
+    # stat-boost change (per-stat or whole-reset)
+    "-boost", "-unboost", "-layerchange", "-setboost",
+    "-clearboost", "-clearpositiveboost", "-clearnegativeboost",
+    "-clearallboost",
+    # volatiles (Focus Energy, Substitute, Leech Seed, Curse, Taunt, ...)
+    "-start", "-end",
+    # field: hazards / screens / pseudo-weather / rooms
+    "-sidestart", "-sideend", "-fieldstart", "-fieldactivate", "-fieldend",
+    "-clearspikes", "-swapsideconditions",
+    # weather / terrain
+    "weather", "-weather", "terrain",
+    # tera / forme / item state
+    "terastallize", "-terastallize", "-mega", "-primal", "-formechange",
+    "-transform", "-enditem", "-warpplate",
+    # recharge lock (Hyper Beam class)
+    "-mustrecharge",
+})
+
+
+def progress_signature(ctx: Optional[Dict]) -> Optional[tuple]:
+    """D3: the game-state key that the NO-PROGRESS confirmation compares.
+
+    Includes EXACTLY the state the ruling treats as progress: per-slot HP,
+    statuses, boosts, volatiles, tera, stockpile, revealed max HP; the
+    fainted counts; and the whole field (weather, terrain, rooms, screens,
+    hazards). EXCLUDED (not progress under the ruling, and must NOT keep the
+    cap from firing): the turn counter, the active slots (switch ping-pong is
+    the stall the cap exists to end), ``moves`` (moves_used — Protect spam),
+    the opponent's ``posterior`` / ``top_moves`` (inference + revealed moves,
+    not game state), and the per-turn flags (``hit_this_turn`` /
+    ``used_protect`` / ``last_move_failed`` / ``last_hit``).
+    ``None`` ctx (belief unavailable) -> ``None`` (the caller treats that as
+    'cannot confirm' — the cap does NOT trip; the step cap backstops).
+    """
+    if not isinstance(ctx, dict):
+        return None
+
+    def _mon_key(b: Optional[Dict]) -> tuple:
+        b = b or {}
+        return (
+            b.get("hp_frac"),
+            tuple(sorted(b.get("statuses") or [])),
+            tuple(sorted((b.get("boosts") or {}).items())),
+            tuple(sorted(b.get("volatiles") or [])),
+            b.get("tera") or "",
+            b.get("stockpile") or 0,
+            b.get("maxhp"),
+        )
+
+    def _side_key(side: Optional[Dict]) -> tuple:
+        side = side or {}
+        return tuple(sorted((slot, _mon_key(side.get(slot))) for slot in side))
+
+    f = ctx.get("field") or {}
+    return (
+        tuple(sorted((ctx.get("fainted") or {}).items())),
+        _side_key(ctx.get("own")),
+        _side_key(ctx.get("opponent")),
+        (
+            f.get("weather"), f.get("terrain"),
+            bool(f.get("trickroom")), bool(f.get("wonderroom")),
+            f.get("tailwind_side"),
+            tuple(sorted((f.get("reflect") or {}).items())),
+            tuple(sorted((f.get("lightscreen") or {}).items())),
+            tuple(sorted((f.get("auroraveil") or {}).items())),
+            tuple(sorted((f.get("spikes") or {}).items())),
+            tuple(sorted((f.get("toxicspikes") or {}).items())),
+            tuple(sorted((f.get("stealthrock") or {}).items())),
+            tuple(sorted((f.get("stickyweb") or {}).items())),
+            tuple(sorted((f.get("safeguard") or {}).items())),
+        ),
+    )
+
+
+class NoProgressTracker:
+    """D3 (2026-11-23 ruling) — a PURE state machine over Showdown log lines.
+
+    Counts CONSECUTIVE ``|turn|`` boundaries with no PROGRESS line between
+    them (see :data:`_PROGRESS_TAGS`). Switch spam, Protect spam and move
+    spam are NO progress — they are exactly the stalls the cap exists to end.
+
+    The tracker only COUNTS; the caller CONFIRMS via the belief signature
+    (:func:`progress_signature`, built from the fork log — D29) before ending
+    the battle, so a scanner miss (an unlisted line type that really changed
+    state) cannot false-positive the cap: the caller resets the tracker when
+    the belief shows a change. Pure — unit-testable with fake lines, no
+    battle object needed.
+    """
+
+    def __init__(self, limit: int = 20) -> None:
+        self.limit = max(1, int(limit))
+        self.streak = 0
+        self.progress_this_turn = False
+
+    def feed_lines(self, lines) -> None:
+        """Consume log lines (append-only; the caller passes only NEW lines).
+        Never raises on malformed input — a junk line is simply skipped."""
+        for ln in lines:
+            s = (ln or "").strip()
+            if not s.startswith("|"):
+                continue
+            parts = s.split("|")
+            if len(parts) < 2:
+                continue
+            tag = parts[1]
+            if tag == "turn":
+                if self.progress_this_turn:
+                    self.streak = 0
+                else:
+                    self.streak += 1
+                self.progress_this_turn = False
+            elif tag in _PROGRESS_TAGS:
+                self.progress_this_turn = True
+
+    @property
+    def tripped(self) -> bool:
+        return self.streak >= self.limit
+
+    def reset(self) -> None:
+        self.streak = 0
+        self.progress_this_turn = False
+
+
+def _cap_signature(env: Any, fmt: str) -> Optional[tuple]:
+    """D3: the belief signature for the no-progress confirmation (p1 POV —
+    the shared battle record, so the POV is irrelevant to the state key).
+    Never raises (belief failure -> ``None`` -> the cap does NOT trip; the
+    step cap backstops the stall as a draw, exactly as today)."""
+    try:
+        from net.env import build_ctx
+        return progress_signature(build_ctx(env.battle1, fmt, "p1"))
+    except Exception:  # noqa: BLE001 — see docstring
+        return None
+
+
 def _step_loop(env: Any, decide_a: Callable[[Any], Any],
-               decide_b: Callable[[Any], Any], max_steps: int) -> int:
+               decide_b: Callable[[Any], Any], max_steps: int,
+               fmt: str = "gen9ou",
+               no_progress_limit: int = 20,
+               log: Optional[Callable[[str], None]] = None) -> int:
     """The shared battle step-loop over an ALREADY-RESET env (mirrors
     ``pool.battle.play_battle_on``'s loop with policy decisions instead of
     ``random_action``). Extracted so the loop's scheduling is testable with a
-    fake env — no server, no net. Returns the number of steps taken."""
+    fake env — no server, no net. Returns the number of steps taken.
+
+    D3 (2026-11-23 ruling): after ``no_progress_limit`` consecutive turns
+    with NO game-state progress (see :data:`_PROGRESS_TAGS`) the battle ends
+    early as a DRAW (no side has won — the harness counts it as a draw; legit
+    stall play — hazard chip, toxic — IS progress and keeps the battle alive).
+    The confirmation re-checks the belief state at the cap against the
+    streak's start (a state change the scanner missed -> the streak resets).
+    ``no_progress_limit=0`` disables the cap (the step cap alone governs)."""
     import numpy as np
     from net.env import action_to_pe
+
+    cap = NoProgressTracker(no_progress_limit) if no_progress_limit > 0 else None
+    baseline: Optional[tuple] = None  # belief signature at streak==1
+    seen_lines = 0
 
     a1, a2 = env.possible_agents
     n_steps = 0
@@ -174,6 +348,31 @@ def _step_loop(env: Any, decide_a: Callable[[Any], Any],
         n_steps += 1
         if term[a1] or trunc[a1] or term[a2] or trunc[a2]:
             break
+        if cap is None or env.battle1 is None:
+            continue
+        # D3: scan the NEW log lines since the last step (append-only log; the
+        # same _build_replay_log() the belief pipeline consumes — D29).
+        try:
+            lines = env.battle1._build_replay_log().split("\n")
+        except Exception:  # noqa: BLE001 — a scan hiccup must never kill the
+            continue      # battle (the cap simply stays inert this step)
+        if len(lines) > seen_lines:
+            cap.feed_lines(lines[seen_lines:])
+            seen_lines = len(lines)
+        if cap.streak == 1:
+            baseline = _cap_signature(env, fmt)
+        if cap.tripped:
+            sig = _cap_signature(env, fmt)
+            if (baseline is not None and sig is not None
+                    and sig == baseline):
+                if log is not None:
+                    log(f"[driver] D3 no-progress cap: {cap.streak} turns "
+                        f"without HP/status/boost/field change -> "
+                        f"ending the battle as a draw")
+                break
+            # the belief shows a change the scanner missed -> keep playing
+            cap.reset()
+            baseline = None
     return n_steps
 
 
@@ -187,7 +386,8 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
                          env_factory: Optional[Callable[[], Any]] = None,
                          max_decision_errors: Optional[int] = None,
                          capture_a: Optional[Callable[[Any, Any], None]] = None,
-                         capture_b: Optional[Callable[[Any, Any], None]] = None
+                         capture_b: Optional[Callable[[Any, Any], None]] = None,
+                         no_progress_limit: int = 20
                          ) -> Tuple[bool, bool, int]:
     """Play ONE full battle with ``agent_a`` on p1 and ``agent_b`` on p2.
 
@@ -219,6 +419,10 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
                    wires each side to its bot's :class:`TrajectoryCollector`).
                    Only the PRODUCTION path captures: a ``decide=`` override
                    (test injection) bypasses capture by design.
+    :param no_progress_limit: D3 (2026-11-23 ruling) — consecutive NO-PROGRESS
+                   turns (no HP change / status / boost / field change) after
+                   which the battle ends early as a DRAW (default 20;
+                   ``0`` = disabled, the step cap alone governs).
     :return: ``(a1_won, a2_won, n_steps)``.
     """
     import logging
@@ -251,7 +455,8 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
             return policy_action(agent_b, battle, fmt, vocabs, greedy, log, guard,
                                  capture=capture_b, side="p2")
 
-        n_steps = _step_loop(env, da, db, max_steps)
+        n_steps = _step_loop(env, da, db, max_steps, fmt=fmt,
+                             no_progress_limit=no_progress_limit, log=log)
         if on_finish is not None:
             on_finish(env.battle1)
         return bool(env.battle1.won), bool(env.battle2.won), n_steps
