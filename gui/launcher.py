@@ -519,6 +519,13 @@ def start_trainer(cfg: Dict[str, Any], runs_dir: Optional[Path] = None
         payload = validate_train_config(cfg).to_dict()
         entry = "gui.trainer_main"
         rounds_planned = int(payload["n_rounds"])
+    elif mode == "m1gate":
+        # C2: single-learner PPO vs the M1 opponent pool (strategy, heuristic,
+        # random, strategy_posterior). gui.m1_gate_main owns the pool + runstate.
+        payload = dict(cfg)
+        payload["mode"] = "m1gate"
+        entry = "gui.m1_gate_main"
+        rounds_planned = int(cfg.get("n_rounds", 10))
     elif mode == "selfplay-collect":
         # the capture engine: plays n_battles across the pool + saves every
         # replay into the library (feature 2's source). Spawns

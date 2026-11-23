@@ -173,6 +173,7 @@ class DesktopApp:
         modes = [
             ("selfplay-collect", "Self-play (collect replays)"),
             ("selfplay", "Self-play (PPO training)"),
+            ("m1gate", "M1 Gate (single-learner vs pool)"),
             ("bc", "Imitation (BC)"),
             ("league", "League (bot vs bot)"),
             ("play", "Play against a checkpoint"),
@@ -219,6 +220,8 @@ class DesktopApp:
             self._build_collect_fields()
         elif mode == "selfplay":
             self._build_ppo_fields()
+        elif mode == "m1gate":
+            self._build_m1gate_fields()
         elif mode == "bc":
             self._build_bc_fields()
         elif mode == "play":
@@ -351,6 +354,36 @@ class DesktopApp:
         self._ppo_device = self._add_field(r, 0, "Device:", "cpu", "str"); r += 1
         # continue training from an existing checkpoint (empty = start from scratch)
         self._ppo_resume = self._ckpt_field(r, 0, "Resume from (optional):", optional=True); r += 1
+
+    def _build_m1gate_fields(self) -> None:
+        """M1 Gate (C2): single-learner PPO vs the M1 opponent pool.
+
+        The pool = {random, heuristic, strategy, strategy_posterior}.
+        The main learner trains against a random sample from this pool each
+        battle. GPU-ready (device field, defaults to cuda)."""
+        r = 0
+        self._m1_fmt = self._format_field(r, 0); r += 1
+        self._m1_battles = self._add_field(r, 0, "Battles/round:", 20, "int"); r += 1
+        self._m1_rounds = self._add_field(r, 0, "Rounds:", 10, "int"); r += 1
+        self._m1_epochs = self._add_field(r, 0, "PPO epochs:", 2, "int"); r += 1
+        self._m1_lr = self._add_field(r, 0, "LR:", 3e-4, "float"); r += 1
+        self._m1_device = self._add_field(r, 0, "Device:", "cuda", "combo", values=["cpu", "cuda"]); r += 1
+        self._m1_seed = self._add_field(r, 0, "Seed:", 20261123, "int"); r += 1
+        self._m1_max_steps = self._add_field(r, 0, "Max steps/battle:", 200, "int"); r += 1
+        self._m1_n_servers = self._add_field(r, 0, "Servers:", 2, "int"); r += 1
+        self._m1_per_server = self._add_field(r, 0, "Per server:", 2, "int"); r += 1
+        self._m1_port_base = self._add_field(r, 0, "Port base:", 49980, "int"); r += 1
+        ttk.Label(self._fields_frame, text="Opponent pool:").grid(row=r, column=0, sticky="w", pady=(8, 0))
+        r += 1
+        self._m1_opp_random = tk.BooleanVar(value=True)
+        ttk.Checkbutton(self._fields_frame, text="random (floor)", variable=self._m1_opp_random).grid(row=r, column=0, sticky="w"); r += 1
+        self._m1_opp_heuristic = tk.BooleanVar(value=True)
+        ttk.Checkbutton(self._fields_frame, text="heuristic (old)", variable=self._m1_opp_heuristic).grid(row=r, column=0, sticky="w"); r += 1
+        self._m1_opp_strategy = tk.BooleanVar(value=True)
+        ttk.Checkbutton(self._fields_frame, text="strategy (new)", variable=self._m1_opp_strategy).grid(row=r, column=0, sticky="w"); r += 1
+        self._m1_opp_posterior = tk.BooleanVar(value=True)
+        ttk.Checkbutton(self._fields_frame, text="strategy_posterior (informed)", variable=self._m1_opp_posterior).grid(row=r, column=0, sticky="w"); r += 1
+        self._m1_resume = self._ckpt_field(r, 0, "Resume from (optional):", optional=True); r += 1
 
     def _build_bc_fields(self) -> None:
         r = 0
@@ -862,6 +895,26 @@ class DesktopApp:
                 "device": self._ppo_device.get(),
                 # continue training from an existing checkpoint (None = from scratch)
                 "resume_from": (self._resolve_ckpt(self._ppo_resume) or None),
+            }
+        elif mode == "m1gate":
+            return {
+                "mode": mode,
+                "battle_format": self._m1_fmt.get(),
+                "battles_per_round": self._m1_battles.get(),
+                "n_rounds": self._m1_rounds.get(),
+                "epochs": self._m1_epochs.get(),
+                "lr": self._m1_lr.get(),
+                "device": self._m1_device.get(),
+                "seed": self._m1_seed.get(),
+                "max_steps": self._m1_max_steps.get(),
+                "n_servers": self._m1_n_servers.get(),
+                "per_server": self._m1_per_server.get(),
+                "port_base": self._m1_port_base.get(),
+                "opp_random": self._m1_opp_random.get(),
+                "opp_heuristic": self._m1_opp_heuristic.get(),
+                "opp_strategy": self._m1_opp_strategy.get(),
+                "opp_posterior": self._m1_opp_posterior.get(),
+                "resume_from": (self._resolve_ckpt(self._m1_resume) or None),
             }
         elif mode == "bc":
             return {
