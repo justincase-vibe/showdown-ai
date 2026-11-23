@@ -2511,3 +2511,51 @@ training battles + 2 evals × 4 battles (eval_every=1), 4 servers × 1, CPU-only
 
 **Status:** C3 built + smoke ✅ (`f3661c9`). Pending: the big GPU run
 (100 rounds × 20 battles, 8×2, `device=cuda`, launcher paste) — USER launches.
+
+---
+
+## Degenerate-training guard (2026-11-23, commit `1431f5b`)
+
+**Task (user, before sleeping):** a warning that FIRES when training turns
+degenerate, so the user is woken to a dead net instead of silently collecting
+a garbage checkpoint overnight.
+
+**Design: WARN, never a hard stop.** A false-positive hard stop would cost a
+whole overnight run; a false-positive *warning* is cheap. So the guard emits a
+loud log line + a `degenerate_warnings` flag in `status.json` (surfaced through
+`launcher.status()` → GUI + status check), but lets the run continue.
+
+**New metric — `value_std`:** the std of the value head's predictions across
+the batch, computed in `_train_round_m1`. Near-0 = the net assigns ~the same
+value to every state (no win/loss discrimination) — the most insidious
+degenerate mode, previously invisible. Now in every metric row + a guard rule.
+
+**Five rules (tunable constants at the top of `gui/m1_gate_main.py`):**
+| signal | rule | why |
+|---|---|---|
+| entropy collapse | `entropy < 0.30` | policy went near-deterministic |
+| KL blow-up | `kl_approx >= 0.50` (severe `>= 1.00`) | updates diverging |
+| value-head collapse | `value_std < 0.02` | no win/loss signal |
+| no progress | 5 straight rounds, 0 training wins | net not improving |
+| flat yardstick | 3 straight evals at exactly 0.0 wr | not beating the floor |
+
+`_degenerate_check(rows)` is a **pure function** of the recent rows (no torch,
+no engine) → unit-testable. The main loop feeds it the last 5 rows each round.
+
+**Verification (numbers):**
+- 13 unit tests (`gui/tests/test_degenerate_guard.py`) — every rule's fire case
+  + every no-false-positive boundary + NaN-safety + threshold sanity. **13/13.**
+- No regressions: `test_m1_pool` 6/6, `test_a3_play_preempt` 7/7, AST clean.
+- Live CPU smoke (`runs/20261123T101811Z-degsmoke`, 1 round, CPU): **exit 0**,
+  `degenerate_warnings: []` written to status.json (guard ran in production),
+  `value_std=0.03019` in the metric row (above the 0.02 floor → correctly not
+  flagged), 0 orphans. Proves the production wiring + no false positive.
+
+**Threshold note (tunable):** `kl_approx` was 0.464 in the round-2 GPU test
+(just under the 0.50 warn line) — expected early-training behavior. If the
+KL-elevated warning becomes cry-wolf noise, raise `DEG_KL_WARN`; the other four
+rules are the real degenerate signals and are conservative.
+
+**Status:** guard built + tested + smoke ✅ (`1431f5b`). The big 1500-battle
+GPU run is now instrumented: C3 yardstick (learning trend) + the degenerate
+guard (dead-net alarm) + `value_std` (collapse detector).
