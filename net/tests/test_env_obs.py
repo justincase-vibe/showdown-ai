@@ -250,3 +250,39 @@ def test_stop_ps_client_swallows_a_close_error():
     finally:
         loop.call_soon_threadsafe(loop.stop)
         t.join(timeout=5)
+
+
+# ── D4: draw_reward = -1.0 (2026-11-23 ruling) ──────────────────────────────
+class _RewardFakeBattle:
+    """Minimal surface for calc_reward: won/lost flags only."""
+    def __init__(self, won: bool = False, lost: bool = False):
+        self.won = won
+        self.lost = lost
+
+
+def test_calc_reward_win():
+    from net.env import ShowdownEnv
+    env = ShowdownEnv.__new__(ShowdownEnv)  # skip __init__ (no server needed)
+    assert env.calc_reward(_RewardFakeBattle(won=True, lost=False)) == 1.0
+
+
+def test_calc_reward_loss():
+    from net.env import ShowdownEnv
+    env = ShowdownEnv.__new__(ShowdownEnv)
+    assert env.calc_reward(_RewardFakeBattle(won=False, lost=True)) == -1.0
+
+
+def test_calc_reward_draw_is_minus_one():
+    """2026-11-23 ruling: draw = -1.0 (NOT 0). The agent must learn to close
+    out battles rather than stall. Value head stays P(win) in (0,1)."""
+    from net.env import ShowdownEnv
+    env = ShowdownEnv.__new__(ShowdownEnv)
+    assert env.calc_reward(_RewardFakeBattle(won=False, lost=False)) == -1.0
+
+
+def test_calc_reward_draw_constant():
+    """The class constant is exposed for config/inspection."""
+    from net.env import ShowdownEnv
+    assert ShowdownEnv.REWARD_DRAW == -1.0
+    assert ShowdownEnv.REWARD_WIN == 1.0
+    assert ShowdownEnv.REWARD_LOSS == -1.0

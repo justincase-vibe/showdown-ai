@@ -199,3 +199,41 @@ def test_ppo_update_finite_and_changes_weights(ctx_vocabs):
     assert changed, "PPO update did not change any weights (no learning signal)"
     # the net is back in eval mode after update
     assert not net.training
+
+
+# ── D4: GAE with draw reward -1.0 stays sane (2026-11-23 ruling) ──────────
+def test_gae_draw_terminal_minus_one():
+    """A draw terminal reward of -1.0 (2026-11-23 ruling) must produce
+    finite, sane advantages and returns. The value head is P(win) in (0,1);
+    the 2V-1 map gives a reward-space value in (-1, +1). A terminal reward
+    of -1.0 is within range and must not cause NaN/inf."""
+    r = [0.0, 0.0, -1.0]  # draw at terminal
+    v = [0.5, 0.4, 0.3]   # P(win) values (all < 0.5 = losing side)
+    adv, ret = gae(r, v, gamma=0.99, lam=0.95)
+    assert adv.shape == (3,) and ret.shape == (3,)
+    # terminal return == terminal reward (no continuation) exactly
+    assert ret[2] == pytest.approx(-1.0, abs=1e-6)
+    # all values finite
+    for a in adv:
+        assert np.isfinite(a)
+    for rv in ret:
+        assert np.isfinite(rv)
+    # terminal advantage = reward - value (no bootstrap, nonterm=0)
+    # delta = r[2] - v[2] = -1.0 - 0.3 = -1.3
+    assert adv[2] == pytest.approx(-1.3, abs=1e-6)
+    # terminal return = adv + v = -1.3 + 0.3 = -1.0 (== terminal reward)
+    assert ret[2] == pytest.approx(-1.0, abs=1e-6)
+
+
+def test_gae_draw_vs_win_symmetry():
+    """A draw (-1.0) and a loss (-1.0) produce IDENTICAL GAE outputs given the
+    same value estimates. This is by design: the agent cannot distinguish
+    'stalled' from 'lost' in the reward signal — it must learn from the
+    trajectory, not the terminal label."""
+    r_draw = [0.0, -1.0]   # draw
+    r_loss = [0.0, -1.0]   # loss (same reward magnitude)
+    v = [0.5, 0.4]
+    adv_d, ret_d = gae(r_draw, v, gamma=0.99, lam=0.95)
+    adv_l, ret_l = gae(r_loss, v, gamma=0.99, lam=0.95)
+    np.testing.assert_allclose(adv_d, adv_l, atol=1e-12)
+    np.testing.assert_allclose(ret_d, ret_l, atol=1e-12)

@@ -577,14 +577,19 @@ class ShowdownEnv(SinglesEnv):
     # ------------------------------------------------------------------ reward
     REWARD_WIN = 1.0
     REWARD_LOSS = -1.0
+    REWARD_DRAW = -1.0   # 2026-11-23 ruling: draw = -1.0 (value head stays P(win) in (0,1))
 
     def calc_reward(self, battle: Any) -> float:
-        """Sparse terminal reward: win +1 / loss -1 / 0 otherwise (zero-sum)."""
+        """Sparse terminal reward: win +1 / loss -1 / draw -1 (2026-11-23 ruling).
+
+        Draw is punished the same as a loss so the agent learns to close out
+        battles rather than stall. The value head remains P(win) ∈ (0,1);
+        -1.0 is within the (−1, +1) reward space used by GAE."""
         if battle.won:
             return self.REWARD_WIN
         if battle.lost:
             return self.REWARD_LOSS
-        return 0.0
+        return self.REWARD_DRAW
 
     # ------------------------------------------------------------------ action
     def get_action_mask(self, battle: Any) -> np.ndarray:

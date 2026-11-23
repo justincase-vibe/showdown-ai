@@ -313,7 +313,9 @@ def test_learning_run_buffers_experience_with_terminal_rewards(tmp_path,
         "alpha": len(a_steps), "beta": len(b_steps)}
 
 
-def test_learning_run_draw_buffers_zero_terminal(tmp_path, monkeypatch):
+def test_learning_run_draw_buffers_minus_one_terminal(tmp_path, monkeypatch):
+    """D4 (2026-11-23 ruling): draw reward = -1.0 (NOT 0). Both sides are
+    punished equally so the agent learns to close out battles."""
     import league.driver as drv
     monkeypatch.setattr(drv, "play_agent_battle_on",
                         _fake_play_factory((False, False, 2)))   # draw
@@ -326,7 +328,7 @@ def test_learning_run_draw_buffers_zero_terminal(tmp_path, monkeypatch):
     assert reg.get("a").draws == 1
     for name in ("a", "b"):
         steps = list(run._bots[name].buffer.steps)
-        assert steps and steps[-1].reward == 0.0 and steps[-1].done is True
+        assert steps and steps[-1].reward == -1.0 and steps[-1].done is True
 
 
 def test_learning_run_discards_partial_trajectory_on_error(tmp_path,

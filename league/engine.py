@@ -80,6 +80,7 @@ class LeagueConfig:
     max_norm: float = 0.5
     gamma: float = 0.99
     lam: float = 0.95
+    draw_reward: float = -1.0   # 2026-11-23 ruling: draw = -1.0 in training (never -2)
     # ── cull + refresh (D103 step 4; the population loop, learning mode) ──
     cull_every: int = 4          # retire+refresh every K rounds (0 = disabled)
     cull_frac: float = 0.25      # the bottom X of the roster by ELO
@@ -339,7 +340,9 @@ class LeagueRun:
         elif result["a2_won"] and not result["a1_won"]:
             out_a, out_b = -1.0, +1.0
         else:
-            out_a, out_b = 0.0, 0.0
+            # 2026-11-23 ruling: draw = draw_reward (default -1.0), NOT 0.
+            # The value head stays P(win) ∈ (0,1); -1.0 is in (−1, +1) range.
+            out_a, out_b = self.cfg.draw_reward, self.cfg.draw_reward
         n_a = len(coll_a)
         # GAE-at-finalize (D103 step 3): the battle boundary is known HERE, so
         # fill_gae runs per battle (never across the whole buffer at update

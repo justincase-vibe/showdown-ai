@@ -103,8 +103,9 @@ def play_and_collect(agent: PokeAgent, fmt: str, seed: int,
     """Play ONE live battle (``agent`` vs random) and return the agent's
     trajectory + battle stats.
 
-    Draw-tolerant: a decided win is reward +1, a loss −1, a **draw 0** — all
-    three are valid terminal outcomes (the P3.4 smoke gate only accepted ±1).
+    Draw-tolerant: a decided win is reward +1, a loss −1, a **draw −1**
+    (2026-11-23 ruling — draw is punished like a loss to discourage stalling).
+    All three are valid terminal outcomes.
     Every agent decision is legality-checked at collection time (the P2
     guarantee, re-checked live). The returned dict carries ``traj`` (a1's
     :class:`RolloutStep`s), ``n_illegal``, ``a1_won``/``a2_won``, ``crashed``,
