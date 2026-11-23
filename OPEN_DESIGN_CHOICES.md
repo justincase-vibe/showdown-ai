@@ -2314,3 +2314,28 @@ label `step6-heuristic`):**
   before-number for the M1 baseline, re-run with `--n 100` (≈3.5 h, CPU).
   MY LEAN: unnecessary — the M1 gate itself (net vs strategy, ≥400 battles)
   is the real measurement; this A/B just proves the yardstick moved.
+
+---
+
+## 2026-11-23 — Draw handling (D1–D5) + BC data filter ruling
+
+**USER RULING (2026-11-23):** Before building the BC warm start (Arm B /
+Step 4f), re-collect or **FILTER** the strategy bot's data to EXCLUDE
+ping-pong / no-progress sequences. Ping-pong = switch loops with no damage,
+no status change, no boost change, no hazard/screen change across
+consecutive turns (the D1 root cause, now fixed in the strategy bot's
+hysteresis, but the EXISTING captured data may still contain them).
+
+**Implementation note (when Arm B is built):**
+- The filter should operate on the raw trajectory: drop any battle where
+  ≥20 consecutive turns had no progress (matching the D3 no-progress cap
+  threshold). Alternatively, if the data was captured AFTER D2+D3 are in
+  place, the hysteresis + cap already prevent ping-pong, so the filter is a
+  no-op (verify by scanning the capture log for the cap-break signal).
+- The `NoProgressTracker` (D3, in `league/driver.py`) provides the
+  `progress_signature` and the tag vocabulary — reuse it for the filter.
+- Document which data files are affected (likely the C1/C1b captures from
+  the M1 gate build, pre-D1/D2/D3).
+
+**Status:** D1 ✅ (`e502f3b`), D2 ✅ (`45ea5eb`), D3 ✅ (`26a5ac8`),
+D4 ✅ (`707b22b`), D5 = this note. D6 (50-battle regression gate) is next.
