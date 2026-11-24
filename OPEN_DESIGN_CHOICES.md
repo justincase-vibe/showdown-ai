@@ -2681,3 +2681,63 @@ the normalization test computes population std explicitly instead.
 item 13 (BC warm start Arm B), item 14 (fixed-PPO vs BC+PPO comparison),
 item 15 (shaping — separate later commit). **Shaping remains unbuilt, per
 the explicit ruling.**
+
+---
+
+## 2026-11-24 — Learnability run-killers: corrected diagnosis + fork safeWrite phase 2
+
+**(i) CORRECTED death-cause findings (supersedes the old handoff's "both runs
+died externally after 70-81 min") — that reading was WRONG:**
+- **Smoke run** (n=20 baseline): died on the **Windows cp1252 stdout trap** —
+  a `──` (U+2500) in the round-1 header print, when the log was redirected
+  (cp1252 codepage) → `UnicodeEncodeError`. Clean traceback in
+  `runs/learnability_smoke.log`. FIXED: `tools/stdio_guard.safe_stdio()`
+  (`errors="replace"`) at all 5 headless entry points + ASCII-ized prints
+  (commit `be132db`, 3 hermetic tests).
+- **"Full" learnability run**: was **NOT dead when the previous agent
+  arrived** — it was ALIVE (PID 38288), mid-baseline. It was *doomed* to hit
+  the same Unicode bug right after baseline (both logs contain cp1252 bytes;
+  hexdump of the round-0 header proves the trap was armed). It was **killed
+  deliberately** (zero state lost — pre-baseline) to relaunch clean after the
+  fixes.
+- The old handoff's run-death question is now **ANSWERED — closed**.
+
+**(ii) `strict_ports` defaults OFF for the GUI** (commit `0e0d18c`): legacy
+GUI/legacy behavior untouched; only the headless tools
+(`tools/learnability_test.py`, `tools/train_step4_vs_pool.py`,
+`tools/bc_collect.py`) set `strict_ports=True` and abort loudly with
+netstat/taskkill instructions instead of silently attaching to another run's
+servers (the other root cause of the shared-state disaster). `port_serving()`
+is now the single implementation in `pool/server_pool.py` (also used by
+`ServerPool.health`).
+
+**(iii) Fork safeWrite concurrency patch — TWO phases, both pinned** (commit
+`87b5923`):
+- **Phase 1 (prior handoff):** stock `safeWrite` used the FIXED temp name
+  `<path>.NEW` in every process → two pool servers writing the same state file
+  raced → losing rename `ENOENT` → server CRASH (`scratch/pool/server_49990.log`).
+  Fix: unique temp name per write.
+- **Phase 2 (found THIS session while verifying phase 1):** with unique temps,
+  the ENOENT is gone, but on **Windows** the concurrent writers then race the
+  FINAL rename onto the same destination; the loser gets
+  `EPERM: operation not permitted, rename` (POSIX replaces atomically; Windows
+  briefly refuses). Same production scenario, second crash point. Fix: bounded
+  backoff retry on EPERM/EBUSY/EACCES + temp cleanup; other errors propagate.
+- Applied in **both** `pokemon-showdown/lib/fs.ts` (source, survives rebuilds)
+  and `dist/lib/fs.js` (runtime). The fork dir is untracked (`.gitignore`), so
+  the tracked test `tools/tests/test_fork_safe_write.py` is what pins the
+  behavior — a fresh clone/rebuild from unpatched sources FAILS it loudly.
+- **Proof, not hope:** with the retry stripped from `dist/lib/fs.js`, the test
+  FAILS deterministically with the exact EPERM crash signature; with it
+  restored, 2×1000 concurrent 256 KB writes pass. Suite: 499 passed (net/
+  fitness/ tools/ pool/ hermetic) + 66 gui hermetic green.
+
+**(iv) STILL NEEDS YOUR CALL — ping-pong `min_run=3` semantics:** the BC
+collector's ping-pong filter (D6) treats a run of ≥3 consecutive no-progress
+turns as ping-pong and drops it. Unconfirmed with you: is 3 the right
+threshold (a legitimate 2-turn stall setup would survive; a 3-turn
+switch-loop dies)? Kept at 3 as the conservative default until you rule.
+
+**(v) Open (unchanged from prior entries):** item 11 (battles/round ≥ 50),
+gate relaunch (CPU learnability vs the (b) GPU gate — RAM ceiling ~12 envs:
+if the GPU gate launches, kill the background learnability run first).

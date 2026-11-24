@@ -112,10 +112,11 @@ uses, but parallel instead of sequential. C4/C5 are implemented via the
 | 9 | both r70 + r80 gated | DONE (multi-ckpt) |
 | 10 | PPO fix pack (adv-norm + minibatch 256 + KL 0.03 stop) | DONE on `bionic/ppo-fix-pack` (commit 7ad040f; 15/15 ppo tests, net+fitness+tools 413 passed / 1 known pre-existing failure) |
 | 11 | battles/round >= 50 for the fixed-PPO runs | TODO (m1gate config; frozen while gate runs) |
-| 12 | learnability test (vs random, 50/round, >85% in ~15 rounds) | TODO (needs servers) |
-| 13 | BC warm start pipeline (Arm B, ping-pong filtered) | TODO (pipeline code first) |
+| 12 | learnability test (vs random, 50/round, >85% in ~15 rounds) | CODE DONE (commit d2b0d37) + all three run-killers fixed (see 16); RELAUNCH PENDING (CPU, detached, tools/learnability_test.py) |
+| 13 | BC warm start pipeline (Arm B, ping-pong filtered) | PIPELINE DONE (commit bfc09d5: bc_collect + bc_warm + annealed-KL Arm-B option); COLLECTION PENDING (run only when servers free) |
 | 14 | fixed-PPO vs BC+PPO comparison, >=400 battles, same controls | TODO |
 | 15 | reward shaping | SEPARATE later commit (explicit) |
+| 16 | headless run-killers fixed (CPU-light infra) | DONE: stdio cp1252 guard (be132db) + strict_ports (0e0d18c) + fork safeWrite concurrency patch phase 1 ENOENT + phase 2 EPERM-rename race, proven regression test (87b5923) |
 
 ## 7. The gate pastes (two-stage — controls decide validity first)
 
