@@ -15,7 +15,7 @@ import pytest
 from net import encode_context
 from net.agent import make_random_net
 from net.ppo import (PPOTrainer, RolloutBuffer, RolloutStep, chosen_logprobs,
-                     gae, steps_to_batch)
+                     gae, normalize_advantages, steps_to_batch)
 from net.tests.test_s41 import make_ctx, make_vocabs
 from net.registry import LAYOUT
 
@@ -140,35 +140,32 @@ def _build(vocabs, ctx, n=24, seed=3):
 
 
 def test_ppo_positive_advantage_raises_chosen_logprob(ctx_vocabs):
+    """Disaster guard (fix-pack edition): with MIXED-sign advantages (a real
+    buffer has wins AND losses), rows with positive advantage must go UP and
+    rows with negative advantage DOWN. (A constant-advantage buffer normalizes
+    to zero by design — no relative information — so the guard uses a
+    realistic mixed vector and asserts PER GROUP.)"""
     import torch
     torch.manual_seed(2026)  # fixed random-init so the margin is deterministic
     ctx, vocabs = ctx_vocabs
     net = make_random_net(vocabs, "cpu")
     batch = _build(vocabs, ctx, seed=11)
+    n = len(batch["action_index"])
     with torch.no_grad():
         batch["old_logprob"] = chosen_logprobs(net, batch).clone()
-    tr = PPOTrainer(net, lr=1e-3, ent_coef=0.0, vf_coef=0.0)
-    before = float(chosen_logprobs(net, batch).mean().item())
-    tr.update(batch, advantages=np.ones(len(batch["action_index"])),
-              returns=np.zeros(len(batch["action_index"])), epochs=30)
-    after = float(chosen_logprobs(net, batch).mean().item())
-    assert after > before + 0.02, f"positive advantage did not raise chosen logprob ({before}->{after})"
-
-
-def test_ppo_negative_advantage_lowers_chosen_logprob(ctx_vocabs):
-    import torch
-    torch.manual_seed(2026)  # fixed random-init so the margin is deterministic
-    ctx, vocabs = ctx_vocabs
-    net = make_random_net(vocabs, "cpu")
-    batch = _build(vocabs, ctx, seed=12)
-    with torch.no_grad():
-        batch["old_logprob"] = chosen_logprobs(net, batch).clone()
-    tr = PPOTrainer(net, lr=1e-3, ent_coef=0.0, vf_coef=0.0)
-    before = float(chosen_logprobs(net, batch).mean().item())
-    tr.update(batch, advantages=-np.ones(len(batch["action_index"])),
-              returns=np.zeros(len(batch["action_index"])), epochs=30)
-    after = float(chosen_logprobs(net, batch).mean().item())
-    assert after < before - 0.02, f"negative advantage did not lower chosen logprob ({before}->{after})"
+    adv = np.concatenate([np.ones(n // 2), -np.ones(n - n // 2)])
+    tr = PPOTrainer(net, lr=1e-3, ent_coef=0.0, vf_coef=0.0, target_kl=None)
+    lp0 = chosen_logprobs(net, batch)
+    before_pos = float(lp0[:n // 2].mean())
+    before_neg = float(lp0[n // 2:].mean())
+    tr.update(batch, advantages=adv, returns=np.zeros(n), epochs=30)
+    lp1 = chosen_logprobs(net, batch)
+    after_pos = float(lp1[:n // 2].mean())
+    after_neg = float(lp1[n // 2:].mean())
+    assert after_pos > before_pos + 0.02, \
+        f"positive advantage did not raise chosen logprob ({before_pos}->{after_pos})"
+    assert after_neg < before_neg - 0.02, \
+        f"negative advantage did not lower chosen logprob ({before_neg}->{after_neg})"
 
 
 def test_ppo_update_finite_and_changes_weights(ctx_vocabs):
@@ -199,6 +196,112 @@ def test_ppo_update_finite_and_changes_weights(ctx_vocabs):
     assert changed, "PPO update did not change any weights (no learning signal)"
     # the net is back in eval mode after update
     assert not net.training
+
+
+# ── PPO fix pack (2026-11-24): adv-normalization + minibatch + KL early stop ──
+def test_normalize_advantages():
+    """normalize_advantages: mean 0 / std 1; constant → zeros; empty OK."""
+    rng = np.random.RandomState(0)
+    a = rng.randn(200) * 5.0 + 3.0          # std ≈ 5, mean ≈ 3
+    out = normalize_advantages(a)
+    assert out.dtype == np.float32 and out.shape == a.shape
+    assert float(out.mean()) == pytest.approx(0.0, abs=1e-5)
+    assert float(out.std()) == pytest.approx(1.0, rel=1e-5)
+    # a constant vector carries no RELATIVE information → zeros (textbook)
+    assert np.allclose(normalize_advantages(np.full(10, 7.5)), 0.0)
+    assert np.allclose(normalize_advantages(np.full(10, -2.0)), 0.0)
+    # empty input is fine (nothing to normalize)
+    e = normalize_advantages(np.array([], dtype=np.float64))
+    assert e.size == 0 and e.dtype == np.float32
+    # accepts a plain list
+    o2 = normalize_advantages([1.0, 2.0, 3.0])
+    assert float(o2.mean()) == pytest.approx(0.0, abs=1e-6)
+    assert float(o2.std()) == pytest.approx(1.0, rel=1e-6)
+
+
+def test_update_minibatch_grad_steps(ctx_vocabs):
+    """n=600, mb=256, epochs=2, target_kl=None → exactly 6 Adam steps, no stop.
+
+    600/256 → 3 minibatches per epoch (256+256+88); 2 epochs → 6 grad steps.
+    Pins the minibatch-loop arithmetic (the pre-fix code took ONE step/epoch —
+    the "80 rounds = 160 gradient steps" finding).
+    """
+    import torch
+    torch.manual_seed(7)
+    ctx, vocabs = ctx_vocabs
+    net = make_random_net(vocabs, "cpu")
+    batch = _build(vocabs, ctx, n=600, seed=5)
+    n = len(batch["action_index"])
+    with torch.no_grad():
+        batch["old_logprob"] = chosen_logprobs(net, batch).clone()
+        batch["old_value"] = net(batch)["value"][:, 0, 0].clone()
+    adv = np.random.RandomState(1).randn(n)
+    tr = PPOTrainer(net, lr=3e-4, minibatch_size=256, target_kl=None)
+    m = tr.update(batch, advantages=adv, returns=np.zeros(n), epochs=2)
+    assert m["grad_steps"] == pytest.approx(6.0), m
+    assert m["early_stopped"] == 0.0, m
+    for k, v in m.items():
+        assert np.isfinite(v), f"non-finite metric {k}={v}"
+
+
+def test_update_kl_early_stop(ctx_vocabs):
+    """target_kl=0.005 at a high lr must stop the update EARLY:
+    early_stopped=1 and strictly fewer than the full 10 epochs × 3
+    minibatches = 30 steps."""
+    import torch
+    torch.manual_seed(21)
+    ctx, vocabs = ctx_vocabs
+    net = make_random_net(vocabs, "cpu")
+    batch = _build(vocabs, ctx, n=96, seed=17)
+    n = 96
+    with torch.no_grad():
+        batch["old_logprob"] = chosen_logprobs(net, batch).clone()
+        batch["old_value"] = net(batch)["value"][:, 0, 0].clone()
+    adv = np.random.RandomState(9).randn(n)
+    tr = PPOTrainer(net, lr=3e-3, minibatch_size=32, target_kl=0.005)
+    m = tr.update(batch, advantages=adv, returns=np.zeros(n), epochs=10)
+    assert m["early_stopped"] == 1.0, f"KL early-stop did not fire: {m}"
+    assert 1.0 <= m["grad_steps"] < 30.0, m
+
+
+def test_update_normalizes_advantages(ctx_vocabs):
+    """update() must normalize advantages ONCE before the minibatch loop:
+    a std≈5 input buffer reaches the loss as std≈1 / mean≈0, and a constant
+    input buffer reaches it as all-zeros (no relative information)."""
+    import torch
+    torch.manual_seed(31)
+    ctx, vocabs = ctx_vocabs
+    net = make_random_net(vocabs, "cpu")
+    batch = _build(vocabs, ctx, n=64, seed=23)
+    n = 64
+    with torch.no_grad():
+        batch["old_logprob"] = chosen_logprobs(net, batch).clone()
+    tr = PPOTrainer(net, lr=1e-5, minibatch_size=64, target_kl=None,
+                    vf_coef=0.0, ent_coef=0.0)
+    captured: list = []
+    orig_loss = tr._loss
+    def spy(b, adv, ret):
+        captured.append(adv.detach().clone())
+        return orig_loss(b, adv, ret)
+    tr._loss = spy  # instance-attr shadow — update() calls self._loss(...)
+
+    rng = np.random.RandomState(4)
+    adv = rng.randn(n) * 5.0 + 2.0        # std≈5, mean≈2 going IN
+    tr.update(batch, advantages=adv, returns=np.zeros(n), epochs=1)
+    seen = torch.cat([c for c in captured if c.numel()])
+    assert seen.numel() == n
+    mu = float(seen.mean())
+    # POPULATION std, computed explicitly (torch's whole-tensor .std() applies
+    # Bessel's correction by default in recent builds — √(n/(n-1)) off).
+    pop = float(((seen - mu) ** 2).mean().sqrt())
+    assert mu == pytest.approx(0.0, abs=1e-4)
+    assert pop == pytest.approx(1.0, rel=1e-4)
+
+    captured.clear()
+    tr.update(batch, advantages=np.full(n, -2.5), returns=np.zeros(n), epochs=1)
+    seen2 = torch.cat([c for c in captured if c.numel()])
+    assert seen2.numel() == n
+    assert torch.allclose(seen2, torch.zeros_like(seen2), atol=1e-6)
 
 
 # ── D4: GAE with draw reward -1.0 stays sane (2026-11-23 ruling) ──────────

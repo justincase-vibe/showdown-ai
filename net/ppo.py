@@ -212,6 +212,24 @@ def steps_to_batch(steps: Sequence[RolloutStep],
     return batch
 
 
+def normalize_advantages(adv: np.ndarray) -> np.ndarray:
+    """Standard per-update advantage normalization (PPO fix pack, 2026-11-24).
+
+    ``(a - mean) / std`` over the WHOLE buffer of the update. A constant
+    advantage vector carries no RELATIVE information (every action is equally
+    good or bad) — normalizing it to zero is the textbook behaviour: updating
+    on a constant sign is pure noise, so the policy loss goes to zero.
+    Pure numpy -> unit-testable without torch.
+    """
+    a = np.asarray(adv, dtype=np.float64).ravel()
+    if a.size == 0:
+        return a.astype(np.float32)
+    std = a.std()
+    if std < 1e-8:
+        return np.zeros_like(a, dtype=np.float32)
+    return ((a - a.mean()) / std).astype(np.float32)
+
+
 def chosen_logprobs(net: PokeNet, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
     """The CURRENT net's log-probability of each stored action index, ``(B,)``.
 
@@ -234,15 +252,27 @@ def chosen_logprobs(net: PokeNet, batch: Dict[str, torch.Tensor]) -> torch.Tenso
 class PPOTrainer:
     """Clipped-surrogate PPO over the :class:`PokeNet` (D73: PPO vs self-target).
 
-    ``update(batch, advantages, returns, epochs)`` runs ``epochs`` full-batch
-    Adam steps on  ``-E[min(ratio*A, clip(ratio)*A)] + vf_coef*MSE(V, R)
-    - ent_coef*H(pi)`` and returns mean metrics. Full-batch (not minibatched) for
-    P3 simplicity — P4 scales to minibatches with the same loss.
+    PPO fix pack (2026-11-24, Claude review — the "80 rounds = 160 gradient
+    steps" finding):
+
+    * **advantage normalization** — ``update`` normalizes the buffer's
+      advantages once per update (:func:`normalize_advantages`);
+    * **minibatch PPO** — each epoch shuffles the buffer and takes
+      ``minibatch_size`` (default 256) Adam steps instead of one full-batch
+      step; with a small buffer this is exactly the old full-batch behaviour;
+    * **approx-KL early stop** — if a minibatch's approx KL
+      ``E_old[ratio * log(ratio)]`` exceeds ``target_kl`` (default 0.03), the
+      remaining minibatches AND epochs are skipped (standard PPO guard).
+
+    ``update(batch, advantages, returns, epochs)`` runs the clipped surrogate
+    ``-E[min(ratio*A, clip(ratio)*A)] + vf_coef*MSE(V, R) - ent_coef*H(pi)``
+    and returns mean metrics (+ ``grad_steps``, ``early_stopped``).
     """
 
     def __init__(self, net: PokeNet, *, lr: float = 3e-4, clip_eps: float = 0.2,
                  vf_coef: float = 0.5, ent_coef: float = 0.01, max_norm: float = 0.5,
-                 epochs: int = 4, device: str = "cpu") -> None:
+                 epochs: int = 4, device: str = "cpu",
+                 minibatch_size: int = 256, target_kl: Optional[float] = 0.03) -> None:
         self.net = net
         self.device = torch.device(device)
         self.net.to(self.device)
@@ -252,6 +282,8 @@ class PPOTrainer:
         self.ent_coef = ent_coef
         self.max_norm = max_norm
         self.epochs = epochs          # default passes per update (overridable in update())
+        self.minibatch_size = max(1, int(minibatch_size))
+        self.target_kl = target_kl    # None disables early stopping
         self.opt = torch.optim.Adam(net.parameters(), lr=lr)
 
     # ── one forward loss (full batch) ─────────────────────────────────
@@ -283,34 +315,72 @@ class PPOTrainer:
         loss = policy_loss + self.vf_coef * value_loss - self.ent_coef * entropy
         return loss, policy_loss, value_loss, entropy, frac_clipped
 
+    @staticmethod
+    def _slice(batch: Dict[str, torch.Tensor], idx: torch.Tensor
+               ) -> Dict[str, torch.Tensor]:
+        """Index-select a subset of a stacked batch (all values are tensors)."""
+        return {k: v[idx] for k, v in batch.items()}
+
     def update(self, batch: Dict[str, torch.Tensor], advantages: np.ndarray,
                returns: np.ndarray, epochs: Optional[int] = None) -> Dict[str, float]:
-        """Run ``epochs`` full-batch PPO Adam steps (default ``self.epochs``).
-        Returns mean metrics."""
+        """Run ``epochs`` passes of MINIBATCH PPO (default ``self.epochs``).
+
+        Per update: advantages are normalized once; each epoch shuffles the
+        buffer and steps in ``minibatch_size`` chunks; a minibatch whose
+        approx KL exceeds ``target_kl`` stops the whole update. Returns mean
+        metrics over the executed minibatches + ``grad_steps`` (number of
+        Adam steps taken) + ``early_stopped`` (1.0 if the KL stop fired).
+        """
         n_epochs = max(1, epochs if epochs is not None else self.epochs)
         dev = self.device
-        adv = torch.as_tensor(advantages, dtype=torch.float32, device=dev)
+        B = len(advantages)
+        # advantage normalization — once per update, BEFORE the epoch loop
+        adv = torch.as_tensor(normalize_advantages(advantages),
+                              dtype=torch.float32, device=dev)
         ret = torch.as_tensor(returns, dtype=torch.float32, device=dev)
         self.net.train()
         tot = {"loss": 0.0, "policy": 0.0, "value": 0.0, "entropy": 0.0,
-               "frac_clipped": 0.0, "kl_approx": 0.0}
+               "frac_clipped": 0.0, "kl_approx": 0.0, "grad_steps": 0.0,
+               "early_stopped": 0.0}
+        stopped = False
         for _ in range(n_epochs):
-            self.opt.zero_grad()
-            loss, pol, val, ent, frac = self._loss(batch, adv, ret)
-            loss.backward()
-            if self.max_norm:
-                torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.max_norm)
-            self.opt.step()
-            with torch.no_grad():
-                # cheap KL(old||new) proxy for the metrics log (standard PPO
-                # estimator E_old[ratio * log(ratio)] = E[ratio*(logp_new-logp_old)],
-                # always >= 0). The pre-fix "exp(d)-1" form was ≈ -KL for small
-                # drift and then max(0,.)-clamped to ~0, i.e. a misleading ~0.
-                new_lp = chosen_logprobs(self.net, batch)
-                ratio_m = torch.exp(new_lp - batch["old_logprob"])
-                kl = float((ratio_m * (new_lp - batch["old_logprob"])).mean().item())
-            tot["loss"] += float(loss.item()); tot["policy"] += float(pol.item())
-            tot["value"] += float(val.item()); tot["entropy"] += float(ent.item())
-            tot["frac_clipped"] += float(frac.item()); tot["kl_approx"] += max(0.0, kl)
+            if stopped:
+                break
+            perm = torch.randperm(B, device=dev)
+            for start in range(0, B, self.minibatch_size):
+                idx = perm[start:start + self.minibatch_size]
+                b = self._slice(batch, idx)
+                adv_b = adv[idx]
+                ret_b = ret[idx]
+                self.opt.zero_grad()
+                loss, pol, val, ent, frac = self._loss(b, adv_b, ret_b)
+                loss.backward()
+                if self.max_norm:
+                    torch.nn.utils.clip_grad_norm_(self.net.parameters(),
+                                                    self.max_norm)
+                self.opt.step()
+                with torch.no_grad():
+                    # cheap KL(old||new) proxy (standard PPO estimator
+                    # E_old[ratio * log(ratio)], always >= 0) — metrics AND
+                    # the early-stop decision (the pre-fix "exp(d)-1" form was
+                    # ≈ -KL for small drift and max(0,.)-clamped to a
+                    # misleading ~0).
+                    new_lp = chosen_logprobs(self.net, b)
+                    d = new_lp - b["old_logprob"]
+                    ratio_m = torch.exp(d)
+                    kl = float((ratio_m * d).mean().item())
+                tot["loss"] += float(loss.item()); tot["policy"] += float(pol.item())
+                tot["value"] += float(val.item()); tot["entropy"] += float(ent.item())
+                tot["frac_clipped"] += float(frac.item())
+                tot["kl_approx"] += max(0.0, kl)
+                tot["grad_steps"] += 1.0
+                if self.target_kl is not None and kl > self.target_kl:
+                    stopped = True
+                    break
         self.net.eval()
-        return {k: v / n_epochs for k, v in tot.items()}
+        n_steps = int(tot["grad_steps"]) or 1
+        out = {k: v / n_steps for k, v in tot.items()
+               if k not in ("grad_steps", "early_stopped")}
+        out["grad_steps"] = float(tot["grad_steps"])
+        out["early_stopped"] = 1.0 if stopped else 0.0
+        return out
