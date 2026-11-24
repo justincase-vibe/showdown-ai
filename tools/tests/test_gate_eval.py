@@ -18,8 +18,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tools.gate_eval import (  # noqa: E402
-    GATE_CONTINUE, GATE_PASS, PRIMARY_OPP, gate_verdict, min_mode_bound,
-    pool_rows, wilson_lower,
+    GATE_CONTINUE, GATE_PASS, PRIMARY_OPP, apply_validity, build_validity,
+    gate_verdict, min_mode_bound, pool_rows, wilson_lower, wilson_upper,
+    _entry_stats, _parse_subjects,
 )
 
 
@@ -51,6 +52,17 @@ def test_wilson_gate_scale_values():
     assert wilson_lower(150, 407) < wilson_lower(200, 407) < wilson_lower(280, 407)
 
 
+def test_wilson_upper_symmetric():
+    assert abs(wilson_upper(200, 400) - (1.0 - 0.393211)) < 1e-4
+    assert wilson_upper(10, 10) == 1.0
+    # 0/10: the upper bound is POSITIVE (true p could be > 0) — the classic
+    # reason Wilson beats the naive interval
+    assert 0.0 < wilson_upper(0, 10) < 1.0
+    assert math.isnan(wilson_upper(5, 0))
+    # interval brackets the point estimate
+    assert wilson_lower(70, 100) < 0.70 < wilson_upper(70, 100)
+
+
 # ── gate_verdict (the M1 decision rule) ─────────────────────────────────────
 
 def test_verdict_thresholds():
@@ -69,7 +81,7 @@ def test_verdict_no_data():
     assert gate_verdict(None) == "NO_DATA"
 
 
-# ── per-mode verdict (Claude review: strategy primary, worst mode rules) ──
+# ── per-mode stats + pooled verdict (C1-C5 spec) ────────────────────────────
 
 def test_primary_opp_is_plain_strategy():
     assert PRIMARY_OPP == "strategy"
@@ -91,25 +103,120 @@ def test_min_mode_bound_ignores_nan_entries():
                - 0.41) < 1e-12
 
 
-def test_subject_verdict_uses_min_of_modes():
-    from tools.gate_eval import _subject_verdict
-    pairs = {"strategy": {
-        "greedy": {"eval_w": 180, "eval_l": 20, "eval_d": 0},
-        "sampled": {"eval_w": 120, "eval_l": 80, "eval_d": 0},
-    }}
-    v = _subject_verdict(pairs)
-    assert v["primary"] == "strategy"
-    assert set(v["per_mode_lower_ci"]) == {"greedy", "sampled"}
-    assert v["per_mode_lower_ci"]["greedy"] > v["per_mode_lower_ci"]["sampled"]
-    assert v["verdict_bound"] == v["per_mode_lower_ci"]["sampled"]
-    assert v["verdict"] == gate_verdict(v["verdict_bound"])
+def _row(w, l, d=0):
+    return {"eval_w": w, "eval_l": l, "eval_d": d, "eval_crashed": 0,
+            "eval_wr": w / (w + l + d) if (w + l + d) else float("nan")}
 
 
-def test_subject_verdict_no_primary_is_no_data():
-    from tools.gate_eval import _subject_verdict
-    v = _subject_verdict({"strategy_posterior": {"greedy": {"eval_w": 1, "eval_l": 1}}})
-    assert v["verdict"] == "NO_DATA"
-    assert math.isnan(v["verdict_bound"])
+def test_entry_stats_per_mode_and_pooled():
+    pairs = {
+        "strategy": {
+            "greedy": _row(180, 20),
+            "sampled": _row(120, 80),
+        },
+        "strategy_posterior": {"greedy": _row(90, 110)},
+    }
+    st = _entry_stats(pairs)
+    assert set(st["per_mode_lower_ci"]["strategy"]) == {"greedy", "sampled"}
+    assert st["per_mode_lower_ci"]["strategy"]["greedy"] \
+        > st["per_mode_lower_ci"]["strategy"]["sampled"]
+    p = st["pooled"]["strategy"]
+    assert p["wins"] == 300 and p["n"] == 400
+    assert 0.0 <= p["lower_ci_95"] < 0.75 < p["upper_ci_95"] <= 1.0
+    # verdict bound = WORST pooled bound of strategy + strategy_posterior
+    assert st["verdict_bound"] == st["pooled"]["strategy_posterior"]["lower_ci_95"]
+    assert st["base_verdict"] == gate_verdict(st["verdict_bound"])
+    assert st["mode_diff_warnings"]  # 0.45 vs 0.60 differ by 15 pts > 10
+
+
+def test_entry_stats_mode_diff_warning_threshold():
+    pairs = {"strategy": {"greedy": _row(55, 45), "sampled": _row(60, 40)}}
+    assert _entry_stats(pairs)["mode_diff_warnings"] == []
+
+
+def test_entry_stats_skips_error_rows():
+    pairs = {"strategy": {"greedy": _row(50, 50), "sampled": {"error": "boom"}}}
+    st = _entry_stats(pairs)
+    assert "strategy" in st["pooled"]
+    assert set(st["per_mode_lower_ci"]["strategy"]) == {"greedy"}
+
+
+# ── validity rules (C1/C2 based) ─────────────────────────────────────────────
+
+def _entries_with_c1(c1_wr_n, c2_wr_n=None):
+    def _pooled(w, n):
+        return {"wins": w, "losses": n - w, "draws": 0, "crashed": 0,
+                "n": n, "win_rate": w / n,
+                "lower_ci_95": wilson_lower(w, n),
+                "upper_ci_95": wilson_upper(w, n)}
+    entries = {}
+    if c1_wr_n is not None:
+        entries["control:random_init"] = {
+            "stats": {"pooled": {"strategy": _pooled(*c1_wr_n)}}}
+    if c2_wr_n is not None:
+        entries["control:random"] = {
+            "stats": {"pooled": {"strategy": _pooled(*c2_wr_n)}}}
+    return entries
+
+
+def test_validity_c2_too_strong_invalidates():
+    # C2 random bot beats strategy 30% > 25% -> YARDSTICK_INVALID
+    v = build_validity(_entries_with_c1((80, 400), (120, 400)))
+    assert v["yardstick_invalid"] is True
+    assert any("C2" in r for r in v["reasons"])
+
+
+def test_validity_c1_upper_bound_invalidates():
+    # C1 random-init at 50% (n=400): upper bound ~0.58 >= 0.40 -> invalid
+    v = build_validity(_entries_with_c1((200, 400)))
+    assert v["yardstick_invalid"] is True
+    assert any("UPPER" in r for r in v["reasons"])
+
+
+def test_validity_clean_when_floor_is_weak():
+    # floor at 20% (n=400): upper bound ~0.27 < 0.40, C2 20% <= 25% -> valid
+    v = build_validity(_entries_with_c1((80, 400), (80, 400)))
+    assert v["yardstick_invalid"] is False
+    assert v["c1"] is not None and v["c2"] is not None
+
+
+def test_apply_validity_caps_pass_when_intervals_overlap():
+    # C1 floor at 20% (n=400, upper ~0.27); net at 32.5% (n=400, lower ~0.22):
+    # margin 12.5 pts >= 10 BUT the 95% intervals overlap -> cap at CONTINUE
+    v = build_validity(_entries_with_c1((80, 400), (80, 400)))
+    net = {"win_rate": 130 / 400, "lower_ci_95": wilson_lower(130, 400),
+           "upper_ci_95": wilson_upper(130, 400)}
+    out = apply_validity("PASS", net, v)
+    assert out.startswith("CONTINUE (capped")
+
+
+def test_apply_validity_pass_survives_with_clear_margin():
+    # C1 floor at 20% (n=400, upper ~0.27); net at 50% (n=400, lower ~0.39):
+    # margin 30 pts and NON-overlapping intervals -> PASS stands
+    v = build_validity(_entries_with_c1((80, 400), (80, 400)))
+    net = {"win_rate": 0.5, "lower_ci_95": wilson_lower(200, 400),
+           "upper_ci_95": wilson_upper(200, 400)}
+    assert apply_validity("PASS", net, v) == "PASS"
+
+
+def test_apply_validity_invalid_yardstick_overrides():
+    v = build_validity(_entries_with_c1((200, 400)))
+    net = {"win_rate": 0.9, "lower_ci_95": 0.8, "upper_ci_95": 0.95}
+    assert apply_validity("PASS", net, v).startswith("YARDSTICK_INVALID")
+
+
+def test_c1_falls_back_to_c2_row():
+    # no random_init entry; the C2 row (identical net here) fills C1
+    v = build_validity(_entries_with_c1(None, (80, 400)))
+    assert v["c1"] is not None and v["c2"] is not None
+
+
+def test_parse_subjects_plain_and_override():
+    out = _parse_subjects("random_init,heuristic,strategy:strategy,strategy_posterior:strategy")
+    assert out == [("random_init", None), ("heuristic", None),
+                   ("strategy", ["strategy"]),
+                   ("strategy_posterior", ["strategy"])]
+    assert _parse_subjects(None) == []
 
 
 # ── pool_rows (reporting-only pool of play modes for one opponent) ──────────

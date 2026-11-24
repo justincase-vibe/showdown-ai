@@ -19,10 +19,45 @@ imported lazily inside ``decide`` — the same discipline as ``fitness.heuristic
 """
 from __future__ import annotations
 
+import threading
 from typing import Any, Dict, Optional
 
 __all__ = ["StrategyAgent", "strategy_reference",
-           "strategy_posterior_reference", "recently_switched_after"]
+           "strategy_posterior_reference", "recently_switched_after",
+           "fallback_stats", "fallback_reset"]
+
+# ── C5 (GATE_CONTROLS_C1_C5.md): silent-fallback counters ──────────────────
+# The strategy bot's `decide()` degrades silently in three places (A3.1
+# contract). The gate spec requires counting them per 100 battles — they must
+# be zero or near zero, or the yardstick is quietly playing a weaker policy
+# than we think. Module-level (process-wide): the eval loop runs workers as
+# THREADS in one process, so one shared counter is correct. Thread-safe.
+_FB_LOCK = threading.Lock()
+_FB: Dict[str, int] = {
+    "decides": 0,             # total decide() calls (the denominator)
+    "ctx_none_acts0": 0,      # build_ctx returned None -> acts[0] fallback
+    "choose_exc_acts0": 0,    # choose_action raised -> acts[0] fallback
+    "pov_except": 0,          # my_side() POV detection raised -> defaulted p1
+    "passed": 0,              # no legal actions -> pass/wait (legit, counted)
+}
+
+
+def fallback_stats() -> Dict[str, int]:
+    """A snapshot of the C5 silent-fallback counters."""
+    with _FB_LOCK:
+        return dict(_FB)
+
+
+def fallback_reset() -> None:
+    """Zero the counters (a fresh eval session)."""
+    with _FB_LOCK:
+        for k in _FB:
+            _FB[k] = 0
+
+
+def _fb_bump(key: str) -> None:
+    with _FB_LOCK:
+        _FB[key] = _FB.get(key, 0) + 1
 
 
 def _gen_from_format(fmt: str) -> int:
@@ -97,6 +132,7 @@ class StrategyAgent:
         would track the opponent's team as "own" (active unresolved, 0 HP),
         and rule 3 would switch every turn — the 2026-11-23 draw bug.
         """
+        _fb_bump("decides")
         fmt = fmt or self.fmt
         # POV: the belief pipeline is p1-POV; a p2 player's log is swapped by
         # build_ctx (my_side detects the side — same helper the driver uses).
@@ -108,6 +144,7 @@ class StrategyAgent:
                          if ln.strip()]
                 side = my_side(battle, lines)
             except Exception:  # noqa: BLE001 — a POV hiccup defaults to p1
+                _fb_bump("pov_except")  # C5: a silent POV fallback
                 side = "p1"
 
         acts: list = []
@@ -117,11 +154,13 @@ class StrategyAgent:
         except Exception:  # noqa: BLE001 — no legal actions -> pass
             acts = []
         if not acts:
+            _fb_bump("passed")  # C5: a pass/wait turn
             return None  # a pass/wait turn (no legal action this moment)
 
         from net.env import build_ctx
         ctx = build_ctx(battle, fmt, side)
         if ctx is None:
+            _fb_bump("ctx_none_acts0")  # C5: belief unavailable -> acts[0]
             return acts[0]  # belief unavailable: first legal (the A3.1 degrade)
 
         from fitness.strategy import choose_action, _posterior_overrides
@@ -150,8 +189,10 @@ class StrategyAgent:
                     self._last_switch_turn, turn, self.no_reswitch_turns),
                 **ov)
         except Exception:  # noqa: BLE001 — choose_action should not raise;
+            _fb_bump("choose_exc_acts0")  # C5: silent acts[0] degrade
             act = None     # belt-and-braces: degrade to a legal action
-        act = act if act is not None else acts[0]
+        if act is None:
+            act = acts[0]
         # D2: record this decision's switch (voluntary OR forced) so the next
         # turn(s) inside the window see ``recently_switched=True``.
         if (isinstance(act, dict) and act.get("kind") == "switch"
