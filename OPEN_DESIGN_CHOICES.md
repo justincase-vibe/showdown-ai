@@ -2849,3 +2849,13 @@ error in the AI's belief state for every doubles screen matchup.
 **Test suite status at commit:**
 - `damage/tests`: 226 passed (all green)
 - `tools/tests/test_b1_all_formats.py`: 5 passed (504 pass / 28 warn / 0 FAIL)
+
+**(ix) RESOLVED (2026-11-24, USER):**
+- **Champions Choice-item gap** — USER: Choice Band/Specs/Scarf are not used in
+  the champions format. Closed; no action needed.
+- **Doubles checkpoint retraining** — USER: we are not doing doubles yet.
+  Confirmed: no retraining required. Closed.
+- **Ping-pong `min_run`** — USER: 3 was too low (a valid stall strategy involves
+  repeated switches with no damage). Increased to **8** (keep first 7, drop the
+  8th+). Updated in `tools/bc_collect.py::PING_PONG_MIN_RUN` + docstring.
+  Closed.

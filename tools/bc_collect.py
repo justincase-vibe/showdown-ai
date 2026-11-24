@@ -58,9 +58,11 @@ from tools.train_step4_vs_pool import play_vs_checkpoint, play_with_watchdog
 FMT = "gen9ou"
 COLLECT_PORT_BASE = 49990     # smoke band (the learnability run uses the same
                               # band — run ONE big job at a time, not both)
-PING_PONG_MIN_RUN = 3         # 3+ consecutive no-progress decisions = a loop
-                              # (keep the FIRST of the run — usually a
-                              # legitimate reactive switch — drop the rest)
+PING_PONG_MIN_RUN = 8         # 8+ consecutive no-progress decisions = a loop
+                              # (USER ruling 2026-11-24: 3 was too low — a valid
+                              # stall strategy involves repeated switches with no
+                              # damage; 8 is where we consider it degenerate)
+                              # Keep the FIRST 7 of the run; drop the rest)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -118,10 +120,10 @@ def ping_pong_keep_mask(signatures: Sequence[str],
     run is dropped from the (min_run - 1)-th consecutive no-progress onward.
     A signature change (real progress) resets the run.
 
-    With the default ``min_run = 3``: a lone reactive switch (1 no-progress
-    decision) is kept; the 2nd and every further consecutive no-progress
-    decision is dropped — i.e. a 2-switch ping-pong loop contributes exactly
-    one (the first) decision to the BC data.
+    With the default ``min_run = 8`` (USER ruling 2026-11-24): the first 7
+    consecutive no-progress decisions are kept (legitimate stall/switch play);
+    the 8th and every further consecutive no-progress decision is dropped —
+    i.e. a ping-pong loop contributes at most 7 decisions to the BC data.
 
     Pure over the signature sequence — unit-testable without a battle.
     (The exact threshold semantics are pinned by tools/tests/test_bc_collect.py.)
