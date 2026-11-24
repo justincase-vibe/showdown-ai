@@ -60,7 +60,7 @@ from net.ppo import (PPOTrainer, RolloutBuffer, chosen_logprobs, fill_gae,
                      steps_to_batch)
 from net.trainer import TrainConfig
 from fitness.ladder import random_reference
-from pool import PoolConfig, ResourcePool
+from pool import PoolConfig, ResourcePool, port_serving
 
 # shared building blocks (imported read-only — no code written twice)
 from tools.train_step4_vs_pool import play_vs_checkpoint, play_with_watchdog
@@ -154,9 +154,28 @@ def decide_verdict(evals: List[Dict[str, Any]], max_rounds: int,
 # ═══════════════════════════════════════════════════════════════════════════════
 #  The run
 # ═══════════════════════════════════════════════════════════════════════════════
+def require_ports_free(ports, label: str) -> None:
+    """Abort LOUDLY when any of ``ports`` already serves a Showdown instance
+    (a different run owns them).
+
+    Needed for the EVAL pool because its PoolConfig is built inside the frozen
+    shared loop (``gui.m1_gate_main.run_eval_battles``), where we cannot set
+    ``strict_ports`` -- so the preflight happens here, at the caller.
+    """
+    taken = [p for p in ports if port_serving(p)]
+    if taken:
+        raise SystemExit(
+            f"[learnability] ABORT: {label} port(s) {taken} already serve another "
+            f"Showdown instance (a different run owns them). Stop that run first "
+            f"(netstat -ano | findstr :{taken[0]}), or pick another port base "
+            f"(--eval-port-base).")
+
+
 def _run_eval(rnd: int, main_net, opp_ref, vocabs, eval_battles: int,
-              max_steps: int, n_servers: int, per_server: int) -> Dict[str, Any]:
+              max_steps: int, n_servers: int, per_server: int,
+              eval_port_base: int = EVAL_PORT_BASE) -> Dict[str, Any]:
     """Both play modes vs the random floor, on the DISJOINT eval port base."""
+    require_ports_free(range(eval_port_base, eval_port_base + n_servers), "eval")
     row: Dict[str, Any] = {"round": rnd}
     for mode in ("sampled", "greedy"):
         det = (mode == "greedy")
@@ -164,7 +183,7 @@ def _run_eval(rnd: int, main_net, opp_ref, vocabs, eval_battles: int,
             main_net, opp_ref, FMT, vocabs, "cpu",
             n_battles=eval_battles, max_steps=max_steps,
             n_servers=n_servers, per_server=per_server,
-            port_base=EVAL_PORT_BASE,
+            port_base=eval_port_base,
             seed_base=EVAL_SEED_BASE + rnd * 100_000
             + (EVAL_MODE_OFFSET if det else 0),
             deterministic=det,
@@ -188,6 +207,8 @@ def run(args: argparse.Namespace) -> int:
     n_servers = 1 if smoke else args.n_servers
     per_server = 2
     max_steps = args.max_steps
+    train_port_base = args.train_port_base
+    eval_port_base = args.eval_port_base
 
     ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     run_dir = Path(args.run_dir) if args.run_dir else \
@@ -231,13 +252,14 @@ def run(args: argparse.Namespace) -> int:
         "stop_rules": {"entropy_floor": DEG_ENTROPY_FLOOR, "kl_hard": DEG_KL_HARD,
                        "switch_share_floor": SWITCH_SHARE_FLOOR,
                        "switch_share_streak": SWITCH_SHARE_STREAK},
-        "ports": {"train": TRAIN_PORT_BASE, "eval": EVAL_PORT_BASE},
+        "ports": {"train": train_port_base, "eval": eval_port_base},
     }
     (run_dir / "config.json").write_text(json.dumps(config_row, indent=2))
 
     pool = ResourcePool(
         PoolConfig(n_servers=n_servers, per_server=per_server,
-                   port_base=TRAIN_PORT_BASE, boot_timeout=120),
+                   port_base=train_port_base, boot_timeout=120,
+                   strict_ports=True),  # never silently attach to a foreign server
         log=lambda m: print(f"  [pool] {m}", flush=True))
     print(f"[learnability] starting training pool "
           f"({n_servers} server(s) x {per_server}) ...", flush=True)
@@ -260,7 +282,8 @@ def run(args: argparse.Namespace) -> int:
         # ── round 0: the untrained baseline (~50% vs the random floor) ──
         print("[learnability] round 0 = baseline eval (untrained net)", flush=True)
         evals.append(_run_eval(0, main_net, opp_ref, vocabs, eval_battles,
-                               max_steps, n_servers, per_server))
+                               max_steps, n_servers, per_server,
+                               eval_port_base=eval_port_base))
         _log({"round": 0, "kind": "baseline", "evals": evals[-1]})
 
         for rnd in range(1, rounds + 1):
@@ -349,7 +372,8 @@ def run(args: argparse.Namespace) -> int:
             if rnd % eval_every == 0:
                 evals.append(_run_eval(rnd, main_net, opp_ref, vocabs,
                                        eval_battles, max_steps,
-                                       n_servers, per_server))
+                                       n_servers, per_server,
+                                       eval_port_base=eval_port_base))
             rounds_completed = rnd
     finally:
         pool.shutdown()
@@ -405,6 +429,11 @@ def main() -> None:
                    help="eval battles per play mode")
     p.add_argument("--n-servers", type=int, default=2,
                    help="training + eval servers (RAM: keep <= 2x2 each here)")
+    p.add_argument("--train-port-base", type=int, default=TRAIN_PORT_BASE,
+                   help="training server ports start here (default 49990; pick a "
+                        "different base to run two runs in parallel)")
+    p.add_argument("--eval-port-base", type=int, default=EVAL_PORT_BASE,
+                   help="eval server ports start here (default 50006)")
     p.add_argument("--max-steps", type=int, default=300, help="per-battle step cap")
     p.add_argument("--battle-timeout", type=int, default=240, help="per-battle watchdog (s)")
     p.add_argument("--seed", type=int, default=20261126)

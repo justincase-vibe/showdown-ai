@@ -227,7 +227,8 @@ def main() -> None:
 
     # Start the pool
     pool = ResourcePool(
-        PoolConfig(n_servers=1, per_server=2, port_base=8000, boot_timeout=120),
+        PoolConfig(n_servers=1, per_server=2, port_base=8000, boot_timeout=120,
+                   strict_ports=True),  # never silently attach to a foreign server
         log=lambda m: print(m, flush=True))
     print("[step4] starting server pool ...", flush=True)
     status = pool.start(wait_healthy=True)

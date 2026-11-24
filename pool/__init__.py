@@ -18,7 +18,7 @@ enforcing the machine's RAM ceiling (default: 8 servers x 3 battles/server =
 """
 from .config import PoolConfig
 from .slot_pool import EnvSlotPool
-from .server_pool import ServerPool
+from .server_pool import ServerPool, port_serving
 from .pool import ResourcePool
 
-__all__ = ["PoolConfig", "EnvSlotPool", "ServerPool", "ResourcePool"]
+__all__ = ["PoolConfig", "EnvSlotPool", "ServerPool", "port_serving", "ResourcePool"]

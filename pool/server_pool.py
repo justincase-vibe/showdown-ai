@@ -25,6 +25,21 @@ from .config import PoolConfig
 DETACHED_PROCESS = 0x00000200  # Windows: don't tie the server to a console lifetime
 
 
+def port_serving(port: int, host: str = "localhost", timeout: float = 2.0) -> bool:
+    """True if a Showdown instance answers on ``host:port``.
+
+    THE single health-check implementation (used by :meth:`ServerPool.health`
+    and by the ``strict_ports`` preflight): HTTP 200 on ``/showdown/info`` --
+    the exact endpoint the browser client and poke-env both use.
+    """
+    url = f"http://{host}:{port}/showdown/info"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
 class ServerPool:
     def __init__(self, cfg: PoolConfig, log=None):
         self.cfg = cfg
@@ -75,6 +90,17 @@ class ServerPool:
             self._procs[port] = p
 
     def start_all(self, wait_healthy: bool = True) -> Dict[int, bool]:
+        if self.cfg.strict_ports:
+            taken = [p for p in self.cfg.ports if port_serving(p, self.cfg.host)]
+            if taken:
+                raise SystemExit(
+                    f"[pool] ABORT (strict_ports): port(s) {taken} already serve "
+                    f"another Showdown instance. A different run (or the GUI) "
+                    f"owns them and this pool would silently attach to foreign "
+                    f"servers instead of its own.\n"
+                    f"  find the owner : netstat -ano | findstr :{taken[0]}\n"
+                    f"  stop it        : taskkill /F /PID <pid>\n"
+                    f"  or give this run its own range (port_base / --port-base)")
         for port in self.cfg.ports:
             try:
                 self._ensure(port)
@@ -100,12 +126,7 @@ class ServerPool:
 
     # --- health --------------------------------------------------------------
     def health(self, port: int, timeout: float = 2.0) -> bool:
-        url = f"http://{self.cfg.host}:{port}/showdown/info"
-        try:
-            with urllib.request.urlopen(url, timeout=timeout) as r:
-                return r.status == 200
-        except Exception:
-            return False
+        return port_serving(port, self.cfg.host, timeout)
 
     def health_all(self) -> Dict[int, bool]:
         return {p: self.health(p) for p in self.cfg.ports}

@@ -8,11 +8,13 @@ GPU, fast.
 """
 from __future__ import annotations
 
+import pytest
+
 from gui.m1_gate_main import DEG_ENTROPY_FLOOR, DEG_KL_HARD
 from tools.learnability_test import (EVAL_MODE_OFFSET, EVAL_PORT_BASE, PASS_WR,
                                      SWITCH_SHARE_FLOOR, SWITCH_SHARE_STREAK,
                                      TRAIN_PORT_BASE, check_stop_rules,
-                                     decide_verdict)
+                                     decide_verdict, require_ports_free)
 
 
 # ── stop rules ────────────────────────────────────────────────────────────────
@@ -124,3 +126,27 @@ def test_contract_constants_match_the_spec():
     assert EVAL_PORT_BASE - TRAIN_PORT_BASE >= 4   # >= max servers in play
     # sampled/greedy eval seeds must stay disjoint for the default eval size
     assert EVAL_MODE_OFFSET > 100
+
+
+# ── the eval-pool preflight (the frozen shared loop can't set strict_ports) ──
+def test_require_ports_free_aborts_on_foreign_ports(monkeypatch):
+    import tools.learnability_test as lt
+    monkeypatch.setattr(lt, "port_serving", lambda p: True)
+    with pytest.raises(SystemExit) as ei:
+        lt.require_ports_free([50006, 50007], "eval")
+    msg = str(ei.value)
+    assert "50006" in msg and "eval" in msg
+
+
+def test_require_ports_free_passes_when_free(monkeypatch):
+    import tools.learnability_test as lt
+    monkeypatch.setattr(lt, "port_serving", lambda p: False)
+    lt.require_ports_free(range(50006, 50006 + 2), "eval")  # must not raise
+
+
+def test_require_ports_free_reports_only_the_busy_ports(monkeypatch):
+    import tools.learnability_test as lt
+    monkeypatch.setattr(lt, "port_serving", lambda p: p == 50007)
+    with pytest.raises(SystemExit) as ei:
+        lt.require_ports_free([50006, 50007], "eval")
+    assert "50007" in str(ei.value)

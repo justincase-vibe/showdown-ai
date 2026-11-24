@@ -267,7 +267,8 @@ def collect_bc(n_battles: int, opp_names: Sequence[str], fmt: str,
 
     pool = ResourcePool(
         PoolConfig(n_servers=n_servers, per_server=per_server,
-                   port_base=port_base, boot_timeout=120),
+                   port_base=port_base, boot_timeout=120,
+                   strict_ports=True),  # never silently attach to a foreign server
         log=lambda m: lg(f"  [pool] {m}"))
     lg(f"[bc_collect] starting pool ({n_servers} x {per_server}) ...")
     if not all(pool.start(wait_healthy=True).values()):

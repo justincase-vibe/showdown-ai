@@ -38,6 +38,11 @@ class PoolConfig:
     auto_restart: bool = True      # revive a crashed server (bounded)
     max_restarts: int = 3          # per server before giving up
     boot_timeout: float = 60.0     # seconds to wait for a server to become healthy
+    strict_ports: bool = False     # True: start_all() ABORTS when a port is
+                                   # already serving (a different run owns it)
+                                   # instead of silently attaching to foreign
+                                   # servers. Headless training entry points set
+                                   # this; the GUI keeps the legacy reuse path.
 
     def __post_init__(self) -> None:
         if self.n_servers < 1:
@@ -72,6 +77,7 @@ class PoolConfig:
             "auto_restart": self.auto_restart,
             "max_restarts": self.max_restarts,
             "boot_timeout": self.boot_timeout,
+            "strict_ports": self.strict_ports,
             "ports": self.ports,
             "max_envs": self.max_envs,
             "fork_path": str(self.fork_path),
