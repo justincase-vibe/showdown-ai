@@ -2590,3 +2590,49 @@ spread is warmup, not collapse.
 `test_real_round2_case_no_false_positive` (the exact round-2 metrics that fired
 before now produce **no** warning) and per-rule fire/boundary cases. 16/16 pass,
 AST clean.
+
+## Gate controls + rule change (Claude review of master@1696bcb, 2026-11-24)
+
+**Trigger:** Claude's review: a 50% coin flip has a Wilson lower bound ≈ 0.42
+at n=200, which CLEARS the 0.40 PASS bar — the gate can be passed by chance.
+Also: wrong primary (strategy_posterior pooled), wrong CI quoted, winner's
+curse on r70's 0.72, and the 0.544 pool-WR conflates four opponents.
+
+**Changes (implemented):**
+- **Decision yardstick = plain `strategy`** (6.6a: strategy_posterior stays
+  an additive reference, not the yardstick). `tools/gate_eval.py` primary
+  changed; `PRIMARY_OPP = "strategy"` pinned by test.
+- **Per-mode bounds:** lower CI95 reported per play mode (greedy, sampled);
+  **verdict = min of the two bounds** (a net passing only one mode is not a
+  pass). `min_mode_bound` + `_subject_verdict` are pure/tested.
+- **Controls:** `--subject random_init,heuristic` plays the pool's
+  random-init floor and the old heuristic vs the SAME yardstick with the
+  SAME battle seeds (shared pair_idx seed space → identical teams on both
+  sides) as the checkpoints. If a control passes the gate, the bar is
+  broken and must be re-set before trusting any checkpoint verdict.
+  `run_eval_battles` gained an additive `my_ref` parameter (single battle
+  loop kept — no duplication).
+- **Both checkpoints gated:** `--ckpt` now accepts a comma list (r70 + r80)
+  — winner's curse: never gate on a single noisy eval peak.
+- **In-distribution caveat** recorded in result.json + printed report:
+  train and eval share the 25-team pool; PASS says nothing about unseen
+  teams yet (out-of-distribution eval = later step).
+- **Per-window truth** (from metrics.jsonl, yardstick vs strategy):
+  r01-30: 0.547 (lo 0.423) · r31-60: 0.553 (lo 0.430) · r61-80: 0.670
+  (lo 0.519). r70: 0.720 (lo 0.508) · r80: 0.620 (lo 0.409). Training-pool
+  WR by window: 0.432 → 0.605 → 0.618.
+
+**OPEN (user decision, not implemented — learning code):**
+- No advantage normalization, no minibatching, no reward shaping, no BC
+  warm start; 80 rounds ≈ 160 gradient steps. Claude: would NOT run 2k more
+  battles with the current settings. DECIDE before scaling: (a) fix the
+  PPO loop first, (b) gate anyway as a weak-signal read, (c) BC warm start
+  (Arm B) as the next experiment.
+- **PASS bar calibration:** after controls land, re-set GATE_PASS if the
+  random-init floor sits inside the decision zone (expected: floor ≈ 0.35-0.45
+  at n=200 → bar must move above the floor's bound + margin).
+
+**Known system issue (not project code):** Windows Defender /
+"Application Control policy" blocked the pyarrow `_parquet` DLL during a
+test run (2 user notifications). `net/tests/test_s42.py` failed
+collection; rest of suite: 455 passed, 3 known pre-existing failures.

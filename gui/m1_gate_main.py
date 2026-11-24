@@ -535,13 +535,18 @@ def run_eval_battles(net, opp_ref, fmt, vocabs, device,
                      n_battles, max_steps, n_servers, per_server, port_base,
                      seed_base: int, deterministic: bool = True,
                      battle_hook=None, stop_check=None,
-                     label: str = "eval") -> Dict[str, Any]:
+                     label: str = "eval",
+                     my_ref: Any = None) -> Dict[str, Any]:
     """The ONE parallel eval-battle loop (shared by the C3 yardstick eval
     and the C4 final gate, ``tools.gate_eval`` — no second implementation).
 
     * plays ``n_battles`` of ``net`` (p1) vs ONE frozen reference (p2);
       ``deterministic=True`` = greedy (argmax) via :class:`_Greedy`,
       ``False`` = sample from the policy (``PokeAgent.act`` default);
+      ``my_ref`` (optional) OVERRIDES the p1 subject with a pool
+      ``Reference`` (random-init floor / old heuristic) — the gate
+      CONTROLS (Claude review: a gate the random-init net can pass is no
+      gate). When set, ``net`` may be ``None``.
     * fresh agent per battle (same isolation contract as training
       collection; the net is read-only — no state mutation);
     * ``seed_base + i`` per battle — the CALLER picks a disjoint seed space
@@ -553,8 +558,14 @@ def run_eval_battles(net, opp_ref, fmt, vocabs, device,
     from pool import PoolConfig, ResourcePool
 
     # Fresh agent per battle; greedy wrapper only for the deterministic mode.
+    # my_ref (gate controls) takes precedence: the subject is a pool
+    # Reference with the same .act contract, so _Greedy wraps it exactly
+    # like a PokeAgent.
     def _make_my_agent(seed: int):
-        agent = PokeAgent(net, seed=seed, device=device)
+        if my_ref is not None:
+            agent = my_ref.make_agent(seed=seed)
+        else:
+            agent = PokeAgent(net, seed=seed, device=device)
         return _Greedy(agent) if deterministic else agent
 
     pool_cfg = PoolConfig(

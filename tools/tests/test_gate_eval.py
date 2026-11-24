@@ -18,7 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tools.gate_eval import (  # noqa: E402
-    GATE_CONTINUE, GATE_PASS, gate_verdict, pool_rows, wilson_lower,
+    GATE_CONTINUE, GATE_PASS, PRIMARY_OPP, gate_verdict, min_mode_bound,
+    pool_rows, wilson_lower,
 )
 
 
@@ -68,7 +69,50 @@ def test_verdict_no_data():
     assert gate_verdict(None) == "NO_DATA"
 
 
-# ── pool_rows (both play modes pooled for one opponent) ─────────────────────
+# ── per-mode verdict (Claude review: strategy primary, worst mode rules) ──
+
+def test_primary_opp_is_plain_strategy():
+    assert PRIMARY_OPP == "strategy"
+
+
+def test_min_mode_bound_takes_worst():
+    assert abs(min_mode_bound({"greedy": 0.50, "sampled": 0.42}) - 0.42) < 1e-12
+    assert abs(min_mode_bound({"greedy": 0.30}) - 0.30) < 1e-12
+
+
+def test_min_mode_bound_empty_or_nan():
+    assert math.isnan(min_mode_bound({}))
+    assert math.isnan(min_mode_bound({"greedy": float("nan")}))
+
+
+def test_min_mode_bound_ignores_nan_entries():
+    # one mode errored (nan) -> the verdict falls back to the real bound
+    assert abs(min_mode_bound({"greedy": 0.41, "sampled": float("nan")})
+               - 0.41) < 1e-12
+
+
+def test_subject_verdict_uses_min_of_modes():
+    from tools.gate_eval import _subject_verdict
+    pairs = {"strategy": {
+        "greedy": {"eval_w": 180, "eval_l": 20, "eval_d": 0},
+        "sampled": {"eval_w": 120, "eval_l": 80, "eval_d": 0},
+    }}
+    v = _subject_verdict(pairs)
+    assert v["primary"] == "strategy"
+    assert set(v["per_mode_lower_ci"]) == {"greedy", "sampled"}
+    assert v["per_mode_lower_ci"]["greedy"] > v["per_mode_lower_ci"]["sampled"]
+    assert v["verdict_bound"] == v["per_mode_lower_ci"]["sampled"]
+    assert v["verdict"] == gate_verdict(v["verdict_bound"])
+
+
+def test_subject_verdict_no_primary_is_no_data():
+    from tools.gate_eval import _subject_verdict
+    v = _subject_verdict({"strategy_posterior": {"greedy": {"eval_w": 1, "eval_l": 1}}})
+    assert v["verdict"] == "NO_DATA"
+    assert math.isnan(v["verdict_bound"])
+
+
+# ── pool_rows (reporting-only pool of play modes for one opponent) ──────────
 
 def test_pool_rows_sums_and_never_counts_draws_as_wins():
     rows = [
