@@ -2738,6 +2738,16 @@ turns as ping-pong and drops it. Unconfirmed with you: is 3 the right
 threshold (a legitimate 2-turn stall setup would survive; a 3-turn
 switch-loop dies)? Kept at 3 as the conservative default until you rule.
 
-**(v) Open (unchanged from prior entries):** item 11 (battles/round ≥ 50),
+**(v) Showdown sim-worker count lowered 16 → 4 (fork `config/config.js`, LOCAL,
+not in git — documented here):** the old "CPU governor" setting (16 sim
+worker PROCESSES per server) × 4 servers = 64 workers ≈ 3.3 GB RAM, leaving
+the box at 2.2 GB free during the learnability run (this machine has a
+history of killing RAM-hungry runs — the stop-command incident). Every pool
+config runs 2 battles PER server (learnability 2×2, gate 6×2), so 4 workers
+= 2× headroom, no sim queuing. After the change: node footprint 108 procs
+/ 8.2 GB → 60 procs / 4.9 GB, free RAM 2.2 → 7.9 GB. Raise only if a future
+config runs >2 concurrent battles per server.
+
+**(vi) Open (unchanged from prior entries):** item 11 (battles/round ≥ 50),
 gate relaunch (CPU learnability vs the (b) GPU gate — RAM ceiling ~12 envs:
 if the GPU gate launches, kill the background learnability run first).
