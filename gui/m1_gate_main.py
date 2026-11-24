@@ -507,37 +507,55 @@ class _Greedy:
         return self._agent.act(obs, action_list, deterministic=True)
 
 
-def _eval_round_m1(trainer, full_pool, fmt, vocabs, device,
-                   opp_name, n_battles, max_steps, n_servers, per_server,
-                   port_base, battle_hook, stop_check) -> Dict[str, Any]:
-    """C3 yardstick eval: the CURRENT net (greedy) vs the frozen reference.
+def summarize_eval_records(records: list) -> Dict[str, Any]:
+    """Pure aggregation of battle records into the eval row contract.
 
-    Same battle-worker pattern as :func:`_train_round_m1`, but:
+    W/L/D are reported SEPARATELY (eval contract; the D4 draw=-1.0 rule is
+    training-reward only) and ``eval_wr = wins/(w+l+d)`` (nan if 0 played).
+    A record where BOTH sides won (double K.O. / stall) counts as a draw.
+    """
+    n_wins = sum(1 for r in records if r["a1_won"] and not r["a2_won"])
+    n_losses = sum(1 for r in records if r["a2_won"] and not r["a1_won"])
+    n_draws = sum(1 for r in records
+                  if not r["crashed"]
+                  and not (r["a1_won"] and not r["a2_won"])
+                  and not (r["a2_won"] and not r["a1_won"]))
+    n_crashed = sum(1 for r in records if r["crashed"])
+    played = n_wins + n_losses + n_draws
+    return {
+        "eval_w": n_wins,
+        "eval_l": n_losses,
+        "eval_d": n_draws,
+        "eval_crashed": n_crashed,
+        "eval_wr": (n_wins / played) if played else float("nan"),
+    }
 
-    * plays ``n_battles`` GREEDY battles vs ONE fixed opponent (default
-      ``strategy``) — the yardstick that tells us whether the net is
-      actually learning; no PPO update, no checkpoint bump;
-    * seeds are in a DISJOINT space (``1_000_000 + round*1000 + i``) so the
-      eval never re-samples the training battles;
-    * W/L/D are reported SEPARATELY (eval contract; the D4 draw=-1.0 rule is
-      training-reward only) and ``eval_wr = wins/(w+l+d)`` (nan if 0 played);
-    * additive metric keys only (``eval_*``) — the existing row contract is
-      untouched (6.6a discipline).
+
+def run_eval_battles(net, opp_ref, fmt, vocabs, device,
+                     n_battles, max_steps, n_servers, per_server, port_base,
+                     seed_base: int, deterministic: bool = True,
+                     battle_hook=None, stop_check=None,
+                     label: str = "eval") -> Dict[str, Any]:
+    """The ONE parallel eval-battle loop (shared by the C3 yardstick eval
+    and the C4 final gate, ``tools.gate_eval`` — no second implementation).
+
+    * plays ``n_battles`` of ``net`` (p1) vs ONE frozen reference (p2);
+      ``deterministic=True`` = greedy (argmax) via :class:`_Greedy`,
+      ``False`` = sample from the policy (``PokeAgent.act`` default);
+    * fresh agent per battle (same isolation contract as training
+      collection; the net is read-only — no state mutation);
+    * ``seed_base + i`` per battle — the CALLER picks a disjoint seed space
+      so parallel evals never re-sample each other's battles;
+    * returns the ``summarize_eval_records`` row (pure aggregation).
     """
     import threading
     from net.agent import PokeAgent
     from pool import PoolConfig, ResourcePool
 
-    if opp_name not in full_pool:
-        raise RuntimeError(
-            f"eval opponent {opp_name!r} not in the M1 pool "
-            f"(have {full_pool.names()})")
-    opp_ref = full_pool.get(opp_name)
-
-    # Fresh greedy agent per battle (same isolation contract as training
-    # collection; the net is read-only here — no state mutation).
-    def _make_my_agent(seed: int) -> "_Greedy":
-        return _Greedy(PokeAgent(trainer.net, seed=seed, device=device))
+    # Fresh agent per battle; greedy wrapper only for the deterministic mode.
+    def _make_my_agent(seed: int):
+        agent = PokeAgent(net, seed=seed, device=device)
+        return _Greedy(agent) if deterministic else agent
 
     pool_cfg = PoolConfig(
         n_servers=n_servers, per_server=per_server,
@@ -546,53 +564,71 @@ def _eval_round_m1(trainer, full_pool, fmt, vocabs, device,
     srv_pool.start(wait_healthy=True)
 
     records: list = []
+    errors: list = []
     lock = threading.Lock()
     next_idx = {"i": 0}
     stop_evt = threading.Event()
+    # stop_check is OPTIONAL (the gate tool passes None); the trainer always
+    # supplies one — the original code called it unguarded, so keep a None
+    # guard here (a None default + unguarded call = instant worker crash).
+    _stop_check = stop_check if stop_check is not None else (lambda: False)
 
     def _worker() -> None:
-        while True:
-            if stop_evt.is_set() or stop_check():
-                stop_evt.set()
-                return
-            with lock:
-                if next_idx["i"] >= n_battles:
-                    # All battles claimed: tell the other workers to stop
-                    # NOW (otherwise a fast worker could grab the same last
-                    # index before the slower one notices it is done).
+        # A worker that DIES (not a crashed battle) must surface: otherwise
+        # every thread could exit silently and the caller sees a quiet
+        # all-zero row (the gate smoke caught exactly this: a TypeError in
+        # the worker loop left records empty with no error raised).
+        try:
+            while True:
+                if stop_evt.is_set() or _stop_check():
                     stop_evt.set()
                     return
-                i = next_idx["i"]
-                next_idx["i"] += 1
+                with lock:
+                    if next_idx["i"] >= n_battles:
+                        # All battles claimed: tell the other workers to
+                        # stop NOW (otherwise a fast worker could grab the
+                        # same last index before a slower one notices).
+                        stop_evt.set()
+                        return
+                    i = next_idx["i"]
+                    next_idx["i"] += 1
 
-            seed = 1_000_000 + trainer.round * 1000 + i
-            if battle_hook:
-                battle_hook(i)
+                seed = seed_base + i
+                if battle_hook:
+                    battle_hook(i)
 
-            my_agent = _make_my_agent(seed)
-            opp_agent = opp_ref.make_agent(seed=seed)
-            a1_won = a2_won = None
-            crashed = False
-            try:
-                with srv_pool.battle_slot() as server_cfg:
-                    _traj, a1_won, a2_won, _n = _play_one_battle(
-                        my_agent, opp_agent, fmt, vocabs, device,
-                        server_cfg, seed, max_steps)
-            except Exception as exc:
-                crashed = True
-                print(f"  eval battle {i}: CRASHED "
-                      f"({type(exc).__name__}: {exc})", flush=True)
+                a1_won = a2_won = None
+                crashed = False
+                try:
+                    my_agent = _make_my_agent(seed)
+                    opp_agent = opp_ref.make_agent(seed=seed)
+                    with srv_pool.battle_slot() as server_cfg:
+                        _traj, a1_won, a2_won, _n = _play_one_battle(
+                            my_agent, opp_agent, fmt, vocabs, device,
+                            server_cfg, seed, max_steps)
+                except Exception as exc:
+                    crashed = True
+                    a1_won = a2_won = None
+                    print(f"  eval battle {i}: CRASHED "
+                          f"({type(exc).__name__}: {exc})", flush=True)
 
+                with lock:
+                    records.append({"a1_won": a1_won, "a2_won": a2_won,
+                                    "crashed": crashed})
+        except Exception as exc:  # noqa: BLE001 — record, signal, re-raise
             with lock:
-                records.append({"a1_won": a1_won, "a2_won": a2_won,
-                                "crashed": crashed})
+                errors.append(f"worker {threading.current_thread().name}: "
+                              f"{type(exc).__name__}: {exc}")
+            stop_evt.set()
+            raise
 
     n_workers = max(1, min(n_battles, n_servers * per_server))
-    print(f"[m1gate-eval] {n_battles} battles vs {opp_name!r} "
+    print(f"[{label}] {n_battles} battles vs {getattr(opp_ref, 'name', opp_ref)!r} "
+          f"mode={'greedy' if deterministic else 'sampled'} "
           f"({n_workers} workers, {n_servers} server(s) x {per_server})",
           flush=True)
     try:
-        threads = [threading.Thread(target=_worker, name=f"m1gate-eval-w{k}",
+        threads = [threading.Thread(target=_worker, name=f"{label}-w{k}",
                                     daemon=True) for k in range(n_workers)]
         for t in threads:
             t.start()
@@ -602,24 +638,36 @@ def _eval_round_m1(trainer, full_pool, fmt, vocabs, device,
         stop_evt.set()
         srv_pool.shutdown()
 
-    n_wins = sum(1 for r in records if r["a1_won"] and not r["a2_won"])
-    n_losses = sum(1 for r in records if r["a2_won"] and not r["a1_won"])
-    n_draws = sum(1 for r in records
-                  if not r["crashed"]
-                  and not (r["a1_won"] and not r["a2_won"])
-                  and not (r["a2_won"] and not r["a1_won"]))
-    n_crashed = sum(1 for r in records if r["crashed"])
+    if errors:
+        raise RuntimeError(
+            f"{len(errors)} eval worker(s) died: {errors[:3]}")
+    row = summarize_eval_records(records)
+    row["eval_battles"] = n_battles
+    return row
 
-    played = n_wins + n_losses + n_draws
-    return {
-        "eval_opp": opp_name,
-        "eval_battles": n_battles,
-        "eval_w": n_wins,
-        "eval_l": n_losses,
-        "eval_d": n_draws,
-        "eval_crashed": n_crashed,
-        "eval_wr": (n_wins / played) if played else float("nan"),
-    }
+
+def _eval_round_m1(trainer, full_pool, fmt, vocabs, device,
+                   opp_name, n_battles, max_steps, n_servers, per_server,
+                   port_base, battle_hook, stop_check) -> Dict[str, Any]:
+    """C3 yardstick eval: the CURRENT net (GREEDY) vs the frozen reference.
+
+    Thin wrapper over :func:`run_eval_battles` (the shared battle loop):
+    greedy mode, seeds in the DISJOINT space ``1_000_000 + round*1000 + i``
+    so the eval never re-samples the training battles, additive ``eval_*``
+    metric keys only (6.6a discipline), no PPO update, no checkpoint bump.
+    """
+    if opp_name not in full_pool:
+        raise RuntimeError(
+            f"eval opponent {opp_name!r} not in the M1 pool "
+            f"(have {full_pool.names()})")
+    opp_ref = full_pool.get(opp_name)
+    row = run_eval_battles(
+        trainer.net, opp_ref, fmt, vocabs, device,
+        n_battles, max_steps, n_servers, per_server, port_base,
+        seed_base=1_000_000 + trainer.round * 1000, deterministic=True,
+        battle_hook=battle_hook, stop_check=stop_check, label="m1gate-eval")
+    row["eval_opp"] = opp_name
+    return row
 
 
 def _play_one_battle(agent, opp_agent, fmt, vocabs, device,
