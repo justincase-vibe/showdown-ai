@@ -2636,3 +2636,48 @@ curse on r70's 0.72, and the 0.544 pool-WR conflates four opponents.
 "Application Control policy" blocked the pyarrow `_parquet` DLL during a
 test run (2 user notifications). `net/tests/test_s42.py` failed
 collection; rest of suite: 455 passed, 3 known pre-existing failures.
+
+---
+
+## 2026-11-24 — PPO fix pack (a) — DONE on `bionic/ppo-fix-pack`
+
+**Status:** the (a) work item from the binding work order (b→a→c→compare) is
+complete on the branch (commit `7ad040f`); not merged to master yet (merge
+after the gate run, to keep the gate's working tree untouched).
+
+**What landed (per the approved spec, no shaping):**
+- **Advantage normalization** — `normalize_advantages()` applied once per
+  `update()`, over the whole buffer; constant advantage → zeros (no relative
+  information; the old code updated on pure sign noise in that case).
+- **Minibatch PPO** — `minibatch_size=256` default; each epoch shuffles and
+  steps in chunks (pre-fix: ONE full-batch Adam step per epoch — the
+  "80 rounds ≈ 160 gradient steps" finding). Small buffers (≤256) reproduce
+  the old full-batch behaviour.
+- **Approx-KL early stop** — `E_old[ratio·log(ratio)]` measured per minibatch;
+  exceeds `target_kl=0.03` → remaining minibatches AND epochs skipped
+  (pre-fix estimator `max(0, exp(d)−1)` was ≈ −KL for small drift — pinned
+  the misleading ~0).
+- **Metrics** — averaged per executed minibatch; additive `grad_steps` and
+  `early_stopped` keys (trainer additive-metrics contract preserved; callers
+  `net/trainer.py`, `league/engine.py`, `gui/m1_gate_main.py`,
+  `tools/{smoke_step4,train_step4_vs_pool}.py` verified signature-compatible).
+
+**Verification (CPU-only):** `net/tests/test_ppo.py` 15/15 (4 new:
+`test_normalize_advantages`, `test_update_minibatch_grad_steps`
+[n=600/mb=256/2 epochs → exactly 6 grad steps], `test_update_kl_early_stop`
+[stops < 30 of 30 possible steps], `test_update_normalizes_advantages`
+[loss receives std≈1/mean≈0; constant → all zeros]); full
+`net + fitness + tools` = **413 passed, 2 skipped, 1 failed** — the one
+failure is the known pre-existing `gen9bss3v3` pool gap
+(`fitness/tests/test_harness.py::test_evaluate_bot_beats_random_live`),
+untouched by this branch.
+
+**Test-writing note (bug caught in review):** torch's whole-tensor `.std()`
+applies Bessel's correction by default in this build (√(64/63) ≈ 1.0079 off) —
+the normalization test computes population std explicitly instead.
+
+**Still open (unchanged):** item 11 (battles/round ≥ 50 — frozen
+`gui/m1_gate_main.py` until the gate finishes), item 12 (learnability test),
+item 13 (BC warm start Arm B), item 14 (fixed-PPO vs BC+PPO comparison),
+item 15 (shaping — separate later commit). **Shaping remains unbuilt, per
+the explicit ruling.**

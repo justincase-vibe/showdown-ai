@@ -110,7 +110,7 @@ uses, but parallel instead of sequential. C4/C5 are implemented via the
 | 7 | C5 strategy-bot silent-fallback counters (per-pair delta) | DONE |
 | 8 | in-distribution sentence in report + result.json | DONE (a6d9165) |
 | 9 | both r70 + r80 gated | DONE (multi-ckpt) |
-| 10 | PPO fix pack (adv-norm + minibatch 256 + KL 0.03 stop) | IN PROGRESS on `bionic/ppo-fix-pack` |
+| 10 | PPO fix pack (adv-norm + minibatch 256 + KL 0.03 stop) | DONE on `bionic/ppo-fix-pack` (commit 7ad040f; 15/15 ppo tests, net+fitness+tools 413 passed / 1 known pre-existing failure) |
 | 11 | battles/round >= 50 for the fixed-PPO runs | TODO (m1gate config; frozen while gate runs) |
 | 12 | learnability test (vs random, 50/round, >85% in ~15 rounds) | TODO (needs servers) |
 | 13 | BC warm start pipeline (Arm B, ping-pong filtered) | TODO (pipeline code first) |
