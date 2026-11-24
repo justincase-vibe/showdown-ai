@@ -19,7 +19,11 @@ Run:
 from __future__ import annotations
 import os, sys, time, glob
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+#: CPU only (the GPU is the LLM's) — but pinned in main(), NOT at import
+#: time: this module is imported as a library by tools/learnability_test.py
+#: and tools/bc_collect.py (the shared battle loop), and an import-time env
+#: mutation would silently hide the CUDA device from the WHOLE process (it
+#: once broke net/tests/test_s42 in full-suite runs).
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, ROOT)
@@ -79,9 +83,10 @@ def load_opponent(path: str, vocabs) -> PokeNet:
 
 
 # ── the core: play one battle, main learner vs a checkpoint opponent ──────────
-def play_vs_checkpoint(main_agent: PokeAgent, opp_agent: PokeAgent,
+def play_vs_checkpoint(main_agent, opp_agent,
                        fmt: str, seed: int, max_steps: int = 300,
-                       server_configuration=None, vocabs=None) -> dict:
+                       server_configuration=None, vocabs=None,
+                       decision_hook=None) -> dict:
     """Play ONE battle (main on p1, checkpoint opponent on p2).
 
     ``server_configuration`` is REQUIRED (the pool's battle_slot yields the
@@ -112,16 +117,32 @@ def play_vs_checkpoint(main_agent: PokeAgent, opp_agent: PokeAgent,
                     pending = None
                 obs_dict = obs[a1]["observation"]
                 acts = build_action_list(env.battle1)
-                d = main_agent.act(obs_dict, acts)
-                if d.action is None:
+                d = None
+                if getattr(main_agent, "decides_from_battle", False):
+                    # C1b mirror for p1: a ctx brain decides from the BATTLE
+                    # (the SAME contract the p2 branch uses) — the loop is
+                    # agent-agnostic: a net OR a brain can sit on either side.
+                    # (BC collection: the strategy teacher plays on p1.)
+                    chosen = main_agent.decide(battle=env.battle1, fmt=fmt,
+                                               vocabs=vocabs, side="p1")
+                else:
+                    d = main_agent.act(obs_dict, acts)
+                    chosen = d.action
+                if chosen is None:
                     actions[a1] = np.int64(-2)
                 else:
-                    pe = action_to_pe(d.action, env.battle1)
+                    pe = action_to_pe(chosen, env.battle1)
                     if pe < 0:
                         out["n_illegal"] += 1
                     actions[a1] = np.int64(pe)
-                    out.setdefault("action_kinds", []).append(d.action.get("kind"))
-                    pending = (obs_dict, d.action_index, float(d.logprob), float(d.value))
+                    out.setdefault("action_kinds", []).append(chosen.get("kind"))
+                    if d is not None:
+                        pending = (obs_dict, d.action_index, float(d.logprob),
+                                   float(d.value))
+                # optional decision hook (BC collection records obs+acts+act
+                # here; the battle object is the ground-truth source)
+                if decision_hook is not None and chosen is not None:
+                    decision_hook(obs_dict, acts, chosen, env.battle1)
             if env.agent2_to_move:
                 if getattr(opp_agent, "decides_from_battle", False):
                     # C1b: ctx brain (strategy / strategy_posterior) decides from
@@ -198,6 +219,7 @@ def play_with_watchdog(fn, *args, timeout_s: int = 300, **kwargs) -> dict:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # CPU only (see module note)
     t0 = time.time()
     os.makedirs(CKPT_DIR, exist_ok=True)
 

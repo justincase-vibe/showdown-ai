@@ -340,3 +340,74 @@ def test_gae_draw_vs_win_symmetry():
     adv_l, ret_l = gae(r_loss, v, gamma=0.99, lam=0.95)
     np.testing.assert_allclose(adv_d, adv_l, atol=1e-12)
     np.testing.assert_allclose(ret_d, ret_l, atol=1e-12)
+
+
+# ── (c) Arm B: the annealed KL(pi || pi_ref) pull ────────────────────────────
+def test_ref_off_is_byte_identical_to_a_path(ctx_vocabs):
+    """Default-OFF contract: ref_net=None vs (ref_net set, beta=0.0) must
+    produce IDENTICAL metrics — the (a) fix-pack path is untouched by the
+    Arm B option."""
+    import copy
+    import torch
+    ctx, vocabs = ctx_vocabs
+    torch.manual_seed(7)
+    net = make_random_net(vocabs, "cpu")
+    net2 = copy.deepcopy(net)
+    ref = copy.deepcopy(net)
+    batch = _build(vocabs, ctx, seed=11)
+    n = len(batch["action_index"])
+    with torch.no_grad():
+        batch["old_logprob"] = chosen_logprobs(net, batch).clone()
+    adv = np.concatenate([np.ones(n // 2), -np.ones(n - n // 2)])
+    ret = np.zeros(n)
+    kw = dict(lr=1e-3, ent_coef=0.0, vf_coef=0.0, target_kl=None,
+              minibatch_size=8)
+    torch.manual_seed(123)
+    m_a = PPOTrainer(net, **kw).update(batch, advantages=adv, returns=ret,
+                                       epochs=2)
+    torch.manual_seed(123)
+    m_b = PPOTrainer(net2, ref_net=ref, ref_kl_beta=0.0, **kw).update(
+        batch, advantages=adv, returns=ret, epochs=2)
+    for k in m_a:
+        assert m_b[k] == pytest.approx(m_a[k], rel=1e-10, abs=1e-12), k
+    assert m_b["ref_kl"] == 0.0
+
+
+def test_ref_kl_is_zero_when_policy_equals_ref(ctx_vocabs):
+    """KL(pi || pi_ref) == 0 iff pi == pi_ref: an unstepped net (lr=0) with
+    its own deepcopy as ref must report a ~0 pull."""
+    import copy
+    import torch
+    ctx, vocabs = ctx_vocabs
+    net = make_random_net(vocabs, "cpu")
+    batch = _build(vocabs, ctx, seed=5)
+    n = len(batch["action_index"])
+    with torch.no_grad():
+        batch["old_logprob"] = chosen_logprobs(net, batch).clone()
+    ref = copy.deepcopy(net)
+    tr = PPOTrainer(net, lr=0.0, target_kl=None, ref_net=ref, ref_kl_beta=1.0)
+    m = tr.update(batch, advantages=np.ones(n), returns=np.zeros(n), epochs=1)
+    assert m["ref_kl"] == pytest.approx(0.0, abs=1e-7)
+
+
+def test_ref_kl_penalizes_drift_and_anneals_to_off(ctx_vocabs):
+    """A DIFFERENT ref init gives a positive, finite KL; annealing beta to 0
+    (set_ref_kl_beta) turns the pull off again."""
+    import torch
+    ctx, vocabs = ctx_vocabs
+    torch.manual_seed(11)
+    net = make_random_net(vocabs, "cpu")
+    torch.manual_seed(99)
+    ref = make_random_net(vocabs, "cpu")
+    assert not all(torch.equal(a, b)
+                   for a, b in zip(net.parameters(), ref.parameters()))
+    batch = _build(vocabs, ctx, seed=5)
+    n = len(batch["action_index"])
+    with torch.no_grad():
+        batch["old_logprob"] = chosen_logprobs(net, batch).clone()
+    tr = PPOTrainer(net, lr=1e-3, target_kl=None, ref_net=ref, ref_kl_beta=0.5)
+    m = tr.update(batch, advantages=np.ones(n), returns=np.zeros(n), epochs=1)
+    assert 0.0 < m["ref_kl"] < 5.0
+    tr.set_ref_kl_beta(0.0)
+    m0 = tr.update(batch, advantages=np.ones(n), returns=np.zeros(n), epochs=1)
+    assert m0["ref_kl"] == 0.0

@@ -25,8 +25,11 @@ No code written twice — every heavy piece is REUSED:
 Stop rules (M1 gate DECISION): entropy collapse, switch share < 3% for 3
 consecutive rounds, or KL blow-up -> STOP and report (do not train blindly).
 
-CPU by design: the (a) decision says "CPU-light only", and the imported
-train_step4_vs_pool module pins CUDA_VISIBLE_DEVICES=-1 at import time.
+CPU by design: the (a) decision says "CPU-light only" — run() pins
+CUDA_VISIBLE_DEVICES=-1 before any net is created. Never at import time:
+this module is imported by its hermetic test suite, and an import-time env
+mutation would hide the CUDA device from the whole process (it once broke
+net/tests/test_s42 in full-suite runs).
 
 Run (CPU smoke — validates the whole pipeline end-to-end, small):
     python -m tools.learnability_test --smoke
@@ -173,6 +176,7 @@ def _run_eval(rnd: int, main_net, opp_ref, vocabs, eval_battles: int,
 
 
 def run(args: argparse.Namespace) -> int:
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # CPU by design (see module note)
     t0 = time.time()
     smoke = bool(args.smoke)
     rounds = 2 if smoke else args.rounds

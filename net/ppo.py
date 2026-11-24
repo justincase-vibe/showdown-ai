@@ -267,12 +267,21 @@ class PPOTrainer:
     ``update(batch, advantages, returns, epochs)`` runs the clipped surrogate
     ``-E[min(ratio*A, clip(ratio)*A)] + vf_coef*MSE(V, R) - ent_coef*H(pi)``
     and returns mean metrics (+ ``grad_steps``, ``early_stopped``).
+
+    (c) Arm B (2026-11-24): optional ``ref_net`` + ``ref_kl_beta`` add an
+    annealed ``+ beta*KL(pi || pi_ref)`` term toward a FROZEN reference net
+    (the BC warm-start teacher, ``net.bc_warm``) — the caller anneals beta with
+    :meth:`set_ref_kl_beta`. Default OFF: with ``ref_net=None`` /
+    ``ref_kl_beta=0.0`` the loss and the metrics are byte-identical to the
+    (a) fix-pack path (pinned by net/tests/test_ppo.py).
     """
 
     def __init__(self, net: PokeNet, *, lr: float = 3e-4, clip_eps: float = 0.2,
                  vf_coef: float = 0.5, ent_coef: float = 0.01, max_norm: float = 0.5,
                  epochs: int = 4, device: str = "cpu",
-                 minibatch_size: int = 256, target_kl: Optional[float] = 0.03) -> None:
+                 minibatch_size: int = 256, target_kl: Optional[float] = 0.03,
+                 ref_net: Optional["PokeNet"] = None,
+                 ref_kl_beta: float = 0.0) -> None:
         self.net = net
         self.device = torch.device(device)
         self.net.to(self.device)
@@ -284,7 +293,20 @@ class PPOTrainer:
         self.epochs = epochs          # default passes per update (overridable in update())
         self.minibatch_size = max(1, int(minibatch_size))
         self.target_kl = target_kl    # None disables early stopping
+        # (c) Arm B: FROZEN reference net for the annealed KL pull. Default
+        # OFF (None / 0.0) = the (a) fix-pack path, byte-identical.
+        self.ref_net = ref_net
+        self.ref_kl_beta = float(ref_kl_beta)
+        if ref_net is not None:
+            ref_net.eval()
+            ref_net.to(self.device)
         self.opt = torch.optim.Adam(net.parameters(), lr=lr)
+
+    def set_ref_kl_beta(self, beta: float) -> None:
+        """Anneal the Arm B KL penalty (caller-driven, e.g. per training
+        round: start high near the BC init, decay toward 0 as PPO takes
+        over)."""
+        self.ref_kl_beta = float(beta)
 
     # ── one forward loss (full batch) ─────────────────────────────────
     def _loss(self, batch: Dict[str, torch.Tensor], advantages: torch.Tensor,
@@ -312,8 +334,20 @@ class PPOTrainer:
         frac_clipped = (ratio < 1.0 - self.clip_eps).float().mean() \
             + (ratio > 1.0 + self.clip_eps).float().mean()
 
+        # (c) Arm B: annealed KL(pi || pi_ref) toward the frozen reference.
+        # KL is >= 0 and == 0 iff pi == pi_ref, so the term only ever pulls
+        # the policy BACK toward the warm-start init. The ref forward is
+        # no_grad (frozen); the gradient flows through prob/logp only.
+        kl_ref = torch.zeros((), device=logits.device)
+        if self.ref_net is not None and self.ref_kl_beta > 0.0:
+            with torch.no_grad():
+                ref_logp = self.ref_net(batch)["prob"][:, 0, :].clamp_min(1e-12).log()
+            kl_ref = (prob * (logp - ref_logp)).sum(-1).mean()
+
         loss = policy_loss + self.vf_coef * value_loss - self.ent_coef * entropy
-        return loss, policy_loss, value_loss, entropy, frac_clipped
+        if self.ref_net is not None and self.ref_kl_beta > 0.0:
+            loss = loss + self.ref_kl_beta * kl_ref
+        return loss, policy_loss, value_loss, entropy, frac_clipped, kl_ref
 
     @staticmethod
     def _slice(batch: Dict[str, torch.Tensor], idx: torch.Tensor
@@ -340,8 +374,8 @@ class PPOTrainer:
         ret = torch.as_tensor(returns, dtype=torch.float32, device=dev)
         self.net.train()
         tot = {"loss": 0.0, "policy": 0.0, "value": 0.0, "entropy": 0.0,
-               "frac_clipped": 0.0, "kl_approx": 0.0, "grad_steps": 0.0,
-               "early_stopped": 0.0}
+               "frac_clipped": 0.0, "kl_approx": 0.0, "ref_kl": 0.0,
+               "grad_steps": 0.0, "early_stopped": 0.0}
         stopped = False
         for _ in range(n_epochs):
             if stopped:
@@ -353,7 +387,7 @@ class PPOTrainer:
                 adv_b = adv[idx]
                 ret_b = ret[idx]
                 self.opt.zero_grad()
-                loss, pol, val, ent, frac = self._loss(b, adv_b, ret_b)
+                loss, pol, val, ent, frac, klref = self._loss(b, adv_b, ret_b)
                 loss.backward()
                 if self.max_norm:
                     torch.nn.utils.clip_grad_norm_(self.net.parameters(),
@@ -372,6 +406,7 @@ class PPOTrainer:
                 tot["loss"] += float(loss.item()); tot["policy"] += float(pol.item())
                 tot["value"] += float(val.item()); tot["entropy"] += float(ent.item())
                 tot["frac_clipped"] += float(frac.item())
+                tot["ref_kl"] += float(klref.item())
                 tot["kl_approx"] += max(0.0, kl)
                 tot["grad_steps"] += 1.0
                 if self.target_kl is not None and kl > self.target_kl:
