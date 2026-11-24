@@ -2748,6 +2748,32 @@ config runs 2 battles PER server (learnability 2×2, gate 6×2), so 4 workers
 / 8.2 GB → 60 procs / 4.9 GB, free RAM 2.2 → 7.9 GB. Raise only if a future
 config runs >2 concurrent battles per server.
 
-**(vi) Open (unchanged from prior entries):** item 11 (battles/round ≥ 50),
+**(vi) Test-environment bug fixed (this session):**
+`pool/tests/test_pool.py::test_serverpool_health_all_shape` hardcoded
+`port_base=49990` and asserted "nothing listening" — an ENVIRONMENT
+assumption. It failed the moment the learnability run (train ports 49990/
+49991) was up: the probe found a LIVE server. Fixed by allocating a
+free port from the OS (`bind(:0)`) in both health tests; the test meaning
+(shape; dead-port → False) is unchanged. Full suite green (562 passed)
+WITH the live run active.
+
+**(vii) LEARNABILITY BASELINE FINDING (affects interpretation):** the
+untrained net's round-0 baseline is **0.740 sampled WR vs the random floor
+(74/26/0, n=100, 0 crashes)** — far above the assumed ~0.5. IMPORTANT
+clarification (verified in `fitness/ladder.py`): the floor is NOT a
+uniform-random policy — it is ANOTHER random-init net (different seed),
+so 0.74 is an init-vs-init mismatch: this particular seed's untrained
+policy happens to outplay the floor seed's (both are near-random with
+different action biases; the earlier smoke run measured 0.30 at n=13 —
+the other side of the same coin). Consequences: (1) the floor is weak by
+design ("a competent bot should beat it well above 50%"), (2) the 0.85
+PASS bar is only ~11 pts above THIS init's untrained strength — read the
+learnability verdict as "pipeline sanity + 0.74→0.85+ margin" with the
+KL/entropy/grad_steps diagnostics as the real learning signal, (3) the
+C1 gate control measures random-init nets against the STRATEGY yardstick
+(a different, much stronger opponent) so it is not affected. NOT a bug;
+recorded so the numbers aren't misread later.
+
+**(viii) Open (unchanged from prior entries):** item 11 (battles/round ≥ 50),
 gate relaunch (CPU learnability vs the (b) GPU gate — RAM ceiling ~12 envs:
 if the GPU gate launches, kill the background learnability run first).

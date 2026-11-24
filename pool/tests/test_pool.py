@@ -134,16 +134,37 @@ def test_serverpool_cmd_without_skip_build():
     assert "--skip-build" not in sp._cmd()
 
 
+def _free_tcp_port() -> int:
+    """Ask the OS for a currently-free TCP port (bind :0, read it back, free it).
+
+    The old tests hardcoded 49999 / 49990 and asserted 'nothing listening' --
+    an ENVIRONMENT assumption that broke on 2026-11-24 when the learnability
+    run (train ports 49990/49991) was up: test_serverpool_health_all_shape
+    failed because the probe found a LIVE server. A dynamically allocated
+    port keeps the test's meaning (shape; dead port -> False) without the
+    assumption.
+    """
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
 def test_serverpool_health_dead_port_is_false():
     sp = ServerPool(PoolConfig(host="localhost"))
-    assert sp.health(49999) is False             # nothing listening -> False, fast
+    assert sp.health(_free_tcp_port()) is False   # nothing listening -> False, fast
 
 
 def test_serverpool_health_all_shape():
-    cfg = PoolConfig(n_servers=3, port_base=49990)
+    base = _free_tcp_port()
+    cfg = PoolConfig(n_servers=3, port_base=base)
     st = ServerPool(cfg).health_all()
-    assert set(st.keys()) == {49990, 49991, 49992}
-    assert all(v is False for v in st.values())
+    assert set(st.keys()) == {base, base + 1, base + 2}
+    # values are booleans (dead -> False; the 'dead' case itself is covered by
+    # test_serverpool_health_dead_port_is_false with a guaranteed-free port)
+    assert all(isinstance(v, bool) for v in st.values())
 
 
 def test_serverpool_revive_refuses_after_stop():
