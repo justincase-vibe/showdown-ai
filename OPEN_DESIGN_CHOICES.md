@@ -2777,3 +2777,75 @@ recorded so the numbers aren't misread later.
 **(viii) Open (unchanged from prior entries):** item 11 (battles/round ≥ 50),
 gate relaunch (CPU learnability vs the (b) GPU gate — RAM ceiling ~12 envs:
 if the GPU gate launches, kill the background learnability run first).
+
+---
+
+## 2026-11-24 — B1 production gameType fix + test suite updates (this session)
+
+**PRODUCTION BUG FOUND AND FIXED:** `@smogon/calc` `Field.gameType` defaults to
+`'Singles'` (field.js:23). Without the fix, ALL doubles formats (VGC +
+champions VGC) with Reflect / Light Screen / Aurora Veil used the **singles
+screen ratio (0.5)** instead of the **doubles ratio (2/3)** — a 4/3 under-screen
+error in the AI's belief state for every doubles screen matchup.
+
+**Root cause chain:**
+1. `node_calc.js::buildField()` built the field dict without `gameType` →
+   library defaulted to `'Singles'` → wrong screen ratio in doubles.
+2. `damage/calc.py::calc_damage` / `calc_damage_many` passed the field dict
+   through unchanged → the library never saw `gameType: 'Doubles'`.
+
+**Fix (single injection point):**
+- `damage/calc.py` — `_game_type(fmt)` maps format id → `'Singles'` / `'Doubles'`
+  via `formats.by_id(fmt).get("game_type")`. `_with_game_type(field, fmt)` injects
+  `gameType` into the field dict at the ONE point where the field is assembled
+  for the Node worker. Wired into BOTH `calc_damage` and `calc_damage_many`.
+  Callers (evidence.py, state.py) need NO changes — they already pass `fmt`.
+- `damage/node_calc.js::buildField()` now forwards `f.gameType || 'Singles'`.
+  (The Python-side injection in `calc.py` is the primary fix; the node-side
+  forwarding is belt-and-braces for any direct node calls.)
+
+**Scope of impact (low blast radius):**
+- Affects ALL doubles formats (6 VGC + 1 champions VGC) when a screen is active.
+- **No doubles checkpoints were trained** (all training so far has been singles
+  BSS 3v3 / gen9ou), so no retraining is needed.
+- The AI's doubles belief state will now be correct the next time it is used.
+- **User decision needed:** confirm no retraining required for any doubles
+  checkpoints (my assessment: none exist — flag for user confirmation).
+
+**New test file:** `damage/tests/test_game_type_doubles.py` (6 tests):
+1. Reflect (single-target) doubles = 4/3 × singles  ✓
+2. Light Screen (single-target) doubles = 4/3 × singles  ✓
+3. Non-screen single-target: identical in singles and doubles  ✓
+4. Spread move (earthquake) in doubles gets ×0.75 (3072/4096)  ✓
+5. `_game_type` helper maps correctly (unit test, no Node)  ✓
+6. `_with_game_type` injects correctly (unit test, no Node)  ✓
+
+**Pre-existing test bugs fixed (surfaced by the new code):**
+- `test_audit_fixes.py::test_gen9_fissure_onix_control` — passed `gen=9` as a
+  positional `field` arg (4th slot). Fixed: now `gen=9` as keyword.
+- `test_audit_fixes.py::test_gen9_sheercold_gengar_control` — same bug. Fixed.
+- `test_format_key.py::test_vgc_battles_at_level_50` — expected Earthquake
+  (a spread move in doubles) to have the singles value. Now uses `dragonclaw`
+  (single-target) to isolate the LEVEL test; expected values updated to (51, 61).
+- `damage/calc.py::_with_game_type` — now defensive against non-dict `field`
+  values (treats them as `None` instead of crashing).
+
+**KNOWN LIBRARY GAPS (documented WARN, not FAIL — same policy as old-gen):**
+- **Champions engine (key 0) omits Choice Band / Choice Specs / Choice Scarf**
+  (champions.js has zero choice-item refs; verified by B1 sweep). PRODUCTION
+  IMPACT: the AI's champions Choice-item damage belief is off by 1.5×.
+  **User decision needed:** accept / library patch / calc-side workaround?
+- **Old-gen gaps** (pre-existing, documented): auroraveil not in gen34/gen56;
+  gen1 rain/Karate Chop; gen1-2 SpA==SpD.
+
+**B1 verdict policy (reaffirmed):**
+- Must-pass: engine 9 + 0 (gen9 + champions). 0 FAIL required.
+- Engine 1-8: best-effort; WARNs for known library gaps are acceptable.
+- `KNOWN_ENGINE_GAPS = {0: Set(['choiceband'])}` — documented library-gap
+  WARNs, NOT band-loosening.
+- Ground truth = `@smogon/calc` library, NOT the fork. A VERIFIED library gap
+  (evidence-backed) is a documented WARN, not a fork bug.
+
+**Test suite status at commit:**
+- `damage/tests`: 226 passed (all green)
+- `tools/tests/test_b1_all_formats.py`: 5 passed (504 pass / 28 warn / 0 FAIL)

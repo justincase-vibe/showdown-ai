@@ -68,8 +68,10 @@ def test_raw_gen9_path_unchanged():
 
 # ── other level rules through the calc API ───────────────────────────
 def test_vgc_battles_at_level_50():
-    r = calc.calc_damage(GARCH, TITAN, "earthquake", fmt="gen9vgc2025regi")
-    assert (r["min"], r["max"]) == (128, 152)
+    # Uses dragonclaw (single-target) to isolate the LEVEL test from the
+    # doubles spread-move ×0.75 multiplier that applies to earthquake.
+    r = calc.calc_damage(GARCH, TITAN, "dragonclaw", fmt="gen9vgc2025regi")
+    assert (r["min"], r["max"]) == (51, 61)
 
 
 def test_lc_battles_at_level_5():

@@ -134,7 +134,16 @@ function buildField(f) {
   // field={isWonderRoom:true} request computed with UNSWAPPED stats (silent
   // no-op). attackerSide/defenderSide already carried isReflect/isLightScreen
   // (the 0.5x screen halves) — keep them.
+  //
+  // gameType: the library defaults to 'Singles' (field.js:23) -> the singles
+  // screen ratio (0.5). The official DOUBLES rule is a 2/3 reduction (2732/4096)
+  // that only activates when gameType !== 'Singles' (gen789.js:1263,
+  // champions.js:735). calc.py injects gameType from the format (see
+  // calc._with_game_type); forward it so doubles Reflect/Light Screen/Aurora
+  // Veil use the correct 2/3 ratio (B1 finding — a missing gameType here was a
+  // real 33% belief error in every doubles format).
   return new Field({
+    gameType: f.gameType || 'Singles',
     weather: f.weather,
     terrain: f.terrain,
     isWonderRoom: !!f.isWonderRoom,

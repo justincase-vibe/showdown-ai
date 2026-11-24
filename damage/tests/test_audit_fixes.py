@@ -139,7 +139,7 @@ def test_gen9_fissure_tera_flying_onix_immune():
 
 
 def test_gen9_fissure_onix_control():
-    r = calc.calc_damage({"name": "Marowak", "level": 50}, {"name": "Onix", "level": 50}, "fissure", 9)
+    r = calc.calc_damage({"name": "Marowak", "level": 50}, {"name": "Onix", "level": 50}, "fissure", gen=9)
     assert r["immune"] is False
     assert (r["min"], r["max"]) == (110, 110)
 
@@ -166,7 +166,7 @@ def test_gen9_sheercold_tera_ice_gengar_immune():
 
 
 def test_gen9_sheercold_gengar_control():
-    r = calc.calc_damage({"name": "Marowak", "level": 50}, {"name": "Gengar", "level": 50}, "sheercold", 9)
+    r = calc.calc_damage({"name": "Marowak", "level": 50}, {"name": "Gengar", "level": 50}, "sheercold", gen=9)
     assert r["immune"] is False
     assert (r["min"], r["max"]) == (135, 135)
 

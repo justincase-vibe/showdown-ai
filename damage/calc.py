@@ -114,6 +114,44 @@ def _engine_key(gen: int, fmt: Optional[str]) -> int:
     return _formats.engine_key(fmt)
 
 
+def _game_type(fmt: Optional[str]) -> Optional[str]:
+    """Map a format id -> the @smogon/calc ``Field.gameType`` ('Singles'/'Doubles').
+
+    The calc library defaults ``Field.gameType`` to 'Singles' (field.js:23), which
+    selects the singles screen ratio (0.5). The official doubles rule is a 2/3
+    reduction (2732/4096) that activates only when ``gameType != 'Singles'``
+    (gen789.js:1263, champions.js:735). Without this, doubles Reflect/Light
+    Screen/Aurora Veil under-screen by 4/3 (B1 finding). ``None`` -> library default.
+    """
+    if fmt is None:
+        return None
+    try:
+        gt = _formats.by_id(fmt).get("game_type")
+    except Exception:
+        return None
+    return "Doubles" if gt == "doubles" else "Singles"
+
+
+def _with_game_type(field: Optional[Dict[str, Any]], fmt: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Inject ``gameType`` (derived from ``fmt``) into the calc field dict.
+
+    The library reads ``field.gameType`` (field.js:23) and defaults to 'Singles',
+    so a field dict built without it silently uses the singles screen ratio even
+    in doubles. Deriving it from the format here (single injection point) covers
+    every calc path (single + batch) so callers never have to remember it.
+
+    Defensive: a non-dict ``field`` (e.g. a legacy positional ``gen`` int passed
+    in the ``field`` slot) is treated as ``None`` rather than crashing.
+    """
+    if field is not None and not isinstance(field, dict):
+        field = None  # legacy positional misuse — treat as no field
+    out: Dict[str, Any] = dict(field or {})
+    gt = _game_type(fmt)
+    if gt is not None:
+        out.setdefault("gameType", gt)
+    return out or None
+
+
 def _resolve_mon(mon: Mon, fmt: Optional[str]) -> Mon:
     """Resolve a mon's battle level through the format's rules (D33).
 
@@ -323,7 +361,7 @@ def calc_damage(
         "attacker": _resolve_mon(attacker, fmt),
         "defender": _resolve_mon(defender, fmt),
         "move": _normalise_move(move),
-        "field": field,
+        "field": _with_game_type(field, fmt),
     }
     return _node(req)
 
@@ -348,7 +386,7 @@ def calc_damage_many(items: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "attacker": _resolve_mon(it["attacker"], fmt),
             "defender": _resolve_mon(it["defender"], fmt),
             "move": _normalise_move(it["move"]),
-            "field": it.get("field"),
+            "field": _with_game_type(it.get("field"), fmt),
         })
     return _node_batch(reqs)
 
