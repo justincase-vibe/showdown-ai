@@ -43,6 +43,7 @@ import torch
 
 from net.model import PokeNet, bc_loss
 from net.registry import LAYOUT
+from tools.stdio_guard import safe_stdio  # dependency-free (see tools/__init__.py)
 
 
 # ── dataset I/O ───────────────────────────────────────────────────────────────
@@ -195,6 +196,7 @@ def save_bc_checkpoint(net: PokeNet, path: str) -> None:
 
 # ── CLI (CPU) ─────────────────────────────────────────────────────────────────
 def main() -> None:
+    safe_stdio()  # Windows cp1252 redirect guard: a Unicode print must never kill the run
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # CPU by default (DECISION)
     p = argparse.ArgumentParser(
         description="Train the BC warm-start net (Arm B init) from a "

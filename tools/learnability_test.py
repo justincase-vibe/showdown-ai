@@ -64,6 +64,7 @@ from pool import PoolConfig, ResourcePool
 
 # shared building blocks (imported read-only — no code written twice)
 from tools.train_step4_vs_pool import play_vs_checkpoint, play_with_watchdog
+from tools.stdio_guard import safe_stdio
 from gui.m1_gate_main import (DEG_ENTROPY_FLOOR, DEG_KL_HARD,
                               run_eval_battles)
 
@@ -176,6 +177,7 @@ def _run_eval(rnd: int, main_net, opp_ref, vocabs, eval_battles: int,
 
 
 def run(args: argparse.Namespace) -> int:
+    safe_stdio()  # Windows cp1252 redirect guard: a Unicode print must never kill the run
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # CPU by design (see module note)
     t0 = time.time()
     smoke = bool(args.smoke)
@@ -256,14 +258,14 @@ def run(args: argparse.Namespace) -> int:
 
     try:
         # ── round 0: the untrained baseline (~50% vs the random floor) ──
-        print("[learnability] round 0 — baseline eval (untrained net)", flush=True)
+        print("[learnability] round 0 = baseline eval (untrained net)", flush=True)
         evals.append(_run_eval(0, main_net, opp_ref, vocabs, eval_battles,
                                max_steps, n_servers, per_server))
         _log({"round": 0, "kind": "baseline", "evals": evals[-1]})
 
         for rnd in range(1, rounds + 1):
-            print(f"\n[learnability] ── round {rnd}/{rounds} "
-                  f"({battles_per_round} battles vs random) ──", flush=True)
+            print(f"\n[learnability] == round {rnd}/{rounds} "
+                  f"({battles_per_round} battles vs random) ==", flush=True)
             buffer.clear()
             n_battles = n_crash = wins = losses = 0
             kinds: List[str] = []

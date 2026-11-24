@@ -43,6 +43,7 @@ from net.env import (ShowdownEnv, StrongTeamBuilder, build_action_list,
 from net.ppo import RolloutStep, fill_gae, steps_to_batch, chosen_logprobs, PPOTrainer
 from net.ppo import RolloutBuffer
 from pool import PoolConfig, ResourcePool
+from tools.stdio_guard import safe_stdio
 
 CKPT_DIR = os.path.join(ROOT, "scratch", "step4")
 N_BATTLES_PER_ROUND = 20
@@ -219,6 +220,7 @@ def play_with_watchdog(fn, *args, timeout_s: int = 300, **kwargs) -> dict:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
+    safe_stdio()  # Windows cp1252 redirect guard: a Unicode print must never kill the run
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # CPU only (see module note)
     t0 = time.time()
     os.makedirs(CKPT_DIR, exist_ok=True)
@@ -301,7 +303,7 @@ def main() -> None:
                 if r.get("timed_out"):
                     n_timeout += 1
                     n_crash += 1
-                    print(f"    [r{rnd+1} b{i+1}] TIMEOUT ({BATTLE_TIMEOUT}s) — skipped", flush=True)
+                    print(f"    [r{rnd+1} b{i+1}] TIMEOUT ({BATTLE_TIMEOUT}s) -- skipped", flush=True)
                     continue
                 if r["crashed"]:
                     n_crash += 1
@@ -358,7 +360,7 @@ def main() -> None:
                   f"{v:>8.4f} {e:>8.4f} {c:>7.3f} {kl:>8.4f}", flush=True)
 
         total = time.time() - t0
-        print(f"\n[step4] DONE in {total:.0f}s — checkpoints in {CKPT_DIR}", flush=True)
+        print(f"\n[step4] DONE in {total:.0f}s -- checkpoints in {CKPT_DIR}", flush=True)
         print(f"[step4] best checkpoint: {CKPT_DIR}/step4_round{N_ROUNDS}.pt", flush=True)
 
     finally:

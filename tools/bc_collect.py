@@ -50,6 +50,7 @@ import numpy as np
 from net.env import build_ctx
 from net.registry import LAYOUT
 from pool import PoolConfig, ResourcePool
+from tools.stdio_guard import safe_stdio
 from fitness.m1_pool import build_m1_pool
 from fitness.strategy_agent import strategy_reference
 from tools.train_step4_vs_pool import play_vs_checkpoint, play_with_watchdog
@@ -337,6 +338,7 @@ def collect_bc(n_battles: int, opp_names: Sequence[str], fmt: str,
 
 
 def main() -> None:
+    safe_stdio()  # Windows cp1252 redirect guard: a Unicode print must never kill the run
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--battles", type=int, default=100)
     p.add_argument("--opps", type=str, default="random,strategy",

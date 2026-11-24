@@ -24,11 +24,13 @@ from net.env import StrongTeamBuilder, build_action_list, build_obs, action_to_p
 from net.ppo import RolloutStep, fill_gae, steps_to_batch, chosen_logprobs, PPOTrainer
 from net.ppo import RolloutBuffer
 from pool import PoolConfig, ResourcePool
+from tools.stdio_guard import safe_stdio
 
 sys.path.insert(0, os.path.join(ROOT, "scratch", "step4"))
 from train_vs_pool import find_opponents, load_opponent
 
 def main():
+    safe_stdio()  # Windows cp1252 redirect guard: a Unicode print must never kill the run
     print("[smoke] starting ...", flush=True)
     pool = ResourcePool(
         PoolConfig(n_servers=1, per_server=1, port_base=49960, boot_timeout=120),
@@ -140,7 +142,7 @@ def main():
             if param.requires_grad and torch.isnan(param).any():
                 raise SystemExit(f"[smoke] FAILED: NaN in {name}")
 
-        print(f"\n[smoke] ALL PASS — pipeline works end-to-end", flush=True)
+        print(f"\n[smoke] ALL PASS -- pipeline works end-to-end", flush=True)
 
     finally:
         pool.shutdown()
