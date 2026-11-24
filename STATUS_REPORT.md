@@ -24,20 +24,45 @@ are PARKED until the gate result is in.
 
 | Item | Status | PID |
 |------|--------|-----|
-| Learnability test (a) | **RUNNING** — round 0 baseline eval in progress | 20116 |
+| Learnability test (a) | **RUNNING** — relaunched after incident (see below) | 11036 |
 | GPU gate (b) | **NOT LAUNCHED** — waiting for user | — |
 | BC collection (c) | Pipeline ready, not started | — |
 
+### ⚠️ INCIDENT: 58 orphaned node processes (2026-11-24 ~23:10–23:35)
+
+The first relaunch (PID 20116, started 23:10) got stuck in round 0 eval.
+Diagnosis: **58 node processes** running (expected ~28 for 4 servers × 4 sim
+workers + 8 calc workers). Root cause: orphaned node processes from previous
+crashed runs accumulated — each killed run left its sim workers behind. The
+websocket connections were overwhelmed, battles couldn't complete, and the
+asyncio tasks were destroyed pending.
+
+**Fix applied:** killed all python + node processes, verified 0 remaining,
+relaunched clean (PID 11036, run dir `runs/learnability_20261124T223712Z/`).
+
+**Prevention for next agent:** before launching any battle run, check for
+orphaned node processes:
+```
+powershell -NoProfile -Command 'Get-Process | Where-Object { $_.ProcessName -eq "node" } | Measure-Object | Select-Object Count'
+```
+If count > 30, kill them all first:
+```
+powershell -NoProfile -Command 'Get-Process | Where-Object { $_.ProcessName -eq "node" } | Stop-Process -Force -ErrorAction SilentlyContinue'
+```
+
 **Learnability test details:**
 - Command: `python -m tools.learnability_test --rounds 15 --battles-per-round 50`
-- Run dir: `runs/learnability_20261124T221036Z/`
+- Run dir: `runs/learnability_20261124T223712Z/` (current, PID 11036)
+- Prior attempt: `runs/learnability_20261124T221036Z/` (stuck, killed)
 - Gate: WR vs random ≥ 0.85 within 15 rounds
-- Baseline (from prior run): 0.740 sampled / 0.620 greedy (init-vs-init mismatch, not a bug)
-- Log: `runs/learnability_full4.out.log` / `.err.log`
-- **Check progress:** `cat runs/learnability_20261124T221036Z/metrics.jsonl`
+- Baseline (from prior completed run): 0.740 sampled / 0.620 greedy (init-vs-init mismatch, not a bug)
+- Log: `runs/learnability_full5.out.log` / `.err.log`
+- **Check progress:** `cat runs/learnability_20261124T223712Z/metrics.jsonl`
+- **Kill if needed:** `powershell -NoProfile -Command 'Stop-Process -Id 11036 -Force'`
 
 **If the user launches the GPU gate:**
-- Kill the learnability test first: `taskkill /F /T /PID 20116`
+- Kill the learnability test first: `powershell -NoProfile -Command 'Stop-Process -Id 11036 -Force'`
+- Also kill all node processes: `powershell -NoProfile -Command 'Get-Process | Where-Object { $_.ProcessName -eq "node" } | Stop-Process -Force'`
 - Gate paste is in `GATE_CONTROLS_C1_C5.md` §7
 - The LLM (llama-server) uses ~23 GB CPU RAM — the user is aware and considering config changes
 
