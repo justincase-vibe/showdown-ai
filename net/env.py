@@ -49,6 +49,7 @@ from __future__ import annotations
 import logging
 import random as _random
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -520,6 +521,75 @@ def _stop_ps_client(client: Any, timeout: float = 5.0) -> bool:
         return False
 
 
+def _stop_env_loop(loop: Any, timeout: float = 5.0) -> None:
+    """Stop the per-env asyncio loop that poke-env's ``PsEnv`` spawns on an
+    ANONYMOUS daemon thread (``Thread(target=self._loop.run_forever,
+    daemon=True)`` in ``poke_env.environment.env``) and never reaps —
+    poke-env only reaps its shared ``POKE_LOOP`` at ``atexit``. Without this,
+    every battle leaks one live thread + one live loop for the rest of the
+    process (2.3k battles in a full learnability run -> 2.3k dead-weight
+    threads and their handles; live forensics 2026-11-24 showed ~3 leaked
+    threads/battle and the stuck run at 141 threads).
+
+    Mirrors poke-env's private ``concurrency.__stop_loop`` (cancel every task,
+    wait for them to finish cancelling, then ``loop.stop()``), minus the
+    ``thread.join()`` (poke-env does not store the thread reference — the
+    thread exits on its own once ``run_forever`` returns). Cancelling first,
+    instead of letting the objects be GC'd out from under pending tasks, is
+    also what suppresses the "Task was destroyed but it is pending!" noise
+    from ``PSClient._handle_message`` tasks at teardown.
+
+    Best-effort: never raises (teardown must not fail the battle being torn
+    down), safe on ``None`` / already-closed loops.
+    """
+    import asyncio
+    if loop is None:
+        return
+    try:
+        if loop.is_closed():
+            return
+    except Exception:  # noqa: BLE001
+        return
+    # FIRST: reap the loop's DEFAULT EXECUTOR (CPython spawns its worker
+    # threads with prefix "asyncio" — the "asyncio_0" threads seen in live
+    # forensics). Stopping the loop does NOT shut the executor down, and
+    # ThreadPoolExecutor workers block on the work queue forever, so without
+    # this every battle also leaked its executor thread(s). Must run while
+    # the loop is still running (it is a coroutine).
+    shutdown_def = getattr(loop, "shutdown_default_executor", None)
+    if shutdown_def is not None:
+        try:
+            fut = asyncio.run_coroutine_threadsafe(shutdown_def(), loop)
+            fut.result(timeout=timeout)
+        except Exception:  # noqa: BLE001 — best effort; the loop stop below
+            pass           # still reaps the loop thread itself
+    try:
+        tasks = list(asyncio.all_tasks(loop))
+    except Exception:  # noqa: BLE001 — all_tasks from a foreign thread can
+        tasks = []          # race with the loop's own bookkeeping; skip the wait
+    for t in tasks:
+        try:
+            t.cancel()      # thread-safe: schedules a CancelledError on the task
+        except Exception:  # noqa: BLE001
+            pass
+    # WINDOWS PROACTOR QUIRK (verified 2026-11-24): cancelling a task that is
+    # suspended on a timer does NOT wake a sleeping loop — the cancellation
+    # sits unprocessed until some other event wakes the loop. Without this
+    # kick the tasks below would still be pending when we stop the loop (and
+    # the "Task was destroyed but it is pending!" noise returns).
+    try:
+        loop.call_soon_threadsafe(lambda: None)
+    except Exception:  # noqa: BLE001
+        pass
+    deadline = time.time() + timeout
+    while time.time() < deadline and any(not t.done() for t in tasks):
+        time.sleep(0.02)
+    try:
+        loop.call_soon_threadsafe(loop.stop)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class ShowdownEnv(SinglesEnv):
     """A concrete, instantiable singles self-play environment.
 
@@ -654,6 +724,10 @@ class ShowdownEnv(SinglesEnv):
         # not on the env — self.ps_client does not exist (verified live).
         for agent in (getattr(self, "agent1", None), getattr(self, "agent2", None)):
             _stop_ps_client(getattr(agent, "ps_client", None))
+        # LAST: stop the env's own loop thread (see _stop_env_loop). Order
+        # matters — the PS clients' listen() tasks run ON this loop, so they
+        # must be stopped (above) while the loop is still running.
+        _stop_env_loop(getattr(self, "_loop", None))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
