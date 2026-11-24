@@ -120,6 +120,7 @@ def play_vs_checkpoint(main_agent: PokeAgent, opp_agent: PokeAgent,
                     if pe < 0:
                         out["n_illegal"] += 1
                     actions[a1] = np.int64(pe)
+                    out.setdefault("action_kinds", []).append(d.action.get("kind"))
                     pending = (obs_dict, d.action_index, float(d.logprob), float(d.value))
             if env.agent2_to_move:
                 if getattr(opp_agent, "decides_from_battle", False):
