@@ -140,3 +140,101 @@ def test_posterior_overrides_empty_when_no_posterior():
     }
     ov = _posterior_overrides(ctx, "p1a", "p2a")
     assert ov == {}
+
+
+# ══════════════ 2026-11-25 — the p1 harness contract (act) ══════════════
+# The frozen eval loop (gui.m1_gate_main._play_one_battle) drives the p1
+# SUBJECT through agent.act(obs, acts) for EVERY subject — the yardstick
+# probe crashed 200/400 battles with
+# "AttributeError: 'StrategyAgent' object has no attribute 'act'" (C4a/C4b
+# mirror controls). These tests pin the fix: act() returns a
+# Decision-shaped object, decides on the EXACT ctx the obs was built from
+# (net.env.build_obs stashes it per-side, thread-local), degrades to the
+# first legal action when the ctx is unavailable (A3.1), and never raises.
+
+def test_act_returns_decision_shape_and_degrades_without_ctx():
+    """No ctx stashed on this thread (the A3.1 degrade) -> the first legal
+    action, Decision-shaped (the harness reads .action/.action_index/
+    .logprob/.value), never an exception."""
+    from net.env import set_last_ctx
+    set_last_ctx("p1", None)  # simulate a failed belief build (or a fresh thread)
+    acts = [{"kind": "move", "move": "outrage"},
+            {"kind": "move", "move": "earthquake"}]
+    d = StrategyAgent(fmt="gen9ou").act(None, acts)
+    for f in ("action", "action_index", "logprob", "value", "entropy", "prob"):
+        assert hasattr(d, f), f"missing contract field {f}"
+    assert d.action == acts[0]
+    assert d.action_index == 0
+    assert d.logprob == 0.0 and d.value == 0.5 and d.entropy == 0.0
+
+
+def test_act_accepts_the_greedy_wrapper_signature():
+    """The frozen loop wraps p1 subjects in _Greedy, which calls
+    act(obs, action_list, deterministic=True) — the signature must accept
+    that exact call (contract parity with PokeAgent/HeuristicAgent)."""
+    from net.env import set_last_ctx
+    set_last_ctx("p1", None)
+    acts = [{"kind": "move", "move": "outrage"}]
+    d = StrategyAgent(fmt="gen9ou").act(None, acts, deterministic=True)
+    assert d.action == acts[0]
+
+
+def test_act_pass_turn_returns_pass_decision():
+    """An empty action list is a pass/wait turn (the harness checks
+    d.action is None) — the SAME contract decide() expresses as None."""
+    d = StrategyAgent(fmt="gen9ou").act(None, [])
+    assert d.action is None
+    assert d.action_index == -1
+
+
+def test_act_matches_decide_on_the_same_ctx():
+    """THE regression: act() (the p1 harness path, ctx via the build_obs
+    stash) must make the SAME decision decide() makes (the p2/driver path,
+    ctx built from the live battle) — one decision pipeline."""
+    from net.tests.test_env_obs import _FakeBattle, _FakeMon
+    from net.tests.test_s41 import make_ctx, make_vocabs
+    from net.env import build_action_list, build_obs
+    b = _FakeBattle(
+        active=_FakeMon("garchomp", moves=["outrage", "earthquake"]),
+        avail_moves=["outrage", "earthquake"],
+        switches=["tornadustherian"],
+        tera=True,
+    )
+    acts = build_action_list(b)
+    assert acts, "the fake battle must offer legal actions"
+    # the p2/driver path (ground truth) — a FRESH agent (D2 switch memory is
+    # per-battle/per-agent; the two paths must each start clean).
+    expected = StrategyAgent(fmt="gen9ou", gen=9).decide(b, fmt="gen9ou")
+    assert expected is not None
+    # the p1 harness path: build_obs stashes the EXACT ctx it encodes.
+    obs = build_obs(b, "gen9ou", make_vocabs(make_ctx()), "p1")
+    d = StrategyAgent(fmt="gen9ou", gen=9).act(obs, acts)
+    assert d.action is not None
+    assert d.action == expected        # the SAME decision, both paths
+    assert d.action in acts            # and LEGAL
+
+
+def test_act_degrades_to_first_legal_when_ctx_build_failed():
+    """build_obs stashes None when the belief build fails (it degrades to a
+    zero obs) — act() must mirror decide()'s A3.1 degrade (first legal)."""
+    from net.env import set_last_ctx
+    set_last_ctx("p1", None)
+    acts = [{"kind": "move", "move": "outrage"},
+            {"kind": "switch", "species": "tornadustherian"}]
+    d = StrategyAgent(fmt="gen9ou").act(None, acts)
+    assert d.action == acts[0] and d.action_index == 0
+
+
+def test_act_and_decide_share_the_c5_counters():
+    """C5: the p1 subject's decisions must be counted too (the gate prints
+    the silent-fallback counters per pair) — act() bumps the same module
+    counters decide() does."""
+    from fitness.strategy_agent import fallback_stats
+    from net.env import set_last_ctx
+    before = fallback_stats()
+    set_last_ctx("p1", None)
+    acts = [{"kind": "move", "move": "outrage"}]
+    StrategyAgent(fmt="gen9ou").act(None, acts)
+    after = fallback_stats()
+    assert after["decides"] == before["decides"] + 1
+    assert after["ctx_none_acts0"] == before["ctx_none_acts0"] + 1

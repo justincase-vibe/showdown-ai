@@ -49,6 +49,7 @@ from __future__ import annotations
 import logging
 import random as _random
 import re
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -357,6 +358,46 @@ def build_ctx(battle: Any, fmt: str, side: str = "p1") -> Optional[Dict]:
         return None
 
 
+# ── the ctx transport (the p1 harness contract) ───────────────────────────────
+# ``build_obs`` encodes the belief ctx into the obs arrays and drops the
+# structured snapshot. A ctx brain driven through the p1 harness path
+# (``gui.m1_gate_main._play_one_battle`` calls ``agent.act(obs, acts)`` — the
+# battle object is NOT available there) must decide on the SAME ctx the obs
+# was built from, not re-parse anything (one decision pipeline). So
+# ``build_obs`` stashes the EXACT ctx it encoded, per side, on the CURRENT
+# thread: the eval loop plays each battle on its own worker thread, and
+# poke-env embeds observations synchronously on that thread (``PsEnv``
+# ``reset``/``step`` call ``embed_battle`` in-line). A failed build stashes
+# ``None`` — the same degrade ``StrategyAgent.decide`` uses (first legal).
+_CTX_TLS = threading.local()
+
+
+def _ctx_store() -> Dict[str, Optional[Dict]]:
+    store = getattr(_CTX_TLS, "ctxs", None)
+    if store is None:
+        store = {}
+        _CTX_TLS.ctxs = store
+    return store
+
+
+def set_last_ctx(side: str, ctx: Optional[Dict]) -> None:
+    """Record the latest ctx snapshot built on THIS thread for ``side``.
+
+    Called by :func:`build_obs` (the ONE obs pipeline) so the p1 harness
+    contract (``fitness.strategy_agent.StrategyAgent.act``) can read back the
+    EXACT snapshot the obs was encoded from.``None`` = the latest build
+    failed (degrade to the first legal action, as ``decide`` does).
+    """
+    _ctx_store()[side] = ctx
+
+
+def last_ctx(side: str = "p1") -> Optional[Dict]:
+    """The latest ctx built on this thread for ``side`` (the snapshot the most
+    recent ``build_obs`` encoded), or ``None`` when no build has stashed one
+    here yet (or the latest one failed)."""
+    return _ctx_store().get(side)
+
+
 def build_obs(battle: Any, fmt: str, vocabs: Any, side: str = "p1") -> Dict[str, np.ndarray]:
     """The net's observation for ``battle`` from ``side``'s perspective.
 
@@ -384,6 +425,7 @@ def build_obs(battle: Any, fmt: str, vocabs: Any, side: str = "p1") -> Dict[str,
             "transient data gap; degrading to a blind zero-obs here would "
             "silently play a bot that sees nothing (the A3 self-check bug).")
     ctx = build_ctx(battle, fmt, side)
+    set_last_ctx(side, ctx)  # ctx transport: the EXACT snapshot this obs encodes
     if ctx is None:
         return _zero_obs()
     try:

@@ -14,15 +14,27 @@ can play it like any bot: the driver's ``policy_action`` recognizes the
 ``decides_from_battle`` marker and routes the decision through
 ``agent.decide()`` (which sees the battle) instead of ``agent.act(obs, acts)``.
 
+The p1 harness contract (2026-11-25, the yardstick probe crash): the frozen
+eval loop (``gui.m1_gate_main._play_one_battle``) drives the p1 SUBJECT
+through ``agent.act(obs, acts)`` for EVERY subject (gate controls C4a/C4b:
+strategy / strategy_posterior as p1 vs the yardstick on p2). ``act`` is
+therefore implemented as a THIN adapter over the SAME decision core
+decide() runs: the obs was encoded by ``net.env.build_obs`` from a belief
+ctx snapshot, which stashes that EXACT snapshot per-side, thread-local
+(``net.env.last_ctx``) — one decision pipeline, no second parser.
+
 CPU-first: importing this module pulls NO torch and NO poke_env (both are
 imported lazily inside ``decide`` — the same discipline as ``fitness.heuristic``).
 """
 from __future__ import annotations
 
 import threading
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
-__all__ = ["StrategyAgent", "strategy_reference",
+import numpy as np
+
+__all__ = ["StrategyAgent", "Decision", "strategy_reference",
            "strategy_posterior_reference", "recently_switched_after",
            "fallback_stats", "fallback_reset"]
 
@@ -55,6 +67,26 @@ def fallback_reset() -> None:
             _FB[k] = 0
 
 
+@dataclass
+class Decision:
+    """A ``net.agent.Decision``-SHAPED return (duck-typed by the harness).
+
+    Defined here (not imported from ``net.agent``) so ``import
+    fitness.strategy_agent`` stays torch-free — the same pattern as
+    ``fitness.heuristic.Decision`` (``HeuristicAgent`` is the precedent:
+    a non-net policy satisfying the p1 harness contract). The play path
+    reads only ``.action`` (plus ``.action_index`` / ``.logprob`` /
+    ``.value`` in the eval loop); ``.prob`` / ``.entropy`` are present for
+    shape-consistency with the net's Decision.
+    """
+    action: Optional[Dict]
+    action_index: int
+    logprob: float
+    value: float
+    entropy: float
+    prob: np.ndarray
+
+
 def _fb_bump(key: str) -> None:
     with _FB_LOCK:
         _FB[key] = _FB.get(key, 0) + 1
@@ -82,7 +114,12 @@ class StrategyAgent:
       * ``decides_from_battle = True`` — this policy consumes the BATTLE (the
         belief pipeline), not the encoded obs;
       * ``decide(battle, fmt, vocabs) -> action dict | None`` (``None`` =
-        pass/wait, no legal action this moment).
+        pass/wait, no legal action this moment);
+      * ``act(obs, acts, deterministic) -> Decision`` — the p1 harness
+        contract (the frozen eval loop drives every p1 subject through it).
+        A thin adapter over the SAME :meth:`_choose_from_ctx` core decide()
+        runs, fed by the exact ctx snapshot its obs was built from
+        (``net.env.last_ctx``) — never a second decision pipeline.
 
     The decision builds the belief's ``get_context()`` snapshot via
     ``net.env.build_ctx`` — the EXACT pipeline ``build_obs`` uses (one source
@@ -163,6 +200,70 @@ class StrategyAgent:
             _fb_bump("ctx_none_acts0")  # C5: belief unavailable -> acts[0]
             return acts[0]  # belief unavailable: first legal (the A3.1 degrade)
 
+        return self._choose_from_ctx(ctx, acts, fmt)
+
+    def act(self, obs: Any, action_list: Optional[List[Dict]],
+            deterministic: bool = False) -> Decision:
+        """The p1 harness contract: ``gui.m1_gate_main._play_one_battle``
+        drives the p1 SUBJECT through ``agent.act(obs, acts)`` for every
+        subject (the frozen gate loop wraps it in ``_Greedy`` ->
+        ``act(obs, acts, deterministic=True)``), while the p2 side dispatches
+        ``decides_from_battle`` brains through :meth:`decide`. This adapter
+        lets a ctx brain be a p1 subject (the C4a/C4b mirror controls)
+        WITHOUT a second decision pipeline:
+
+        * the obs was encoded by ``net.env.build_obs`` from a belief ctx
+          snapshot, which stashes the EXACT snapshot per-side, thread-local
+          (each eval battle runs on its own worker thread, and poke-env
+          embeds observations synchronously on that thread);
+        * this reads that snapshot back and runs the SAME
+          :meth:`_choose_from_ctx` core ``decide`` runs — same
+          ``choose_action``, same 6.6a posterior overrides, same D2
+          hysteresis, same C5 counters.
+
+        ``deterministic`` is accepted for contract parity (the policy is
+        always deterministic, like ``HeuristicAgent``). Never raises:
+        a missing/failed ctx degrades to the first legal action (A3.1).
+        """
+        _fb_bump("decides")
+        acts: List[Dict] = list(action_list or [])
+        if not acts:
+            _fb_bump("passed")  # C5: a pass/wait turn
+            return self._decision_pass()
+        # The p1 subject is always side "p1" in the harness (``embed_battle``
+        # maps battle1 -> "p1"); the ctx is the one its obs was built from.
+        from net.env import last_ctx
+        ctx = last_ctx("p1")
+        if ctx is None:
+            _fb_bump("ctx_none_acts0")  # C5: belief unavailable -> acts[0]
+            act = acts[0]               # first legal (the A3.1 degrade)
+        else:
+            act = self._choose_from_ctx(ctx, acts, self.fmt)
+        for i, a in enumerate(acts):
+            if a is act:                # choose_action returns an element of `acts`
+                return self._decision(acts, i)
+        try:
+            return self._decision(acts, acts.index(act))
+        except ValueError:  # noqa: BLE001 — unreachable (identity check above)
+            return self._decision(acts, 0)
+
+    # ── decision packing (the harness reads .action/.action_index/...) ─────
+    def _decision(self, acts: List[Dict], idx: int) -> Decision:
+        prob = np.zeros(len(acts), dtype=np.float32)
+        prob[idx] = 1.0  # a deterministic one-hot (logprob 0.0, entropy 0.0)
+        return Decision(acts[idx], idx, 0.0, 0.5, 0.0, prob)
+
+    def _decision_pass(self) -> Decision:
+        return Decision(None, -1, 0.0, 0.5, 0.0,
+                        np.zeros(0, dtype=np.float32))
+
+    def _choose_from_ctx(self, ctx: Dict, acts: List[Dict], fmt: str) -> Dict:
+        """THE ONE decision core: ``decide()`` (the driver/training path, from
+        a live battle) and ``act()`` (the p1 harness contract, from the
+        stashed ctx) BOTH converge here — the SAME ``choose_action`` over the
+        SAME ctx snapshot (6.6a posterior overrides, D2 hysteresis, C5
+        degrade counters). Never raises; always returns a legal action dict.
+        """
         from fitness.strategy import choose_action, _posterior_overrides
         # 6.6a: the posterior variant feeds the opponent's top-1 build into the
         # calc (mirroring the net); the plain yardstick passes known-info only.
