@@ -163,6 +163,10 @@ def main(argv: Optional[list] = None) -> int:
     eval_every = int(cfg.get("eval_every", 10))
     eval_battles = int(cfg.get("eval_battles", 100))
     eval_opp = cfg.get("eval_opp", "strategy")
+    # S3.1: learner-side randomization (seeded 50/50 per battle in training;
+    # eval can report per seat). OFF by default — defaults reproduce the
+    # historical learner-is-p1 behaviour exactly.
+    randomize_sides = bool(cfg.get("randomize_sides", False))
 
     log(f"start M1 GATE: fmt={fmt} device={device} "
         f"battles/round={battles} rounds={rounds} "
@@ -171,6 +175,7 @@ def main(argv: Optional[list] = None) -> int:
         f"strategy:{cfg.get('opp_strategy', True)} "
         f"posterior:{cfg.get('opp_posterior', True)} "
         f"eval={eval_battles}vs{eval_opp} every {eval_every} rounds "
+        f"randomize_sides={randomize_sides} "
         f"resume={cfg.get('resume_from')!r}")
 
     runstate.write_status(rd, state="running", started=runstate.now_iso())
@@ -271,7 +276,8 @@ def main(argv: Optional[list] = None) -> int:
             # play each battle against a randomly-selected pool member.
             row = _train_round_m1(trainer, pool, fmt, vocabs, device,
                                   battles, max_steps, n_servers, per_server,
-                                  port_base, battle_hook, stop_check)
+                                  port_base, battle_hook, stop_check,
+                                  randomize_sides=randomize_sides)
             row["wall_s"] = round(time.time() - t0, 1)
             _finite(row)
             # C3: the yardstick eval — every eval_every rounds + ALWAYS the
@@ -337,9 +343,29 @@ def _moves_lookup() -> Dict[str, Dict[str, Any]]:
     return _MOVES_LK_CACHE
 
 
+def _learner_won(record: Dict[str, Any]) -> bool:
+    """Learner-relative WIN from a battle record (S3.1, side-aware).
+
+    Records are SEAT-relative (a1 = the p1 seat). When the learner sat on p2
+    (``record['side'] == 'p2'``) the win is a2_won. Default (no ``side`` key,
+    or "p1") = the historical a1-is-learner mapping.
+    """
+    if record.get("side", "p1") == "p1":
+        return bool(record["a1_won"]) and not bool(record["a2_won"])
+    return bool(record["a2_won"]) and not bool(record["a1_won"])
+
+
+def _learner_lost(record: Dict[str, Any]) -> bool:
+    """Learner-relative LOSS (see :func:`_learner_won`)."""
+    if record.get("side", "p1") == "p1":
+        return bool(record["a2_won"]) and not bool(record["a1_won"])
+    return bool(record["a1_won"]) and not bool(record["a2_won"])
+
+
 def _train_round_m1(trainer, pool, fmt, vocabs, device,
                     n_battles, max_steps, n_servers, per_server, port_base,
-                    battle_hook, stop_check) -> Dict[str, Any]:
+                    battle_hook, stop_check,
+                    randomize_sides: bool = False) -> Dict[str, Any]:
     """One PPO round: play n_battles against the M1 pool, GAE, update.
 
     Thread-per-battle — the pool's design front (D93.2: the Phase 0 gate ran
@@ -404,6 +430,12 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
             my_agent = PokeAgent(trainer.net, seed=trainer.round * 1000 + i,
                                  device=device)
 
+            # S3.1: which seat the learner plays — seeded 50/50 when the flag
+            # is on; default off = always p1 (the historical behaviour). The
+            # draw comes from the SAME seeded stream as the opponent choice,
+            # so (round, battle) determinism is preserved.
+            learner_side = ("p2" if _rng.random() < 0.5 else "p1") \
+                if randomize_sides else "p1"
             a1_won = a2_won = None
             crashed = False
             crash_reason = None
@@ -414,7 +446,7 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
                     traj, a1_won, a2_won, _n = _play_one_battle(
                         my_agent, opp_agent, fmt, vocabs, device,
                         server_cfg, trainer.round * 1000 + i, max_steps,
-                        action_log=actions_log)
+                        action_log=actions_log, learner_side=learner_side)
             except Exception as exc:
                 crashed = True
                 crash_reason = f"{type(exc).__name__}: {exc}"
@@ -422,9 +454,11 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
                       flush=True)
 
             if not crashed:
-                if a1_won and not a2_won:
+                rec = {"side": learner_side, "a1_won": a1_won,
+                       "a2_won": a2_won}
+                if _learner_won(rec):
                     terminal_reward = 1.0
-                elif a2_won and not a1_won:
+                elif _learner_lost(rec):
                     terminal_reward = -1.0
                 else:
                     terminal_reward = -1.0  # D4: draw = -1.0
@@ -436,6 +470,7 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
             with lock:
                 records.append({"a1_won": a1_won, "a2_won": a2_won,
                                 "opp": opp_ref.name,
+                                "side": learner_side,
                                 "crashed": crashed,
                                 "steps": (0 if crashed else len(traj)),
                                 "crash_reason": crash_reason})
@@ -457,13 +492,14 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
         stop_evt.set()
         srv_pool.shutdown()
 
-    # Aggregate exactly as the sequential loop did (same win/loss/draw rules)
-    n_wins = sum(1 for r in records if r["a1_won"] and not r["a2_won"])
-    n_losses = sum(1 for r in records if r["a2_won"] and not r["a1_won"])
+    # Aggregate LEARNER-RELATIVE (S3.1: records carry the learner's seat;
+    # side="p1" — the default — reproduces the historical a1-is-learner
+    # mapping exactly).
+    n_wins = sum(1 for r in records if _learner_won(r))
+    n_losses = sum(1 for r in records if _learner_lost(r))
     n_draws = sum(1 for r in records
-                  if not r["crashed"]
-                  and not (r["a1_won"] and not r["a2_won"])
-                  and not (r["a2_won"] and not r["a1_won"]))
+                  if not r["crashed"] and not _learner_won(r)
+                  and not _learner_lost(r))
     n_crashed = sum(1 for r in records if r["crashed"])
     n_played = n_wins + n_losses + n_draws
     n_maxsteps = sum(1 for r in records
@@ -479,9 +515,9 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
         slot = opp_wld.setdefault(r.get("opp") or "?",
                                   {"w": 0, "l": 0, "d": 0, "n": 0})
         slot["n"] += 1
-        if r["a1_won"] and not r["a2_won"]:
+        if _learner_won(r):
             slot["w"] += 1
-        elif r["a2_won"] and not r["a1_won"]:
+        elif _learner_lost(r):
             slot["l"] += 1
         elif not r["crashed"]:
             slot["d"] += 1
@@ -624,7 +660,8 @@ def run_eval_battles(net, opp_ref, fmt, vocabs, device,
                      seed_base: int, deterministic: bool = True,
                      battle_hook=None, stop_check=None,
                      label: str = "eval",
-                     my_ref: Any = None) -> Dict[str, Any]:
+                     my_ref: Any = None,
+                     my_side: str = "p1") -> Dict[str, Any]:
     """The ONE parallel eval-battle loop (shared by the C3 yardstick eval
     and the C4 final gate, ``tools.gate_eval`` — no second implementation).
 
@@ -635,6 +672,12 @@ def run_eval_battles(net, opp_ref, fmt, vocabs, device,
       ``Reference`` (random-init floor / old heuristic) — the gate
       CONTROLS (Claude review: a gate the random-init net can pass is no
       gate). When set, ``net`` may be ``None``.
+      ``my_side`` (optional, default "p1") — which SEAT the subject sits
+      on (S3.1): "p2" = the subject plays the p2 seat and the reference
+      the p1 seat; the seat-relative result is normalised to subject-POV
+      before aggregation, so the ``summarize_eval_records`` contract
+      (a1_won = subject win) holds for both seats. The row gains
+      ``eval_side``.
     * fresh agent per battle (same isolation contract as training
       collection; the net is read-only — no state mutation);
     * ``seed_base + i`` per battle — the CALLER picks a disjoint seed space
@@ -706,13 +749,22 @@ def run_eval_battles(net, opp_ref, fmt, vocabs, device,
                     with srv_pool.battle_slot() as server_cfg:
                         _traj, a1_won, a2_won, _n = _play_one_battle(
                             my_agent, opp_agent, fmt, vocabs, device,
-                            server_cfg, seed, max_steps)
+                            server_cfg, seed, max_steps,
+                            learner_side=my_side)
                 except Exception as exc:
                     crashed = True
                     crash_reason = f"{type(exc).__name__}: {exc}"
                     a1_won = a2_won = None
                     print(f"  eval battle {i}: CRASHED "
                           f"({type(exc).__name__}: {exc})", flush=True)
+
+                # S3.1: normalise to SUBJECT-POV — when the subject sat on
+                # p2 the a1/a2 seats are swapped relative to it; flip so
+                # the summarize_eval_records contract (a1_won = subject
+                # win) holds. my_side="p1" (default) = no flip = the
+                # historical behaviour.
+                if my_side == "p2":
+                    a1_won, a2_won = a2_won, a1_won
 
                 with lock:
                     records.append({"a1_won": a1_won, "a2_won": a2_won,
@@ -747,12 +799,14 @@ def run_eval_battles(net, opp_ref, fmt, vocabs, device,
             f"{len(errors)} eval worker(s) died: {errors[:3]}")
     row = summarize_eval_records(records, max_steps)
     row["eval_battles"] = n_battles
+    row["eval_side"] = my_side
     return row
 
 
 def _eval_round_m1(trainer, full_pool, fmt, vocabs, device,
                    opp_name, n_battles, max_steps, n_servers, per_server,
-                   port_base, battle_hook, stop_check) -> Dict[str, Any]:
+                   port_base, battle_hook, stop_check,
+                   my_side: str = "p1") -> Dict[str, Any]:
     """C3 yardstick eval: the CURRENT net (GREEDY) vs the frozen reference.
 
     Thin wrapper over :func:`run_eval_battles` (the shared battle loop):
@@ -769,15 +823,26 @@ def _eval_round_m1(trainer, full_pool, fmt, vocabs, device,
         trainer.net, opp_ref, fmt, vocabs, device,
         n_battles, max_steps, n_servers, per_server, port_base,
         seed_base=1_000_000 + trainer.round * 1000, deterministic=True,
-        battle_hook=battle_hook, stop_check=stop_check, label="m1gate-eval")
+        battle_hook=battle_hook, stop_check=stop_check, label="m1gate-eval",
+        my_side=my_side)
     row["eval_opp"] = opp_name
     return row
 
 
 def _play_one_battle(agent, opp_agent, fmt, vocabs, device,
                      server_cfg, seed, max_steps,
-                     action_log: Optional[list] = None):
-    """Play one battle: agent (p1) vs opp_agent (p2). Returns (traj, a1_won, a2_won, steps).
+                     action_log: Optional[list] = None,
+                     learner_side: str = "p1"):
+    """Play one battle: agent vs opp_agent. Returns (traj, a1_won, a2_won, steps).
+
+    ``learner_side`` (S3.1): which SEAT the learner (``agent``) plays.
+    Default "p1" = the historical placement (agent on p1, opp on p2) — the
+    loop below is textually identical to the pre-S3.1 one. "p2" = the
+    learner sits on p2 and the opponent on p1: the learner consumes its
+    own p2-POV observation, and a ``decides_from_battle`` opponent brain
+    is told ``side="p1"``. ``a1_won``/``a2_won`` are ALWAYS seat-relative
+    (a1 = the p1 seat) — a caller that needs learner-relative W/L
+    normalises via the record's ``side`` (see :func:`_learner_won`).
 
     ``action_log`` (optional): when given, each EXECUTED learner action dict
     is appended (S3.4 action-mix metric). Default None = no logging, so
@@ -800,13 +865,23 @@ def _play_one_battle(agent, opp_agent, fmt, vocabs, device,
 
     try:
         obs, _info = env.reset()
+        # S3.1: seat binding (after reset: both Battle objects exist and
+        # stay stable for the battle). learner_side="p1" (default) =>
+        # my_seat=a1 / opp_seat=a2 / my_battle=battle1 / opp_side="p2" —
+        # textually the historical loop. "p2" mirrors it.
+        my_is_p1 = (learner_side == "p1")
+        my_seat = a1 if my_is_p1 else a2
+        opp_seat = a2 if my_is_p1 else a1
+        my_battle = env.battle1 if my_is_p1 else env.battle2
+        opp_battle = env.battle2 if my_is_p1 else env.battle1
+        opp_side = "p2" if my_is_p1 else "p1"
         for _ in range(max_steps):
             if env.battle1 is not None and env.battle1.finished:
                 break
             actions = {a1: np.int64(-2), a2: np.int64(-2)}
-            if env.agent1_to_move:
-                obs_dict = obs[a1]["observation"]
-                acts = build_action_list(env.battle1)
+            if (env.agent1_to_move if my_is_p1 else env.agent2_to_move):
+                obs_dict = obs[my_seat]["observation"]
+                acts = build_action_list(my_battle)
                 d = agent.act(obs_dict, acts)
                 if pending is not None:
                     traj.append(RolloutStep(
@@ -815,9 +890,9 @@ def _play_one_battle(agent, opp_agent, fmt, vocabs, device,
                         reward=0.0, done=False))
                     pending = None
                 if d.action is not None:
-                    pe = action_to_pe(d.action, env.battle1)
+                    pe = action_to_pe(d.action, my_battle)
                     if pe >= 0:
-                        actions[a1] = np.int64(pe)
+                        actions[my_seat] = np.int64(pe)
                         if action_log is not None:
                             action_log.append(d.action)
                         pending = (obs_dict, d.action_index,
@@ -829,19 +904,19 @@ def _play_one_battle(agent, opp_agent, fmt, vocabs, device,
                             old_logprob=pending[2], old_value=pending[3],
                             reward=0.0, done=False))
                         pending = None
-            if env.agent2_to_move:
+            if (env.agent2_to_move if my_is_p1 else env.agent1_to_move):
                 if getattr(opp_agent, "decides_from_battle", False):
-                    act2 = opp_agent.decide(battle=env.battle2, fmt=fmt,
-                                            vocabs=vocabs, side="p2")
+                    act2 = opp_agent.decide(battle=opp_battle, fmt=fmt,
+                                            vocabs=vocabs, side=opp_side)
                 else:
-                    obs2_dict = obs[a2]["observation"]
-                    acts2 = build_action_list(env.battle2)
+                    obs2_dict = obs[opp_seat]["observation"]
+                    acts2 = build_action_list(opp_battle)
                     d2 = opp_agent.act(obs2_dict, acts2)
                     act2 = d2.action if d2 else None
                 if act2 is not None:
-                    pe2 = action_to_pe(act2, env.battle2)
+                    pe2 = action_to_pe(act2, opp_battle)
                     if pe2 >= 0:
-                        actions[a2] = np.int64(pe2)
+                        actions[opp_seat] = np.int64(pe2)
             obs, rew, term, trunc, _info = env.step(actions)
             if term[a1] or term[a2] or trunc[a1] or trunc[a2]:
                 break

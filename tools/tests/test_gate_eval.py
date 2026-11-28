@@ -310,10 +310,12 @@ def test_eval_round_m1_contract_shape():
     def fake_run_eval_battles(net, opp_ref, fmt, vocabs, device, n_battles,
                               max_steps, n_servers, per_server, port_base,
                               seed_base, deterministic=True, battle_hook=None,
-                              stop_check=None, label="eval"):
+                              stop_check=None, label="eval", my_ref=None,
+                              my_side="p1"):
         calls.update(dict(net=net, opp_ref=opp_ref, n_battles=n_battles,
-                          seed_base=seed_base, deterministic=deterministic))
-        return dict(fake_row)
+                          seed_base=seed_base, deterministic=deterministic,
+                          my_side=my_side))
+        return dict(fake_row, eval_side=my_side)
 
     orig = m1.run_eval_battles
     m1.run_eval_battles = fake_run_eval_battles
@@ -331,13 +333,108 @@ def test_eval_round_m1_contract_shape():
         row = m1._eval_round_m1(_FakeTrainer(), pool, "gen9ou", "vocabs",
                                 "cpu", "strategy", 4, 200, 6, 2, 49980,
                                 None, lambda: False)
-        # exact contract: additive eval_* keys + eval_opp, nothing else
+        # exact contract: additive eval_* keys + eval_opp + eval_side
+        # (S3.1), nothing else
         assert set(row.keys()) == {"eval_opp", "eval_w", "eval_l", "eval_d",
-                                   "eval_crashed", "eval_wr", "eval_battles"}
+                                   "eval_crashed", "eval_wr", "eval_battles",
+                                   "eval_side"}
         assert row["eval_opp"] == "strategy"
+        # default placement unchanged: subject on p1
+        assert calls["my_side"] == "p1" and row["eval_side"] == "p1"
         # the C3 wrapper stays GREEDY and uses the round-disjoint seed space
         assert calls["deterministic"] is True
         assert calls["seed_base"] == 1_000_000 + 3 * 1000
         assert calls["n_battles"] == 4
+    finally:
+        m1.run_eval_battles = orig
+
+
+# ── S3.1: side-aware learner W/L helpers + eval my_side plumbing ────────────
+
+def _rec(a1, a2, side=None):
+    r = {"a1_won": a1, "a2_won": a2}
+    if side is not None:
+        r["side"] = side
+    return r
+
+
+def test_learner_won_loss_p1_default():
+    """No 'side' key = the historical a1-is-learner mapping (regression)."""
+    from gui.m1_gate_main import _learner_won, _learner_lost
+    assert _learner_won(_rec(True, None))
+    assert not _learner_lost(_rec(True, None))
+    assert _learner_lost(_rec(None, True))
+    assert not _learner_won(_rec(None, True))
+    # draws (stall / double K.O.): neither a win nor a loss
+    assert not _learner_won(_rec(None, None))
+    assert not _learner_lost(_rec(None, None))
+    assert not _learner_won(_rec(True, True))
+    assert not _learner_lost(_rec(True, True))
+
+
+def test_learner_won_loss_p1_explicit():
+    from gui.m1_gate_main import _learner_won, _learner_lost
+    assert _learner_won(_rec(True, None, "p1"))
+    assert _learner_lost(_rec(None, True, "p1"))
+    assert not _learner_won(_rec(None, None, "p1"))
+    assert not _learner_won(_rec(True, True, "p1"))
+    assert not _learner_lost(_rec(True, True, "p1"))
+
+
+def test_learner_won_loss_p2_swaps_seats():
+    """Learner sat on p2: the a2 seat is the learner's result."""
+    from gui.m1_gate_main import _learner_won, _learner_lost
+    assert _learner_won(_rec(None, True, "p2"))
+    assert not _learner_lost(_rec(None, True, "p2"))
+    assert _learner_lost(_rec(True, None, "p2"))
+    assert not _learner_won(_rec(True, None, "p2"))
+    # draws: seat-independent — still neither
+    assert not _learner_won(_rec(None, None, "p2"))
+    assert not _learner_lost(_rec(None, None, "p2"))
+    assert not _learner_won(_rec(True, True, "p2"))
+    assert not _learner_lost(_rec(True, True, "p2"))
+
+
+def test_eval_round_m1_my_side_passthrough():
+    """S3.1: _eval_round_m1 forwards my_side to the shared loop; the row
+    contract gains eval_side (additive). Default stays p1."""
+    import gui.m1_gate_main as m1
+
+    calls = []
+
+    def fake_run_eval_battles(net, opp_ref, fmt, vocabs, device, n_battles,
+                              max_steps, n_servers, per_server, port_base,
+                              seed_base, deterministic=True, battle_hook=None,
+                              stop_check=None, label="eval", my_ref=None,
+                              my_side="p1"):
+        calls.append(my_side)
+        return {"eval_w": 0, "eval_l": 0, "eval_d": 0, "eval_crashed": 0,
+                "eval_wr": float("nan"), "eval_battles": 1,
+                "eval_side": my_side}
+
+    orig = m1.run_eval_battles
+    m1.run_eval_battles = fake_run_eval_battles
+    try:
+        class _FakePool(dict):
+            def names(self):
+                return list(self.keys())
+
+        class _FakeTrainer:
+            net = "NET"
+            round = 0
+
+        pool = _FakePool()
+        pool["strategy"] = "STRATEGY_REF"
+        for side in ("p1", "p2"):
+            row = m1._eval_round_m1(_FakeTrainer(), pool, "gen9ou", "vocabs",
+                                    "cpu", "strategy", 1, 200, 6, 2, 49980,
+                                    None, lambda: False, my_side=side)
+            assert calls[-1] == side
+            assert row["eval_side"] == side
+        # default stays p1 (historical placement)
+        row = m1._eval_round_m1(_FakeTrainer(), pool, "gen9ou", "vocabs",
+                                "cpu", "strategy", 1, 200, 6, 2, 49980,
+                                None, lambda: False)
+        assert calls[-1] == "p1" and row["eval_side"] == "p1"
     finally:
         m1.run_eval_battles = orig
