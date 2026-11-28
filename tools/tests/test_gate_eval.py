@@ -264,6 +264,35 @@ def test_summarize_eval_records_empty_is_nan():
     row = summarize_eval_records([])
     assert row["eval_w"] == 0 and row["eval_crashed"] == 0
     assert math.isnan(row["eval_wr"])
+    assert row["max_steps_terminations"] == 0
+    assert math.isnan(row["max_steps_share"])
+
+
+def test_summarize_eval_records_max_steps_share():
+    """§2.4: battles ending at the loop cap are counted separately (they are
+    scored as draws, but reported as not-a-real-result). Crashed records are
+    never counted; records without a steps key (older rows / fixtures) are
+    not counted either."""
+    from gui.m1_gate_main import summarize_eval_records
+    records = [
+        {"a1_won": None, "a2_won": None, "crashed": False, "steps": 200},
+        {"a1_won": None, "a2_won": None, "crashed": False, "steps": 200},
+        {"a1_won": True, "a2_won": None, "crashed": False, "steps": 47},
+        {"a1_won": None, "a2_won": True, "crashed": False, "steps": 88},
+        {"a1_won": None, "a2_won": None, "crashed": True, "steps": 200},
+    ]
+    row = summarize_eval_records(records)  # default max_steps=200
+    assert row["eval_w"] == 1 and row["eval_l"] == 1 and row["eval_d"] == 2
+    assert row["eval_crashed"] == 1
+    assert row["max_steps_terminations"] == 2
+    assert abs(row["max_steps_share"] - 0.5) < 1e-12
+    # the pre-existing row contract is unchanged
+    assert abs(row["eval_wr"] - 1 / 4) < 1e-12
+    # step-less records: never a max_steps termination
+    row2 = summarize_eval_records(
+        [{"a1_won": True, "a2_won": None, "crashed": False}])
+    assert row2["max_steps_terminations"] == 0
+    assert row2["max_steps_share"] == 0.0
 
 
 # ── the C3 wrapper must keep its exact row contract (6.6a) ──────────────────

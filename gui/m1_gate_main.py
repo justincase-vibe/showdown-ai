@@ -392,6 +392,7 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
 
             a1_won = a2_won = None
             crashed = False
+            crash_reason = None
             traj: list = []
             try:
                 with srv_pool.battle_slot() as server_cfg:
@@ -400,6 +401,7 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
                         server_cfg, trainer.round * 1000 + i, max_steps)
             except Exception as exc:
                 crashed = True
+                crash_reason = f"{type(exc).__name__}: {exc}"
                 print(f"  battle {i}: CRASHED ({type(exc).__name__}: {exc})",
                       flush=True)
 
@@ -417,7 +419,9 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
 
             with lock:
                 records.append({"a1_won": a1_won, "a2_won": a2_won,
-                                "crashed": crashed})
+                                "crashed": crashed,
+                                "steps": (0 if crashed else len(traj)),
+                                "crash_reason": crash_reason})
                 if not crashed:
                     all_steps.extend(traj)
 
@@ -443,11 +447,19 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
                   and not (r["a1_won"] and not r["a2_won"])
                   and not (r["a2_won"] and not r["a1_won"]))
     n_crashed = sum(1 for r in records if r["crashed"])
+    n_played = n_wins + n_losses + n_draws
+    n_maxsteps = sum(1 for r in records
+                     if not r["crashed"]
+                     and r.get("steps") is not None
+                     and r["steps"] >= max_steps)
+    maxsteps_share = (n_maxsteps / n_played) if n_played else float("nan")
 
     # PPO update
     metrics = {"battles": n_battles, "transitions": len(all_steps),
                "a1_wins": n_wins, "a1_losses": n_losses, "draws": n_draws,
-               "crashed": n_crashed, "loss": float("nan")}
+               "crashed": n_crashed, "loss": float("nan"),
+               "max_steps_terminations": n_maxsteps,
+               "max_steps_share": maxsteps_share}
     if len(all_steps) >= 2:
         batch = steps_to_batch(all_steps, device=device)
         n = len(batch["action_index"])
@@ -476,6 +488,8 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
         metrics["a1_losses"] = n_losses
         metrics["draws"] = n_draws
         metrics["crashed"] = n_crashed
+        metrics["max_steps_terminations"] = n_maxsteps
+        metrics["max_steps_share"] = maxsteps_share
         metrics["value_std"] = round(value_std, 5)
 
     # Checkpoint — the standard self-play format (net.trainer.save_checkpoint):
@@ -507,12 +521,20 @@ class _Greedy:
         return self._agent.act(obs, action_list, deterministic=True)
 
 
-def summarize_eval_records(records: list) -> Dict[str, Any]:
+def summarize_eval_records(records: list, max_steps: int = 200) -> Dict[str, Any]:
     """Pure aggregation of battle records into the eval row contract.
 
     W/L/D are reported SEPARATELY (eval contract; the D4 draw=-1.0 rule is
     training-reward only) and ``eval_wr = wins/(w+l+d)`` (nan if 0 played).
     A record where BOTH sides won (double K.O. / stall) counts as a draw.
+
+    §2.4 observability: ``max_steps_terminations`` counts non-crashed
+    records whose ``steps`` reached the loop cap (the battle ended by
+    max_steps, not a real result — scored as a draw); ``max_steps_share``
+    is that over played battles (nan if none played). Records without a
+    ``steps`` key (older rows / test fixtures) are not counted; the default
+    200 matches the standard ``max_steps``, so existing call sites are
+    unchanged.
     """
     n_wins = sum(1 for r in records if r["a1_won"] and not r["a2_won"])
     n_losses = sum(1 for r in records if r["a2_won"] and not r["a1_won"])
@@ -521,6 +543,10 @@ def summarize_eval_records(records: list) -> Dict[str, Any]:
                   and not (r["a1_won"] and not r["a2_won"])
                   and not (r["a2_won"] and not r["a1_won"]))
     n_crashed = sum(1 for r in records if r["crashed"])
+    n_maxsteps = sum(
+        1 for r in records
+        if not r["crashed"]
+        and r.get("steps") is not None and r["steps"] >= max_steps)
     played = n_wins + n_losses + n_draws
     return {
         "eval_w": n_wins,
@@ -528,6 +554,8 @@ def summarize_eval_records(records: list) -> Dict[str, Any]:
         "eval_d": n_draws,
         "eval_crashed": n_crashed,
         "eval_wr": (n_wins / played) if played else float("nan"),
+        "max_steps_terminations": n_maxsteps,
+        "max_steps_share": (n_maxsteps / played) if played else float("nan"),
     }
 
 
@@ -610,6 +638,8 @@ def run_eval_battles(net, opp_ref, fmt, vocabs, device,
 
                 a1_won = a2_won = None
                 crashed = False
+                crash_reason = None
+                _traj: list = []
                 try:
                     my_agent = _make_my_agent(seed)
                     opp_agent = opp_ref.make_agent(seed=seed)
@@ -619,13 +649,16 @@ def run_eval_battles(net, opp_ref, fmt, vocabs, device,
                             server_cfg, seed, max_steps)
                 except Exception as exc:
                     crashed = True
+                    crash_reason = f"{type(exc).__name__}: {exc}"
                     a1_won = a2_won = None
                     print(f"  eval battle {i}: CRASHED "
                           f"({type(exc).__name__}: {exc})", flush=True)
 
                 with lock:
                     records.append({"a1_won": a1_won, "a2_won": a2_won,
-                                    "crashed": crashed})
+                                    "crashed": crashed,
+                                    "steps": (0 if crashed else len(_traj)),
+                                    "crash_reason": crash_reason})
         except Exception as exc:  # noqa: BLE001 — record, signal, re-raise
             with lock:
                 errors.append(f"worker {threading.current_thread().name}: "
@@ -652,7 +685,7 @@ def run_eval_battles(net, opp_ref, fmt, vocabs, device,
     if errors:
         raise RuntimeError(
             f"{len(errors)} eval worker(s) died: {errors[:3]}")
-    row = summarize_eval_records(records)
+    row = summarize_eval_records(records, max_steps)
     row["eval_battles"] = n_battles
     return row
 

@@ -117,16 +117,18 @@ def test_mask_lone_no_progress_kept():
 
 
 def test_mask_run_keeps_first_drops_rest():
+    # min_run=3 (explicit — the default is 8 per the USER ruling 2026-11-24):
     # 2 consecutive no-progress: keep the first, drop the second
-    assert ping_pong_keep_mask(["A", "B", "B", "B"]) == \
+    assert ping_pong_keep_mask(["A", "B", "B", "B"], min_run=3) == \
         [True, True, True, False]
     # 3 in a row: keep the first, drop the second AND third
-    assert ping_pong_keep_mask(["A", "B", "B", "B", "B"]) == \
+    assert ping_pong_keep_mask(["A", "B", "B", "B", "B"], min_run=3) == \
         [True, True, True, False, False]
 
 
 def test_mask_progress_resets_run():
-    assert ping_pong_keep_mask(["A", "B", "B", "C", "B", "B", "B"]) == \
+    assert ping_pong_keep_mask(["A", "B", "B", "C", "B", "B", "B"],
+                               min_run=3) == \
         [True, True, True, True, True, True, False]
 
 
@@ -140,6 +142,10 @@ def test_mask_min_run_threshold():
     # min_run<2: degenerate guard — nothing is dropped
     assert ping_pong_keep_mask(["A", "B", "B"], min_run=1) == \
         [True, True, True]
+    # default min_run=8 (USER ruling 2026-11-24): a ping-pong loop keeps at
+    # most 7 consecutive no-progress decisions; the 8th is dropped
+    assert ping_pong_keep_mask(["A"] + ["B"] * 7) == [True] * 8
+    assert ping_pong_keep_mask(["A"] + ["B"] * 8) == [True] * 8 + [False]
 
 
 # ── action_index_of ────────────────────────────────────────────────────────────
