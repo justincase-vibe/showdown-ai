@@ -81,7 +81,6 @@ def _fake_factory(results_by_idx=None):
 # ── planning (the team clock) ──────────────────────────────────────────────
 
 def test_plan_schedules_n_team_matchups(team_reg):
-    reg = _roster(Path("x"), "b1", "b2", "b3")   # not used (injected below)
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         breg = BotRegistry(path=Path(td) / "bots.json")
