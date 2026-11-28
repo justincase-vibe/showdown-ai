@@ -33,6 +33,7 @@ as ``pool`` / ``control.selfplay``).
 """
 from __future__ import annotations
 
+import copy
 import dataclasses
 import threading
 import time
@@ -86,6 +87,16 @@ class LeagueConfig:
     cull_frac: float = 0.25      # the bottom X of the roster by ELO
     min_roster: int = 4          # the roster never drops below this (and 2)
     refresh_dir: Optional[str] = None  # new bots' .pt dir (default "scratch")
+    # ── the two-clock team pool (the league's LIVING team lineups) ─────────
+    team_pool: bool = False      # True: schedule + ELO-track a living team pool
+                                # (False = legacy shared StrongTeamBuilder draw)
+    team_registry_path: Optional[str] = None  # default league/teams.json
+    team_mirror_frac: float = 0.25   # share of slots that are pure bot-vs-bot
+    team_cull_frac: float = 0.25     # bottom X of GENERATED teams per cull
+    team_min_pool: int = 12          # total pool never drops below this (and 2)
+    team_breed_candidates: int = 8   # mutations ranked per culled slot
+    team_brain_path: Optional[str] = None  # default scratch/team_brain.pt
+    team_brain_epochs: int = 2       # preference passes per cull boundary
     # ── the pool (the RAM ceiling is enforced by the pool, not here) ───
     n_servers: int = 2
     per_server: int = 2
@@ -136,6 +147,8 @@ class LeagueRun:
                  pool: Optional[Any] = None,
                  library: Optional[Any] = None,
                  driver_factory: Optional[Callable[[int], Any]] = None,
+                 team_registry: Optional[Any] = None,
+                 team_brain: Optional[Any] = None,
                  log: Optional[Callable[[str], None]] = None):
         self.cfg = cfg
         self.run_dir = Path(run_dir) if run_dir is not None else None
@@ -173,6 +186,24 @@ class LeagueRun:
         # D103 step 4: the population loop (cull + refresh) bookkeeping
         self._vocabs: Optional[Any] = None            # set by _load_bots (reuse)
         self._cull_events: List[Dict[str, Any]] = []  # per-cull-round record
+        # the two-clock team pool (league.teams + league.schedule + net.team_brain;
+        # all pulled LAZILY — the engine's CPU-first / no-torch-at-import rule)
+        self._team_reg: Optional[Any] = team_registry
+        self._team_brain_obj: Optional[Any] = team_brain   # injectable (tests)
+        self._team_matchups: List[Tuple[str, str]] = []
+        self._team_cull_events: List[Dict[str, Any]] = []
+        if self._team_reg is None and cfg.team_pool:
+            from .teams import TeamRegistry, seed_curated
+            tpath = (Path(cfg.team_registry_path)
+                     if cfg.team_registry_path else None)
+            self._team_reg = TeamRegistry(tpath)
+            if len(self._team_reg) == 0:
+                # first league for this registry: seed the curated anchors
+                # (idempotent; FAILS LOUD if the pools file is missing — a
+                # team_pool league cannot start without the team source)
+                seed_curated(self._team_reg, cfg.battle_format)
+            self.log(f"[league] team pool ready: {len(self._team_reg)} team(s) "
+                     f"({self._team_reg.origin_counts()})")
 
     # ── roster ──────────────────────────────────────────────────────────
     def add_bot(self, name: str, ckpt_path: str,
@@ -203,9 +234,41 @@ class LeagueRun:
             raise ValueError(f"unknown pairing strategy {strat!r} "
                              "(want 'round_robin' or 'elo_weighted')")
         self._pairings = list(pairs)
+        self._plan_teams(len(pairs))
         self.log(f"[league] {len(bots)} bots -> {len(pairs)} pairing(s) "
-                 f"(strategy={strat}, best_of={n})")
+                 f"(strategy={strat}, best_of={n})" +
+                 (f" + {len(self._team_matchups)} team matchup(es)"
+                  if self._team_matchups else ""))
         return list(pairs)
+
+    def _plan_teams(self, n_matchups: int) -> None:
+        """The team clock: N team matchups for this round (one per bot
+        pairing, matched 1:1 — battle i = pairing i piloting matchup i).
+
+        The pool is read LIVE from the team registry (cull/refresh churn is
+        picked up automatically — the schedule rebuilds its round-robin
+        sequence when the pool identity changes). Mirrors (``t, t``) are
+        ELO-neutral for teams by construction; they are pure bot-vs-bot.
+        """
+        if self._team_reg is None:
+            self._team_matchups = []
+            return
+        from .schedule import team_matchups
+        pool = [t.tid for t in self._team_reg.all()]
+        self._team_matchups = team_matchups(
+            pool, n_matchups, round_idx=self._round_idx, seed=self.cfg.seed,
+            mirror_frac=self.cfg.team_mirror_frac)
+
+    def _teams_for(self, idx: int) -> Optional[Tuple[List[Dict], List[Dict]]]:
+        """The per-seat mon lists for battle ``idx`` (None = legacy draw)."""
+        if self._team_reg is None or not self._team_matchups:
+            return None
+        t_a, t_b = self._team_matchups[idx]
+        # DEEP copies: the pool is the single source of truth; the driver / 
+        # poke-env teabuilder may normalise (e.g. add ivs) and must NOT
+        # mutate the shared mon dicts (nested moves/evs lists included).
+        return (copy.deepcopy(self._team_reg.get(t_a).mons),
+                copy.deepcopy(self._team_reg.get(t_b).mons))
 
     # ── checkpoint loading (once, before workers start) ─────────────────
     def _load_nets(self) -> None:
@@ -267,6 +330,9 @@ class LeagueRun:
                     server_cfg, agent_a=agent_a, agent_b=agent_b,
                     fmt=fmt, seed=seed, vocabs=vocabs, max_steps=max_steps,
                     greedy=collection_greedy(self.cfg), log=self.log, on_finish=on_finish,
+                    # the two-clock team matchup for THIS battle slot (None =
+                    # legacy shared-builder draw when the team pool is off)
+                    teams=self._teams_for(idx),
                     # D102 guard: N back-to-back decision errors -> the battle
                     # FAILS LOUD (trips the run's max_consecutive_errors) instead
                     # of silently pass-festing all n_battles (the device bug).
@@ -320,7 +386,10 @@ class LeagueRun:
                     max_decision_errors=self.cfg.max_consecutive_errors,
                     # the collection seam: each side's real decisions land in
                     # its bot's collector (finalize + buffer in _on_battle).
-                    capture_a=coll_a.record, capture_b=coll_b.record)
+                    capture_a=coll_a.record, capture_b=coll_b.record,
+                    # the two-clock team matchup for THIS battle slot (None =
+                    # legacy shared-builder draw when the team pool is off)
+                    teams=self._teams_for(idx))
             return driver
         return factory
 
@@ -383,6 +452,7 @@ class LeagueRun:
                          f"- an errored battle has no decided outcome")
             return
         a_name, b_name = self._pairings[idx]
+        # _record also books the TEAM ELO (the second clock) for this matchup
         self._record(idx, a_name, b_name, result["a1_won"], result["a2_won"],
                      result["steps"])
         self._finalize_experience(idx, result)
@@ -401,11 +471,39 @@ class LeagueRun:
             winner = None  # both flagged (weird) OR undecided (max_steps) -> draw
         row = {"battle": idx, "a": a_name, "b": b_name, "winner": winner,
                "a1_won": bool(a1_won), "a2_won": bool(a2_won), "steps": int(steps)}
+        t_winner = self._record_team(idx, a1_won, a2_won)
+        if t_winner is not None or (self._team_reg is not None
+                                   and self._team_matchups):
+            row.update({"team_a": self._team_matchups[idx][0],
+                        "team_b": self._team_matchups[idx][1],
+                        "team_winner": t_winner})
         with self._lk:
             self._results.append(row)
         self.registry.update_result(a_name, b_name, winner)
         self.log(f"[league] battle {idx}: {a_name} vs {b_name} -> "
                  f"{'WIN ' + winner if winner else 'DRAW'} (steps={steps})")
+
+    def _record_team(self, idx: int, a1_won: bool, a2_won: bool
+                     ) -> Optional[str]:
+        """Team ELO (the second clock): the matchup's teams get the same
+        positional winner mapping. The driver assigns teams per-seat via
+        ``update_team`` (p1 = matchup[0], p2 = matchup[1]) BEFORE reset, so
+        the attribution is EXACT — a1_won -> matchup[0] wins.
+
+        Mirrors (``t, t``) are ELO-NEUTRAL by construction in the registry
+        (x vs x nets zero — pinned by test_schedule.py), so they never
+        distort team standings; they are a pure bot-vs-bot signal."""
+        if self._team_reg is None or not self._team_matchups:
+            return None
+        t_a, t_b = self._team_matchups[idx]
+        if a1_won and not a2_won:
+            winner = t_a
+        elif a2_won and not a1_won:
+            winner = t_b
+        else:
+            winner = None
+        self._team_reg.update_result(t_a, t_b, winner)
+        return winner
 
     # ── lifecycle (multi-round over ONE shared pool; one run engine) ─────
     def start(self) -> None:
@@ -491,6 +589,7 @@ class LeagueRun:
             self._update_round()
             if s.get("state") == "completed":
                 self._cull_and_refresh()
+                self._team_cull_and_refresh()
 
     def request_stop(self, reason: str = "user") -> None:
         if self._sp is None:
@@ -659,6 +758,135 @@ class LeagueRun:
                  f"-> fresh random bot(s) {added} "
                  f"(roster now {len(self.registry.all())})")
 
+    # ── the two-clock team builder (the pool's own population loop) ──────
+    def _team_brain(self):
+        """The team brain, built ONCE (lazy: no torch until first cull
+        boundary). Reused across cull boundaries — the brain is trained
+        ONLINE as the pool's ELO history grows (the approved "trained
+        online every 4 rounds"). An injected brain (tests) is used as-is."""
+        if self._team_brain_obj is not None:
+            return self._team_brain_obj
+        from net.team_brain import TeamBrain
+        path = Path(self.cfg.team_brain_path or "scratch/team_brain.pt")
+        if self._vocabs is None:
+            from net.vocab_db import build_vocabs
+            self._vocabs = build_vocabs()
+        if path.is_file():
+            self._team_brain_obj = TeamBrain.load_file(
+                path, self._vocabs, device=self.cfg.device)
+            self.log(f"[league] team brain loaded from {path}")
+        else:
+            self._team_brain_obj = TeamBrain(
+                self._vocabs, device=self.cfg.device, seed=self.cfg.seed)
+            self.log(f"[league] team brain initialized (fresh) at {path}")
+        return self._team_brain_obj
+
+    def _team_cull_and_refresh(self) -> None:
+        """The builder step at a cull boundary (learning mode, COMPLETED
+        round only — same discipline as the bot cull): the living team pool
+        improves DURING the run.
+
+        1) TRAIN the team brain on the pool's ELO history (the league's own
+           results — (a, b, a_better) pairs from team_pairs_from_registry);
+        2) RETIRE the bottom ``team_cull_frac`` of GENERATED teams (curated
+           are PROTECTED by the registry; the pool never drops below
+           ``team_min_pool``);
+        3) BREED replacements: mutate a strong parent (top generated, else
+           the curated anchors — "mutations of good teams"), rank the
+           candidates with the brain (``rank(parent)``: a candidate that
+           does not beat its parent ranks last), adopt the best;
+        4) replan (the pool changed -> next round's matchups follow it).
+
+        First generation (no generated teams yet): the pool is seeded from
+           the curated anchors — the same mutation machinery, so the
+           generated population starts as controlled one-slot experiments
+           from the human lineups.
+        """
+        import random as _random
+        if self._team_reg is None:
+            return
+        if self.cfg.cull_every <= 0:
+            return
+        if self._round_idx == 0 or self._round_idx % self.cfg.cull_every != 0:
+            return
+        if self._round_idx >= self._n_rounds:
+            return                      # no next round -> no point breeding
+        reg = self._team_reg
+        gen = reg.generated()
+        floor = max(2, int(self.cfg.team_min_pool))
+        if gen:
+            n_new = max(1, int(round(len(gen) * float(self.cfg.team_cull_frac))))
+            n_new = min(n_new, len(gen), max(0, len(reg) - floor))
+        else:
+            n_new = 4                   # seed the first generation
+            self.log("[league] team cull round: pool has no generated teams "
+                     f"yet -> seeding the first generation ({n_new}) from "
+                     "the curated anchors")
+        if n_new <= 0:
+            self.log("[league] team cull round: pool at the floor — nothing "
+                     f"retired ({len(reg)} teams, floor {floor})")
+            return
+        # 1) train the brain on the pool's ELO history (online)
+        from net.team_brain import team_pairs_from_registry
+        brain = self._team_brain()
+        pairs = team_pairs_from_registry(reg, min_battles=2)
+        if pairs:
+            m = brain.train_step(pairs, epochs=self.cfg.team_brain_epochs)
+            self.log(f"[league] team brain: trained on {m['n_pairs']} pair(s) "
+                     f"(loss={m['loss']:.4f})")
+        else:
+            self.log("[league] team brain: no preference pairs yet "
+                     "(teams have not decided enough battles) — skipping train")
+        # 2) retire the bottom generated (the registry REFUSES curated)
+        culled: List[str] = []
+        if gen:
+            for t in reg.bottom_generated(n_new):
+                reg.remove(t.tid)
+                culled.append(t.tid)
+        # 3) breed replacements (mutations of strong teams, brain-ranked)
+        from .teams import (load_sets, mutate, new_generated_tid,
+                            ORIGIN_GENERATED)
+        sets = load_sets(self.cfg.battle_format)
+        parents = (reg.top_generated(min(n_new, len(gen)))
+                   if gen else reg.standings(origin="curated"))
+        parent_tids = [t["tid"] if isinstance(t, dict) else t.tid
+                       for t in parents]
+        if not parent_tids:
+            parent_tids = [t.tid for t in reg.all()]
+        added: List[str] = []
+        rng = _random.Random(self.cfg.seed * 7919 + self._round_idx)
+        for k in range(n_new):
+            parent = reg.get(parent_tids[k % len(parent_tids)])
+            cands: List[List[Dict]] = []
+            for _ in range(int(self.cfg.team_breed_candidates)):
+                try:
+                    new_mons, _op = mutate(
+                        [dict(m) for m in parent.mons], sets, _random.Random(rng.random()))
+                except (RuntimeError, ValueError):
+                    continue
+                cands.append(new_mons)
+            if not cands:
+                # the parent is immovable in this data (no legal mutation);
+                # adopt the parent's line as-is under a fresh tid (legal by
+                # construction — it was already in the pool)
+                best = [dict(m) for m in parent.mons]
+            else:
+                if brain is not None:
+                    order = brain.rank(cands, parent=[dict(m) for m in parent.mons])
+                else:
+                    order = list(range(len(cands)))
+                best = cands[order[0]]
+            tid = new_generated_tid(reg, parent=parent.tid, rnd=self._round_idx)
+            reg.add(tid, best, origin=ORIGIN_GENERATED, parent=parent.tid,
+                    created_round=self._round_idx)
+            added.append(tid)
+        # 4) the pool changed -> replan (next round's matchups follow it)
+        self._plan_teams(len(self._pairings))
+        event = {"round": self._round_idx, "culled": culled, "added": added}
+        self._team_cull_events.append(event)
+        self.log(f"[league] team cull round {self._round_idx}: retired "
+                 f"{culled} -> bred {added} (pool now {len(reg)} teams)")
+
     # ── the final summary (cumulative across rounds) ────────────────────
     def _final_summary(self) -> Dict[str, Any]:
         s: Dict[str, Any] = {
@@ -671,6 +899,12 @@ class LeagueRun:
             "errors": self._total_errors,
             "standings": self.registry.standings(),
         }
+        if self._team_reg is not None:
+            from .teams import ORIGIN_GENERATED
+            s["team_standings"] = self._team_reg.standings()
+            s["team_standings_generated"] = self._team_reg.standings(
+                origin=ORIGIN_GENERATED)
+            s["team_cull_events"] = list(self._team_cull_events)
         if self.cfg.learning:
             s["steps_collected_by_bot"] = dict(self._total_steps)
             s["updates_by_bot"] = {n: self._total_updates.get(n, 0)
@@ -705,4 +939,6 @@ class LeagueRun:
         if self._bots:
             s["steps_collected_by_bot"] = {
                 name: len(b.buffer) for name, b in sorted(self._bots.items())}
+        if self._team_reg is not None:
+            s["team_standings"] = self._team_reg.standings()
         return s

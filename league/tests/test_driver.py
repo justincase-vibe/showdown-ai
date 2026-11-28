@@ -755,3 +755,82 @@ def test_step_loop_cap_disabled():
     n = _step_loop(env, lambda b: None, lambda b: None, max_steps=10,
                    no_progress_limit=0)
     assert n == 10                     # the step cap alone governs
+
+
+# ── the two-clock team seam (teams= per-seat assignment) ──────────────────
+class _FakeAgent:
+    """The poke-env player surface _set_battle_teams uses (update_team)."""
+
+    def __init__(self):
+        self.team = None
+
+    def update_team(self, team):
+        self.team = team
+
+
+class _TeamEnv(_FakeEnv):
+    """A _FakeEnv with the per-agent update_team surface (the league seam)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.agent1 = _FakeAgent()
+        self.agent2 = _FakeAgent()
+
+
+def _two_teams():
+    import json
+    pools = json.loads((ROOT / "bot" / "team_pools.json").read_text(encoding="utf-8"))
+    teams = pools["gen9ou"]["teams"]
+    return [dict(m) for m in teams[0]], [dict(m) for m in teams[1]]
+
+
+def test_teams_assigns_each_seat_exactly():
+    """teams=((p1_mons),(p2_mons)) -> agent1 (p1/battle1) carries p1_mons
+    and agent2 (p2/battle2) carries p2_mons — the deterministic seat->team
+    mapping the team ELO attribution depends on."""
+    t_a, t_b = _two_teams()
+    env = _TeamEnv(turns=2, finish_after=2)
+    a1, a2, n = play_agent_battle_on(
+        "server-cfg", agent_a="AG_A", agent_b="AG_B",
+        decide=lambda agent, battle, fmt, vocabs, greedy: None,
+        env_factory=lambda: env, teams=(t_a, t_b))
+    assert (a1, a2) == (True, False)         # battle1 wins (scripted)
+    sa, sb = env.agent1.team, env.agent2.team
+    assert sa is not None and sb is not None  # BOTH sides got a team
+    # each side carries EXACTLY its own team (species sets differ). The
+    # packed string is toID-normalized ("Ting-Lu" -> "tinglu"), so compare
+    # in the same space (the net/encoder._to_id convention).
+    import re
+    tid = lambda s: re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+    sa_n, sb_n = tid(sa), tid(sb)
+    sp_a = {m["species"] for m in t_a}
+    sp_b = {m["species"] for m in t_b}
+    for sp in sp_a:
+        assert tid(sp) in sa_n, f"p1 team missing {sp}: {sa}"
+    for sp in sp_b:
+        assert tid(sp) in sb_n, f"p2 team missing {sp}: {sb}"
+    assert sp_a != sp_b                       # the two teams are distinct
+
+
+def test_teams_none_keeps_legacy_shared_builder():
+    """teams=None (legacy) -> update_team is NEVER called; both sides keep
+    drawing from the env's shared builder exactly as before."""
+    env = _TeamEnv(turns=2, finish_after=2)
+    play_agent_battle_on(
+        "server-cfg", agent_a="AG_A", agent_b="AG_B",
+        decide=lambda agent, battle, fmt, vocabs, greedy: None,
+        env_factory=lambda: env)              # no teams= -> legacy
+    assert env.agent1.team is None
+    assert env.agent2.team is None
+
+
+def test_teams_mirror_same_team_both_seats():
+    """A mirror matchup (t, t) is legal through the same seam: both seats
+    carry the identical team (the ELO-neutrality is the registry's job)."""
+    t_a, _ = _two_teams()
+    env = _TeamEnv(turns=2, finish_after=2)
+    play_agent_battle_on(
+        "server-cfg", agent_a="AG_A", agent_b="AG_B",
+        decide=lambda agent, battle, fmt, vocabs, greedy: None,
+        env_factory=lambda: env, teams=(t_a, t_a))
+    assert env.agent1.team == env.agent2.team

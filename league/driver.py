@@ -19,7 +19,7 @@ discipline as ``pool.battle``).
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
 #: the decision seam: (agent, battle, fmt, vocabs, greedy) -> action dict | None
 #: (``None`` = pass/wait, no legal action this moment — the loop sends -2).
@@ -398,6 +398,31 @@ def _step_loop(env: Any, decide_a: Callable[[Any], Any],
     return n_steps
 
 
+def _set_battle_teams(env: Any, teams: Tuple[Sequence, Sequence]) -> None:
+    """Deterministic seat assignment for a team-matchup battle.
+
+    ``teams[0]`` goes to p1 (``env.agent1`` / ``battle1``), ``teams[1]`` to p2
+    (``env.agent2`` / ``battle2``), via poke-env's per-agent ``update_team``
+    (a string becomes a ``ConstantTeambuilder`` — idempotent, so the
+    challenge AND the team-sheet read both see the same team). Each player
+    reads its OWN ``_team`` at battle start, so the seat->team mapping is
+    EXACT — not a race on the shared builder's draw order (which is how the
+    legacy ``StrongTeamBuilder`` path assigns teams).
+
+    ``teams`` are mon-dict lists (the team_pools exchange format); legality
+    is by construction (verified set data), the same guarantee the curated
+    pools carry.
+    """
+    from bot.teams import _to_tb
+    from poke_env.teambuilder import Teambuilder
+
+    def pack(mons):
+        return Teambuilder.join_team([_to_tb(m) for m in mons])
+
+    env.agent1.update_team(pack(teams[0]))
+    env.agent2.update_team(pack(teams[1]))
+
+
 def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
                          fmt: str = "gen9ou", seed: int = 0,
                          vocabs: Any = None, max_steps: int = 200,
@@ -409,7 +434,8 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
                          max_decision_errors: Optional[int] = None,
                          capture_a: Optional[Callable[[Any, Any], None]] = None,
                          capture_b: Optional[Callable[[Any, Any], None]] = None,
-                         no_progress_limit: int = 20
+                         no_progress_limit: int = 20,
+                         teams: Optional[Tuple[Sequence, Sequence]] = None
                          ) -> Tuple[bool, bool, int]:
     """Play ONE full battle with ``agent_a`` on p1 and ``agent_b`` on p2.
 
@@ -445,6 +471,12 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
                    turns (no HP change / status / boost / field change) after
                    which the battle ends early as a DRAW (default 20;
                    ``0`` = disabled, the step cap alone governs).
+    :param teams: OPTIONAL per-seat team matchup ``((p1_mons), (p2_mons))``
+                   (mon-dict lists). When given, p1 pilots ``teams[0]`` and
+                   p2 pilots ``teams[1]`` EXACTLY (poke-env ``update_team``,
+                   applied before ``reset``) — the league's two-clock team
+                   schedule. When ``None`` (legacy), both sides draw from the
+                   env's shared team builder as before.
     :return: ``(a1_won, a2_won, n_steps)``.
     """
     import logging
@@ -457,6 +489,11 @@ def play_agent_battle_on(server_cfg: Any, *, agent_a: Any, agent_b: Any,
     guard = (DecisionGuard(max_decision_errors, log)
              if max_decision_errors is not None else None)
     env = make_env()
+    if teams is not None:
+        # per-seat team matchup (the league's two-clock schedule): assign
+        # BEFORE reset, so each side's challenge/team-sheet carries exactly
+        # its own team (deterministic seat->team mapping for ELO attribution).
+        _set_battle_teams(env, teams)
     try:
         _obs, _info = env.reset()
 
