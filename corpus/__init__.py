@@ -28,4 +28,4 @@ happens in S4.1; S4.0 only verifies the pipeline yields valid contexts for both
 sides.
 """
 
-__all__ = ["pull", "trajectories", "report"]
+__all__ = ["pull", "trajectories"]
