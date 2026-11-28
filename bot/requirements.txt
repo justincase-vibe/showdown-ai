@@ -1,1 +1,13 @@
+# Core runtime dependencies for the Showdown AI bot / training loop.
+#
+# NOTE: the GUI launcher (bot/launcher.py) only needs the Python stdlib + tkinter,
+# so it can open even before these are installed. You need all of the below to
+# actually START TRAINING.
 poke-env>=0.16.0
+gymnasium>=0.29
+numpy>=1.24
+# torch: install the build that matches your machine.
+#   GPU (CUDA, most common):   python -m pip install torch --index-url https://download.pytorch.org/whl/cu121
+#   CPU only:                  python -m pip install torch
+# (pip will fetch a compatible version; the line below is just a lower bound)
+torch>=2.0

@@ -14918,6 +14918,128 @@
    ],
    [
     {
+     "species": "Dragapult",
+     "item": "Choice Specs",
+     "ability": "Infiltrator",
+     "moves": [
+      "Draco Meteor",
+      "Hydro Pump",
+      "Shadow Ball",
+      "U-turn"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      0,
+      252,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Garchomp",
+     "item": "Leftovers",
+     "ability": "Rough Skin",
+     "moves": [
+      "Earthquake",
+      "Fire Fang",
+      "Scale Shot",
+      "Swords Dance"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Heatran",
+     "item": "Air Balloon",
+     "ability": "Flame Body",
+     "moves": [
+      "Heavy Slam",
+      "Lava Plume",
+      "Stealth Rock",
+      "Toxic"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      252,
+      0,
+      176,
+      0,
+      52,
+      28
+     ]
+    },
+    {
+     "species": "Tapu Fini",
+     "item": "Leftovers",
+     "ability": "Misty Surge",
+     "moves": [
+      "Moonblast",
+      "Nature's Madness",
+      "Taunt",
+      "Whirlpool"
+     ],
+     "nature": "Calm",
+     "evs": [
+      248,
+      0,
+      16,
+      0,
+      108,
+      136
+     ]
+    },
+    {
+     "species": "Tornadus-Therian",
+     "item": "Heavy-Duty Boots",
+     "ability": "Regenerator",
+     "moves": [
+      "Defog",
+      "Hurricane",
+      "Knock Off",
+      "U-turn"
+     ],
+     "nature": "Timid",
+     "evs": [
+      252,
+      0,
+      88,
+      0,
+      0,
+      168
+     ]
+    },
+    {
+     "species": "Zeraora",
+     "item": "Heavy-Duty Boots",
+     "ability": "Volt Absorb",
+     "moves": [
+      "Bulk Up",
+      "Close Combat",
+      "Knock Off",
+      "Plasma Fists"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      4,
+      252
+     ]
+    }
+   ],
+   [
+    {
      "species": "Mew",
      "item": "Mental Herb",
      "ability": "Synchronize",
@@ -15040,16 +15162,36 @@
    ],
    [
     {
+     "species": "Volcarona",
+     "item": "Heavy-Duty Boots",
+     "ability": "Flame Body",
+     "moves": [
+      "Bug Buzz",
+      "Flamethrower",
+      "Psychic",
+      "Quiver Dance"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      4,
+      252,
+      0,
+      252
+     ]
+    },
+    {
      "species": "Dragapult",
      "item": "Choice Specs",
      "ability": "Infiltrator",
      "moves": [
       "Draco Meteor",
-      "Hydro Pump",
+      "Flamethrower",
       "Shadow Ball",
       "U-turn"
      ],
-     "nature": "Timid",
+     "nature": "Modest",
      "evs": [
       0,
       0,
@@ -15060,94 +15202,74 @@
      ]
     },
     {
-     "species": "Garchomp",
+     "species": "Ferrothorn",
      "item": "Leftovers",
-     "ability": "Rough Skin",
+     "ability": "Iron Barbs",
+     "moves": [
+      "Body Press",
+      "Knock Off",
+      "Leech Seed",
+      "Spikes"
+     ],
+     "nature": "Impish",
+     "evs": [
+      252,
+      0,
+      252,
+      0,
+      4,
+      0
+     ]
+    },
+    {
+     "species": "Landorus-Therian",
+     "item": "Leftovers",
+     "ability": "Intimidate",
      "moves": [
       "Earthquake",
-      "Fire Fang",
-      "Scale Shot",
-      "Swords Dance"
+      "Stealth Rock",
+      "Toxic",
+      "U-turn"
      ],
-     "nature": "Jolly",
+     "nature": "Careful",
      "evs": [
-      0,
       252,
       0,
+      4,
       0,
+      252,
+      0
+     ]
+    },
+    {
+     "species": "Tapu Lele",
+     "item": "Choice Specs",
+     "ability": "Psychic Surge",
+     "moves": [
+      "Focus Blast",
+      "Moonblast",
+      "Psychic",
+      "Psyshock"
+     ],
+     "nature": "Modest",
+     "evs": [
+      0,
+      0,
+      0,
+      252,
       4,
       252
      ]
     },
     {
-     "species": "Heatran",
-     "item": "Air Balloon",
-     "ability": "Flame Body",
-     "moves": [
-      "Heavy Slam",
-      "Lava Plume",
-      "Stealth Rock",
-      "Toxic"
-     ],
-     "nature": "Relaxed",
-     "evs": [
-      252,
-      0,
-      176,
-      0,
-      52,
-      28
-     ]
-    },
-    {
-     "species": "Tapu Fini",
-     "item": "Leftovers",
-     "ability": "Misty Surge",
-     "moves": [
-      "Moonblast",
-      "Nature's Madness",
-      "Taunt",
-      "Whirlpool"
-     ],
-     "nature": "Calm",
-     "evs": [
-      248,
-      0,
-      16,
-      0,
-      108,
-      136
-     ]
-    },
-    {
-     "species": "Tornadus-Therian",
+     "species": "Weavile",
      "item": "Heavy-Duty Boots",
-     "ability": "Regenerator",
+     "ability": "Pressure",
      "moves": [
-      "Defog",
-      "Hurricane",
       "Knock Off",
-      "U-turn"
-     ],
-     "nature": "Timid",
-     "evs": [
-      252,
-      0,
-      88,
-      0,
-      0,
-      168
-     ]
-    },
-    {
-     "species": "Zeraora",
-     "item": "Heavy-Duty Boots",
-     "ability": "Volt Absorb",
-     "moves": [
-      "Bulk Up",
-      "Close Combat",
-      "Knock Off",
-      "Plasma Fists"
+      "Low Kick",
+      "Swords Dance",
+      "Triple Axel"
      ],
      "nature": "Jolly",
      "evs": [
@@ -15406,6 +15528,128 @@
    ],
    [
     {
+     "species": "Ninetales-Alola",
+     "item": "Light Clay",
+     "ability": "Snow Warning",
+     "moves": [
+      "Aurora Veil",
+      "Encore",
+      "Freeze-Dry",
+      "Hypnosis"
+     ],
+     "nature": "Timid",
+     "evs": [
+      248,
+      0,
+      8,
+      0,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Arctozolt",
+     "item": "Heavy-Duty Boots",
+     "ability": "Slush Rush",
+     "moves": [
+      "Blizzard",
+      "Bolt Beak",
+      "Low Kick",
+      "Substitute"
+     ],
+     "nature": "Naive",
+     "evs": [
+      0,
+      224,
+      0,
+      48,
+      0,
+      236
+     ]
+    },
+    {
+     "species": "Dragapult",
+     "item": "Dragon Fang",
+     "ability": "Clear Body",
+     "moves": [
+      "Dragon Dance",
+      "Dragon Darts",
+      "Flamethrower",
+      "Phantom Force"
+     ],
+     "nature": "Naughty",
+     "evs": [
+      112,
+      252,
+      0,
+      12,
+      0,
+      132
+     ]
+    },
+    {
+     "species": "Garchomp",
+     "item": "Leftovers",
+     "ability": "Rough Skin",
+     "moves": [
+      "Earthquake",
+      "Fire Fang",
+      "Scale Shot",
+      "Swords Dance"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Heatran",
+     "item": "Air Balloon",
+     "ability": "Flame Body",
+     "moves": [
+      "Earth Power",
+      "Magma Storm",
+      "Stealth Rock",
+      "Taunt"
+     ],
+     "nature": "Timid",
+     "evs": [
+      184,
+      0,
+      0,
+      96,
+      4,
+      224
+     ]
+    },
+    {
+     "species": "Scizor",
+     "item": "Leftovers",
+     "ability": "Technician",
+     "moves": [
+      "Bullet Punch",
+      "Knock Off",
+      "Roost",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      88,
+      252,
+      4,
+      0,
+      0,
+      164
+     ]
+    }
+   ],
+   [
+    {
      "species": "Tapu Lele",
      "item": "Choice Specs",
      "ability": "Psychic Surge",
@@ -15528,14 +15772,136 @@
    ],
    [
     {
-     "species": "Tapu Koko",
-     "item": "Heavy-Duty Boots",
-     "ability": "Electric Surge",
+     "species": "Chansey",
+     "item": "Eviolite",
+     "ability": "Natural Cure",
+     "moves": [
+      "Aromatherapy",
+      "Seismic Toss",
+      "Soft-Boiled",
+      "Toxic"
+     ],
+     "nature": "Impish",
+     "evs": [
+      248,
+      0,
+      252,
+      0,
+      8,
+      0
+     ]
+    },
+    {
+     "species": "Clefable",
+     "item": "Leftovers",
+     "ability": "Unaware",
      "moves": [
       "Calm Mind",
-      "Dazzling Gleam",
+      "Flamethrower",
+      "Moonblast",
+      "Soft-Boiled"
+     ],
+     "nature": "Bold",
+     "evs": [
+      248,
+      0,
+      252,
+      0,
+      0,
+      8
+     ]
+    },
+    {
+     "species": "Corviknight",
+     "item": "Leftovers",
+     "ability": "Pressure",
+     "moves": [
+      "Body Press",
+      "Brave Bird",
+      "Defog",
+      "Roost"
+     ],
+     "nature": "Impish",
+     "evs": [
+      248,
+      0,
+      252,
+      0,
+      0,
+      8
+     ]
+    },
+    {
+     "species": "Hippowdon",
+     "item": "Leftovers",
+     "ability": "Sand Stream",
+     "moves": [
+      "Earthquake",
+      "Slack Off",
+      "Stealth Rock",
+      "Toxic"
+     ],
+     "nature": "Careful",
+     "evs": [
+      248,
+      8,
+      0,
+      0,
+      240,
+      12
+     ]
+    },
+    {
+     "species": "Toxapex",
+     "item": "Shed Shell",
+     "ability": "Regenerator",
+     "moves": [
+      "Knock Off",
+      "Light Screen",
+      "Recover",
+      "Toxic Spikes"
+     ],
+     "nature": "Bold",
+     "evs": [
+      248,
+      0,
+      252,
+      0,
+      8,
+      0
+     ]
+    },
+    {
+     "species": "Zapdos",
+     "item": "Heavy-Duty Boots",
+     "ability": "Pressure",
+     "moves": [
+      "Defog",
+      "Heat Wave",
       "Roost",
-      "Thunderbolt"
+      "Volt Switch"
+     ],
+     "nature": "Calm",
+     "evs": [
+      252,
+      0,
+      180,
+      0,
+      56,
+      20
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Volcanion",
+     "item": "Choice Specs",
+     "ability": "Water Absorb",
+     "moves": [
+      "Earth Power",
+      "Flamethrower",
+      "Sludge Bomb",
+      "Steam Eruption"
      ],
      "nature": "Timid",
      "evs": [
@@ -15548,94 +15914,34 @@
      ]
     },
     {
-     "species": "Clefable",
-     "item": "Sticky Barb",
-     "ability": "Magic Guard",
+     "species": "Bisharp",
+     "item": "Choice Band",
+     "ability": "Defiant",
      "moves": [
-      "Moonblast",
-      "Soft-Boiled",
-      "Thunder Wave",
-      "Trick"
-     ],
-     "nature": "Calm",
-     "evs": [
-      252,
-      0,
-      120,
-      0,
-      136,
-      0
-     ]
-    },
-    {
-     "species": "Dragonite",
-     "item": "Heavy-Duty Boots",
-     "ability": "Multiscale",
-     "moves": [
-      "Dragon Dance",
-      "Dual Wingbeat",
-      "Earthquake",
-      "Roost"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      184,
-      72,
-      0,
-      0,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Ferrothorn",
-     "item": "Rocky Helmet",
-     "ability": "Iron Barbs",
-     "moves": [
-      "Gyro Ball",
+      "Beat Up",
+      "Iron Head",
       "Knock Off",
-      "Leech Seed",
-      "Spikes"
+      "Sucker Punch"
      ],
-     "nature": "Relaxed",
+     "nature": "Adamant",
      "evs": [
-      248,
-      0,
-      248,
-      0,
-      12,
-      0
-     ]
-    },
-    {
-     "species": "Landorus-Therian",
-     "item": "Leftovers",
-     "ability": "Intimidate",
-     "moves": [
-      "Earthquake",
-      "Stealth Rock",
-      "Toxic",
-      "U-turn"
-     ],
-     "nature": "Relaxed",
-     "evs": [
+      232,
       252,
       0,
-      56,
       0,
-      200,
-      0
+      0,
+      24
      ]
     },
     {
-     "species": "Victini",
-     "item": "Heavy-Duty Boots",
-     "ability": "Victory Star",
+     "species": "Dragapult",
+     "item": "Choice Band",
+     "ability": "Clear Body",
      "moves": [
-      "Bolt Strike",
-      "Encore",
-      "U-turn",
-      "V-create"
+      "Dragon Darts",
+      "Quick Attack",
+      "Steel Wing",
+      "U-turn"
      ],
      "nature": "Jolly",
      "evs": [
@@ -15646,9 +15952,27 @@
       0,
       252
      ]
-    }
-   ],
-   [
+    },
+    {
+     "species": "Ferrothorn",
+     "item": "Leftovers",
+     "ability": "Iron Barbs",
+     "moves": [
+      "Gyro Ball",
+      "Knock Off",
+      "Leech Seed",
+      "Stealth Rock"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      252,
+      0,
+      252,
+      0,
+      4,
+      0
+     ]
+    },
     {
      "species": "Landorus-Therian",
      "item": "Leftovers",
@@ -15670,14 +15994,320 @@
      ]
     },
     {
-     "species": "Clefable",
-     "item": "Rocky Helmet",
-     "ability": "Magic Guard",
+     "species": "Zapdos",
+     "item": "Choice Specs",
+     "ability": "Static",
      "moves": [
+      "Heat Wave",
+      "Hurricane",
+      "Thunderbolt",
+      "Volt Switch"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      4,
+      252,
+      0,
+      252
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Slowbro",
+     "item": "Eject Button",
+     "ability": "Regenerator",
+     "moves": [
+      "Future Sight",
+      "Scald",
+      "Slack Off",
+      "Teleport"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      248,
+      0,
+      76,
+      0,
+      184,
+      0
+     ]
+    },
+    {
+     "species": "Blacephalon",
+     "item": "Choice Specs",
+     "ability": "Beast Boost",
+     "moves": [
+      "Flamethrower",
+      "Overheat",
+      "Shadow Ball",
+      "Trick"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      4,
+      252,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Corviknight",
+     "item": "Rocky Helmet",
+     "ability": "Pressure",
+     "moves": [
+      "Body Press",
+      "Defog",
+      "Roost",
+      "U-turn"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      252,
+      0,
+      252,
+      0,
+      4,
+      0
+     ]
+    },
+    {
+     "species": "Landorus-Therian",
+     "item": "Leftovers",
+     "ability": "Intimidate",
+     "moves": [
+      "Defog",
+      "Earthquake",
+      "Toxic",
+      "U-turn"
+     ],
+     "nature": "Careful",
+     "evs": [
+      252,
+      0,
+      0,
+      0,
+      240,
+      16
+     ]
+    },
+    {
+     "species": "Melmetal",
+     "item": "Leftovers",
+     "ability": "Iron Fist",
+     "moves": [
+      "Double Iron Bash",
+      "Superpower",
+      "Thunder Punch",
+      "Toxic"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      20,
+      252,
+      0,
+      0,
+      192,
+      44
+     ]
+    },
+    {
+     "species": "Weavile",
+     "item": "Choice Band",
+     "ability": "Pickpocket",
+     "moves": [
+      "Beat Up",
+      "Ice Shard",
       "Knock Off",
+      "Triple Axel"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      4,
+      252
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Slowking",
+     "item": "Assault Vest",
+     "ability": "Regenerator",
+     "moves": [
+      "Dragon Tail",
+      "Future Sight",
+      "Scald",
+      "Zap Cannon"
+     ],
+     "nature": "Quiet",
+     "evs": [
+      252,
+      0,
+      0,
+      156,
+      100,
+      0
+     ]
+    },
+    {
+     "species": "Clefable",
+     "item": "Leftovers",
+     "ability": "Unaware",
+     "moves": [
+      "Aromatherapy",
+      "Calm Mind",
       "Moonblast",
-      "Soft-Boiled",
-      "Stealth Rock"
+      "Soft-Boiled"
+     ],
+     "nature": "Bold",
+     "evs": [
+      252,
+      0,
+      252,
+      0,
+      0,
+      4
+     ]
+    },
+    {
+     "species": "Corviknight",
+     "item": "Shed Shell",
+     "ability": "Pressure",
+     "moves": [
+      "Body Press",
+      "Defog",
+      "Iron Defense",
+      "Roost"
+     ],
+     "nature": "Bold",
+     "evs": [
+      248,
+      0,
+      252,
+      0,
+      8,
+      0
+     ]
+    },
+    {
+     "species": "Dragonite",
+     "item": "Heavy-Duty Boots",
+     "ability": "Multiscale",
+     "moves": [
+      "Defog",
+      "Flamethrower",
+      "Roost",
+      "Superpower"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      248,
+      0,
+      116,
+      0,
+      0,
+      144
+     ]
+    },
+    {
+     "species": "Gastrodon-East",
+     "item": "Heavy-Duty Boots",
+     "ability": "Storm Drain",
+     "moves": [
+      "Earthquake",
+      "Recover",
+      "Scald",
+      "Toxic"
+     ],
+     "nature": "Sassy",
+     "evs": [
+      252,
+      0,
+      4,
+      0,
+      252,
+      0
+     ]
+    },
+    {
+     "species": "Toxapex",
+     "item": "Black Sludge",
+     "ability": "Regenerator",
+     "moves": [
+      "Baneful Bunker",
+      "Knock Off",
+      "Light Screen",
+      "Recover"
+     ],
+     "nature": "Sassy",
+     "evs": [
+      248,
+      0,
+      20,
+      0,
+      240,
+      0
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Hippowdon",
+     "item": "Leftovers",
+     "ability": "Sand Stream",
+     "moves": [
+      "Earthquake",
+      "Slack Off",
+      "Stealth Rock",
+      "Toxic"
+     ],
+     "nature": "Careful",
+     "evs": [
+      252,
+      8,
+      0,
+      0,
+      248,
+      0
+     ]
+    },
+    {
+     "species": "Aegislash",
+     "item": "Leftovers",
+     "ability": "Stance Change",
+     "moves": [
+      "Flash Cannon",
+      "King's Shield",
+      "Shadow Ball",
+      "Substitute"
+     ],
+     "nature": "Modest",
+     "evs": [
+      252,
+      0,
+      0,
+      184,
+      56,
+      16
+     ]
+    },
+    {
+     "species": "Clefable",
+     "item": "Leftovers",
+     "ability": "Unaware",
+     "moves": [
+      "Heal Bell",
+      "Moonblast",
+      "Protect",
+      "Wish"
      ],
      "nature": "Bold",
      "evs": [
@@ -15690,83 +16320,63 @@
      ]
     },
     {
-     "species": "Dragapult",
-     "item": "Choice Specs",
-     "ability": "Infiltrator",
-     "moves": [
-      "Draco Meteor",
-      "Hex",
-      "Shadow Ball",
-      "U-turn"
-     ],
-     "nature": "Timid",
-     "evs": [
-      0,
-      0,
-      0,
-      252,
-      4,
-      252
-     ]
-    },
-    {
-     "species": "Heatran",
-     "item": "Air Balloon",
-     "ability": "Flash Fire",
-     "moves": [
-      "Earth Power",
-      "Magma Storm",
-      "Taunt",
-      "Toxic"
-     ],
-     "nature": "Timid",
-     "evs": [
-      0,
-      0,
-      4,
-      252,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Melmetal",
+     "species": "Suicune",
      "item": "Leftovers",
-     "ability": "Iron Fist",
+     "ability": "Pressure",
      "moves": [
-      "Double Iron Bash",
-      "Protect",
-      "Superpower",
-      "Thunder Punch"
+      "Calm Mind",
+      "Rest",
+      "Scald",
+      "Substitute"
      ],
-     "nature": "Adamant",
+     "nature": "Timid",
      "evs": [
-      172,
-      32,
+      252,
+      0,
+      4,
       0,
       0,
-      244,
-      60
+      252
      ]
     },
     {
-     "species": "Zapdos",
+     "species": "Tornadus-Therian",
      "item": "Heavy-Duty Boots",
-     "ability": "Static",
+     "ability": "Regenerator",
      "moves": [
-      "Hurricane",
-      "Roost",
-      "Thunderbolt",
-      "Volt Switch"
+      "Defog",
+      "Heat Wave",
+      "Knock Off",
+      "U-turn"
      ],
      "nature": "Timid",
      "evs": [
       248,
       0,
+      52,
       0,
-      44,
+      36,
+      172
+     ]
+    },
+    {
+     "species": "Toxapex",
+     "item": "Shed Shell",
+     "ability": "Regenerator",
+     "moves": [
+      "Knock Off",
+      "Recover",
+      "Scald",
+      "Toxic Spikes"
+     ],
+     "nature": "Calm",
+     "evs": [
+      252,
       0,
-      216
+      4,
+      0,
+      252,
+      0
      ]
     }
    ],
@@ -15903,67 +16513,27 @@
       "Sludge Bomb",
       "Steam Eruption"
      ],
-     "nature": "Timid",
+     "nature": "Modest",
      "evs": [
       0,
       0,
-      4,
-      252,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Bisharp",
-     "item": "Choice Band",
-     "ability": "Defiant",
-     "moves": [
-      "Beat Up",
-      "Iron Head",
-      "Knock Off",
-      "Sucker Punch"
-     ],
-     "nature": "Adamant",
-     "evs": [
-      232,
-      252,
-      0,
-      0,
-      0,
-      24
-     ]
-    },
-    {
-     "species": "Dragapult",
-     "item": "Choice Band",
-     "ability": "Clear Body",
-     "moves": [
-      "Dragon Darts",
-      "Quick Attack",
-      "Steel Wing",
-      "U-turn"
-     ],
-     "nature": "Jolly",
-     "evs": [
       0,
       252,
       4,
-      0,
-      0,
       252
      ]
     },
     {
      "species": "Ferrothorn",
-     "item": "Leftovers",
+     "item": "Rocky Helmet",
      "ability": "Iron Barbs",
      "moves": [
-      "Gyro Ball",
+      "Body Press",
       "Knock Off",
       "Leech Seed",
       "Stealth Rock"
      ],
-     "nature": "Relaxed",
+     "nature": "Impish",
      "evs": [
       252,
       0,
@@ -15971,6 +16541,26 @@
       0,
       4,
       0
+     ]
+    },
+    {
+     "species": "Heatran",
+     "item": "Air Balloon",
+     "ability": "Flash Fire",
+     "moves": [
+      "Earth Power",
+      "Eruption",
+      "Magma Storm",
+      "Taunt"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      4,
+      252,
+      0,
+      252
      ]
     },
     {
@@ -15987,274 +16577,50 @@
      "evs": [
       252,
       0,
-      4,
       0,
-      252,
-      0
-     ]
-    },
-    {
-     "species": "Zapdos",
-     "item": "Choice Specs",
-     "ability": "Static",
-     "moves": [
-      "Heat Wave",
-      "Hurricane",
-      "Thunderbolt",
-      "Volt Switch"
-     ],
-     "nature": "Timid",
-     "evs": [
-      0,
-      0,
-      4,
-      252,
-      0,
-      252
-     ]
-    }
-   ],
-   [
-    {
-     "species": "Ninetales-Alola",
-     "item": "Icy Rock",
-     "ability": "Snow Warning",
-     "moves": [
-      "Aurora Veil",
-      "Encore",
-      "Freeze-Dry",
-      "Heal Bell"
-     ],
-     "nature": "Timid",
-     "evs": [
-      248,
-      0,
-      0,
-      8,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Arctozolt",
-     "item": "Heavy-Duty Boots",
-     "ability": "Slush Rush",
-     "moves": [
-      "Blizzard",
-      "Bolt Beak",
-      "Freeze-Dry",
-      "Substitute"
-     ],
-     "nature": "Naive",
-     "evs": [
-      0,
-      236,
-      0,
-      48,
-      0,
-      224
-     ]
-    },
-    {
-     "species": "Corviknight",
-     "item": "Rocky Helmet",
-     "ability": "Pressure",
-     "moves": [
-      "Body Press",
-      "Defog",
-      "Roost",
-      "U-turn"
-     ],
-     "nature": "Relaxed",
-     "evs": [
-      252,
-      0,
-      200,
-      0,
-      56,
-      0
-     ]
-    },
-    {
-     "species": "Dragapult",
-     "item": "Choice Specs",
-     "ability": "Infiltrator",
-     "moves": [
-      "Draco Meteor",
-      "Flamethrower",
-      "Shadow Ball",
-      "U-turn"
-     ],
-     "nature": "Modest",
-     "evs": [
-      0,
-      0,
-      0,
-      252,
-      4,
-      252
-     ]
-    },
-    {
-     "species": "Landorus-Therian",
-     "item": "Leftovers",
-     "ability": "Intimidate",
-     "moves": [
-      "Earthquake",
-      "Stealth Rock",
-      "Toxic",
-      "U-turn"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      252,
-      0,
-      0,
-      0,
-      72,
-      184
-     ]
-    },
-    {
-     "species": "Toxapex",
-     "item": "Eject Button",
-     "ability": "Regenerator",
-     "moves": [
-      "Knock Off",
-      "Poison Jab",
-      "Recover",
-      "Toxic Spikes"
-     ],
-     "nature": "Careful",
-     "evs": [
-      248,
-      0,
-      20,
       0,
       240,
-      0
-     ]
-    }
-   ],
-   [
-    {
-     "species": "Hippowdon",
-     "item": "Leftovers",
-     "ability": "Sand Stream",
-     "moves": [
-      "Earthquake",
-      "Slack Off",
-      "Stealth Rock",
-      "Toxic"
-     ],
-     "nature": "Careful",
-     "evs": [
-      252,
-      8,
-      0,
-      0,
-      248,
-      0
-     ]
-    },
-    {
-     "species": "Aegislash",
-     "item": "Leftovers",
-     "ability": "Stance Change",
-     "moves": [
-      "Flash Cannon",
-      "King's Shield",
-      "Shadow Ball",
-      "Substitute"
-     ],
-     "nature": "Modest",
-     "evs": [
-      252,
-      0,
-      0,
-      184,
-      56,
       16
      ]
     },
     {
-     "species": "Clefable",
-     "item": "Leftovers",
-     "ability": "Unaware",
-     "moves": [
-      "Heal Bell",
-      "Moonblast",
-      "Protect",
-      "Wish"
-     ],
-     "nature": "Bold",
-     "evs": [
-      252,
-      0,
-      252,
-      0,
-      4,
-      0
-     ]
-    },
-    {
-     "species": "Suicune",
-     "item": "Leftovers",
-     "ability": "Pressure",
-     "moves": [
-      "Calm Mind",
-      "Rest",
-      "Scald",
-      "Substitute"
-     ],
-     "nature": "Timid",
-     "evs": [
-      252,
-      0,
-      4,
-      0,
-      0,
-      252
-     ]
-    },
-    {
      "species": "Tornadus-Therian",
-     "item": "Heavy-Duty Boots",
+     "item": "Assault Vest",
      "ability": "Regenerator",
      "moves": [
-      "Defog",
       "Heat Wave",
+      "Hurricane",
       "Knock Off",
       "U-turn"
      ],
      "nature": "Timid",
      "evs": [
-      248,
+      252,
       0,
-      52,
+      88,
       0,
-      36,
-      172
+      0,
+      168
      ]
     },
     {
-     "species": "Toxapex",
-     "item": "Shed Shell",
-     "ability": "Regenerator",
+     "species": "Weavile",
+     "item": "Heavy-Duty Boots",
+     "ability": "Pressure",
      "moves": [
+      "Ice Shard",
       "Knock Off",
-      "Recover",
-      "Scald",
-      "Toxic Spikes"
+      "Swords Dance",
+      "Triple Axel"
      ],
-     "nature": "Calm",
+     "nature": "Jolly",
      "evs": [
+      0,
       252,
+      0,
       0,
       4,
-      0,
-      252,
-      0
+      252
      ]
     }
    ],
@@ -16382,32 +16748,12 @@
    ],
    [
     {
-     "species": "Tornadus-Therian",
-     "item": "Heavy-Duty Boots",
-     "ability": "Regenerator",
+     "species": "Clefable",
+     "item": "Rocky Helmet",
+     "ability": "Magic Guard",
      "moves": [
-      "Focus Blast",
-      "Hurricane",
-      "Nasty Plot",
-      "Taunt"
-     ],
-     "nature": "Timid",
-     "evs": [
-      252,
-      0,
-      0,
-      88,
-      0,
-      168
-     ]
-    },
-    {
-     "species": "Blissey",
-     "item": "Heavy-Duty Boots",
-     "ability": "Natural Cure",
-     "moves": [
-      "Heal Bell",
-      "Seismic Toss",
+      "Aromatherapy",
+      "Moonblast",
       "Soft-Boiled",
       "Stealth Rock"
      ],
@@ -16415,578 +16761,110 @@
      "evs": [
       252,
       0,
-      252,
-      0,
-      4,
-      0
-     ]
-    },
-    {
-     "species": "Clefable",
-     "item": "Leftovers",
-     "ability": "Unaware",
-     "moves": [
-      "Calm Mind",
-      "Flamethrower",
-      "Moonblast",
-      "Soft-Boiled"
-     ],
-     "nature": "Bold",
-     "evs": [
-      252,
-      0,
-      196,
+      200,
       0,
       56,
-      4
-     ]
-    },
-    {
-     "species": "Corviknight",
-     "item": "Shed Shell",
-     "ability": "Pressure",
-     "moves": [
-      "Body Press",
-      "Defog",
-      "Iron Defense",
-      "Roost"
-     ],
-     "nature": "Relaxed",
-     "evs": [
-      252,
-      0,
-      252,
-      0,
-      4,
       0
      ]
     },
     {
      "species": "Gastrodon-East",
-     "item": "Heavy-Duty Boots",
-     "ability": "Sticky Hold",
+     "item": "Leftovers",
+     "ability": "Storm Drain",
      "moves": [
-      "Earthquake",
+      "Earth Power",
       "Recover",
       "Scald",
       "Toxic"
-     ],
-     "nature": "Sassy",
-     "evs": [
-      252,
-      0,
-      76,
-      0,
-      180,
-      0
-     ]
-    },
-    {
-     "species": "Toxapex",
-     "item": "Shed Shell",
-     "ability": "Regenerator",
-     "moves": [
-      "Knock Off",
-      "Light Screen",
-      "Recover",
-      "Toxic"
-     ],
-     "nature": "Bold",
-     "evs": [
-      248,
-      0,
-      252,
-      0,
-      8,
-      0
-     ]
-    }
-   ],
-   [
-    {
-     "species": "Chansey",
-     "item": "Eviolite",
-     "ability": "Natural Cure",
-     "moves": [
-      "Aromatherapy",
-      "Seismic Toss",
-      "Soft-Boiled",
-      "Toxic"
-     ],
-     "nature": "Impish",
-     "evs": [
-      248,
-      0,
-      252,
-      0,
-      8,
-      0
-     ]
-    },
-    {
-     "species": "Clefable",
-     "item": "Leftovers",
-     "ability": "Unaware",
-     "moves": [
-      "Calm Mind",
-      "Flamethrower",
-      "Moonblast",
-      "Soft-Boiled"
-     ],
-     "nature": "Bold",
-     "evs": [
-      248,
-      0,
-      252,
-      0,
-      0,
-      8
-     ]
-    },
-    {
-     "species": "Corviknight",
-     "item": "Leftovers",
-     "ability": "Pressure",
-     "moves": [
-      "Body Press",
-      "Brave Bird",
-      "Defog",
-      "Roost"
-     ],
-     "nature": "Impish",
-     "evs": [
-      248,
-      0,
-      252,
-      0,
-      0,
-      8
-     ]
-    },
-    {
-     "species": "Hippowdon",
-     "item": "Leftovers",
-     "ability": "Sand Stream",
-     "moves": [
-      "Earthquake",
-      "Slack Off",
-      "Stealth Rock",
-      "Toxic"
-     ],
-     "nature": "Careful",
-     "evs": [
-      248,
-      8,
-      0,
-      0,
-      240,
-      12
-     ]
-    },
-    {
-     "species": "Toxapex",
-     "item": "Shed Shell",
-     "ability": "Regenerator",
-     "moves": [
-      "Knock Off",
-      "Light Screen",
-      "Recover",
-      "Toxic Spikes"
-     ],
-     "nature": "Bold",
-     "evs": [
-      248,
-      0,
-      252,
-      0,
-      8,
-      0
-     ]
-    },
-    {
-     "species": "Zapdos",
-     "item": "Heavy-Duty Boots",
-     "ability": "Pressure",
-     "moves": [
-      "Defog",
-      "Heat Wave",
-      "Roost",
-      "Volt Switch"
      ],
      "nature": "Calm",
      "evs": [
       252,
       0,
-      180,
+      64,
       0,
-      56,
-      20
-     ]
-    }
-   ],
-   [
-    {
-     "species": "Landorus-Therian",
-     "item": "Leftovers",
-     "ability": "Intimidate",
-     "moves": [
-      "Earthquake",
-      "Knock Off",
-      "Stealth Rock",
-      "Stone Edge"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      0,
-      252,
-      0,
-      0,
-      4,
-      252
-     ]
-    },
-    {
-     "species": "Ferrothorn",
-     "item": "Leftovers",
-     "ability": "Iron Barbs",
-     "moves": [
-      "Gyro Ball",
-      "Knock Off",
-      "Leech Seed",
-      "Spikes"
-     ],
-     "nature": "Relaxed",
-     "evs": [
-      252,
-      0,
-      224,
-      0,
-      32,
+      192,
       0
      ]
     },
     {
-     "species": "Mandibuzz",
+     "species": "Heatran",
+     "item": "Leftovers",
+     "ability": "Flash Fire",
+     "moves": [
+      "Earth Power",
+      "Magma Storm",
+      "Nature Power",
+      "Taunt"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      4,
+      252,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Melmetal",
+     "item": "Leftovers",
+     "ability": "Iron Fist",
+     "moves": [
+      "Double Iron Bash",
+      "Protect",
+      "Superpower",
+      "Thunder Punch"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      204,
+      52
+     ]
+    },
+    {
+     "species": "Rillaboom",
+     "item": "Leftovers",
+     "ability": "Grassy Surge",
+     "moves": [
+      "Grassy Glide",
+      "Knock Off",
+      "Superpower",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      248,
+      252,
+      0,
+      0,
+      8,
+      0
+     ]
+    },
+    {
+     "species": "Tornadus-Therian",
      "item": "Heavy-Duty Boots",
-     "ability": "Overcoat",
+     "ability": "Regenerator",
      "moves": [
       "Defog",
-      "Foul Play",
-      "Roost",
+      "Hurricane",
+      "Knock Off",
       "U-turn"
      ],
-     "nature": "Impish",
+     "nature": "Timid",
      "evs": [
       248,
       0,
       92,
       0,
-      168,
-      0
-     ]
-    },
-    {
-     "species": "Slowking-Galar",
-     "item": "Assault Vest",
-     "ability": "Regenerator",
-     "moves": [
-      "Flamethrower",
-      "Future Sight",
-      "Scald",
-      "Sludge Bomb"
-     ],
-     "nature": "Modest",
-     "evs": [
-      248,
       0,
-      0,
-      252,
-      0,
-      8
-     ]
-    },
-    {
-     "species": "Tapu Koko",
-     "item": "Choice Specs",
-     "ability": "Electric Surge",
-     "moves": [
-      "Dazzling Gleam",
-      "Grass Knot",
-      "Thunderbolt",
-      "Volt Switch"
-     ],
-     "nature": "Timid",
-     "evs": [
-      0,
-      0,
-      0,
-      252,
-      4,
-      252
-     ]
-    },
-    {
-     "species": "Urshifu-Rapid-Strike",
-     "item": "Choice Band",
-     "ability": "Unseen Fist",
-     "moves": [
-      "Aqua Jet",
-      "Close Combat",
-      "Surging Strikes",
-      "U-turn"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      0,
-      252,
-      0,
-      0,
-      4,
-      252
-     ]
-    }
-   ],
-   [
-    {
-     "species": "Ninetales-Alola",
-     "item": "Light Clay",
-     "ability": "Snow Warning",
-     "moves": [
-      "Aurora Veil",
-      "Encore",
-      "Freeze-Dry",
-      "Hypnosis"
-     ],
-     "nature": "Timid",
-     "evs": [
-      248,
-      0,
-      8,
-      0,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Arctozolt",
-     "item": "Heavy-Duty Boots",
-     "ability": "Slush Rush",
-     "moves": [
-      "Blizzard",
-      "Bolt Beak",
-      "Low Kick",
-      "Substitute"
-     ],
-     "nature": "Naive",
-     "evs": [
-      0,
-      224,
-      0,
-      48,
-      0,
-      236
-     ]
-    },
-    {
-     "species": "Dragapult",
-     "item": "Dragon Fang",
-     "ability": "Clear Body",
-     "moves": [
-      "Dragon Dance",
-      "Dragon Darts",
-      "Flamethrower",
-      "Phantom Force"
-     ],
-     "nature": "Naughty",
-     "evs": [
-      112,
-      252,
-      0,
-      12,
-      0,
-      132
-     ]
-    },
-    {
-     "species": "Garchomp",
-     "item": "Leftovers",
-     "ability": "Rough Skin",
-     "moves": [
-      "Earthquake",
-      "Fire Fang",
-      "Scale Shot",
-      "Swords Dance"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      0,
-      252,
-      0,
-      0,
-      4,
-      252
-     ]
-    },
-    {
-     "species": "Heatran",
-     "item": "Air Balloon",
-     "ability": "Flame Body",
-     "moves": [
-      "Earth Power",
-      "Magma Storm",
-      "Stealth Rock",
-      "Taunt"
-     ],
-     "nature": "Timid",
-     "evs": [
-      184,
-      0,
-      0,
-      96,
-      4,
-      224
-     ]
-    },
-    {
-     "species": "Scizor",
-     "item": "Leftovers",
-     "ability": "Technician",
-     "moves": [
-      "Bullet Punch",
-      "Knock Off",
-      "Roost",
-      "Swords Dance"
-     ],
-     "nature": "Adamant",
-     "evs": [
-      88,
-      252,
-      4,
-      0,
-      0,
-      164
-     ]
-    }
-   ],
-   [
-    {
-     "species": "Zapdos",
-     "item": "Heavy-Duty Boots",
-     "ability": "Pressure",
-     "moves": [
-      "Defog",
-      "Heat Wave",
-      "Roost",
-      "Thunderbolt"
-     ],
-     "nature": "Bold",
-     "evs": [
-      248,
-      0,
-      228,
-      0,
-      0,
-      32
-     ]
-    },
-    {
-     "species": "Blissey",
-     "item": "Heavy-Duty Boots",
-     "ability": "Natural Cure",
-     "moves": [
-      "Seismic Toss",
-      "Soft-Boiled",
-      "Stealth Rock",
-      "Toxic"
-     ],
-     "nature": "Bold",
-     "evs": [
-      252,
-      0,
-      252,
-      0,
-      4,
-      0
-     ]
-    },
-    {
-     "species": "Clefable",
-     "item": "Leftovers",
-     "ability": "Unaware",
-     "moves": [
-      "Calm Mind",
-      "Heal Bell",
-      "Moonblast",
-      "Soft-Boiled"
-     ],
-     "nature": "Bold",
-     "evs": [
-      252,
-      0,
-      248,
-      8,
-      0,
-      0
-     ]
-    },
-    {
-     "species": "Corviknight",
-     "item": "Leftovers",
-     "ability": "Pressure",
-     "moves": [
-      "Body Press",
-      "Defog",
-      "Iron Defense",
-      "Roost"
-     ],
-     "nature": "Bold",
-     "evs": [
-      252,
-      0,
-      176,
-      0,
-      80,
-      0
-     ]
-    },
-    {
-     "species": "Gastrodon",
-     "item": "Leftovers",
-     "ability": "Sticky Hold",
-     "moves": [
-      "Earthquake",
-      "Protect",
-      "Recover",
-      "Scald"
-     ],
-     "nature": "Sassy",
-     "evs": [
-      252,
-      0,
-      76,
-      0,
-      180,
-      0
-     ]
-    },
-    {
-     "species": "Toxapex",
-     "item": "Shed Shell",
-     "ability": "Regenerator",
-     "moves": [
-      "Knock Off",
-      "Light Screen",
-      "Recover",
-      "Toxic"
-     ],
-     "nature": "Impish",
-     "evs": [
-      248,
-      8,
-      252,
-      0,
-      0,
-      0
+      168
      ]
     }
    ],
@@ -17108,6 +16986,128 @@
       160,
       0,
       100,
+      0
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Ninetales-Alola",
+     "item": "Icy Rock",
+     "ability": "Snow Warning",
+     "moves": [
+      "Aurora Veil",
+      "Encore",
+      "Freeze-Dry",
+      "Heal Bell"
+     ],
+     "nature": "Timid",
+     "evs": [
+      248,
+      0,
+      0,
+      8,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Arctozolt",
+     "item": "Heavy-Duty Boots",
+     "ability": "Slush Rush",
+     "moves": [
+      "Blizzard",
+      "Bolt Beak",
+      "Freeze-Dry",
+      "Substitute"
+     ],
+     "nature": "Naive",
+     "evs": [
+      0,
+      236,
+      0,
+      48,
+      0,
+      224
+     ]
+    },
+    {
+     "species": "Corviknight",
+     "item": "Rocky Helmet",
+     "ability": "Pressure",
+     "moves": [
+      "Body Press",
+      "Defog",
+      "Roost",
+      "U-turn"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      252,
+      0,
+      200,
+      0,
+      56,
+      0
+     ]
+    },
+    {
+     "species": "Dragapult",
+     "item": "Choice Specs",
+     "ability": "Infiltrator",
+     "moves": [
+      "Draco Meteor",
+      "Flamethrower",
+      "Shadow Ball",
+      "U-turn"
+     ],
+     "nature": "Modest",
+     "evs": [
+      0,
+      0,
+      0,
+      252,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Landorus-Therian",
+     "item": "Leftovers",
+     "ability": "Intimidate",
+     "moves": [
+      "Earthquake",
+      "Stealth Rock",
+      "Toxic",
+      "U-turn"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      252,
+      0,
+      0,
+      0,
+      72,
+      184
+     ]
+    },
+    {
+     "species": "Toxapex",
+     "item": "Eject Button",
+     "ability": "Regenerator",
+     "moves": [
+      "Knock Off",
+      "Poison Jab",
+      "Recover",
+      "Toxic Spikes"
+     ],
+     "nature": "Careful",
+     "evs": [
+      248,
+      0,
+      20,
+      0,
+      240,
       0
      ]
     }
@@ -17236,11 +17236,519 @@
    ],
    [
     {
+     "species": "Torkoal",
+     "item": "Heat Rock",
+     "ability": "Drought",
+     "moves": [
+      "Body Press",
+      "Lava Plume",
+      "Rapid Spin",
+      "Stealth Rock"
+     ],
+     "nature": "Bold",
+     "evs": [
+      248,
+      0,
+      252,
+      0,
+      8,
+      0
+     ]
+    },
+    {
+     "species": "Blacephalon",
+     "item": "Choice Specs",
+     "ability": "Beast Boost",
+     "moves": [
+      "Flamethrower",
+      "Mind Blown",
+      "Shadow Ball",
+      "Trick"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      0,
+      252,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Heatran",
+     "item": "Choice Scarf",
+     "ability": "Flash Fire",
+     "moves": [
+      "Dragon Pulse",
+      "Earth Power",
+      "Flamethrower",
+      "Flash Cannon"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      0,
+      252,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Landorus-Therian",
+     "item": "Leftovers",
+     "ability": "Intimidate",
+     "moves": [
+      "Defog",
+      "Earthquake",
+      "Toxic",
+      "U-turn"
+     ],
+     "nature": "Careful",
+     "evs": [
+      252,
+      0,
+      0,
+      0,
+      240,
+      16
+     ]
+    },
+    {
+     "species": "Venusaur",
+     "item": "Life Orb",
+     "ability": "Chlorophyll",
+     "moves": [
+      "Earth Power",
+      "Giga Drain",
+      "Growth",
+      "Weather Ball"
+     ],
+     "nature": "Modest",
+     "evs": [
+      0,
+      0,
+      0,
+      252,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Weavile",
+     "item": "Heavy-Duty Boots",
+     "ability": "Pickpocket",
+     "moves": [
+      "Ice Shard",
+      "Knock Off",
+      "Swords Dance",
+      "Triple Axel"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      4,
+      252
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Landorus-Therian",
+     "item": "Leftovers",
+     "ability": "Intimidate",
+     "moves": [
+      "Earthquake",
+      "Knock Off",
+      "Stealth Rock",
+      "Stone Edge"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Ferrothorn",
+     "item": "Leftovers",
+     "ability": "Iron Barbs",
+     "moves": [
+      "Gyro Ball",
+      "Knock Off",
+      "Leech Seed",
+      "Spikes"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      252,
+      0,
+      224,
+      0,
+      32,
+      0
+     ]
+    },
+    {
+     "species": "Mandibuzz",
+     "item": "Heavy-Duty Boots",
+     "ability": "Overcoat",
+     "moves": [
+      "Defog",
+      "Foul Play",
+      "Roost",
+      "U-turn"
+     ],
+     "nature": "Impish",
+     "evs": [
+      248,
+      0,
+      92,
+      0,
+      168,
+      0
+     ]
+    },
+    {
+     "species": "Slowking-Galar",
+     "item": "Assault Vest",
+     "ability": "Regenerator",
+     "moves": [
+      "Flamethrower",
+      "Future Sight",
+      "Scald",
+      "Sludge Bomb"
+     ],
+     "nature": "Modest",
+     "evs": [
+      248,
+      0,
+      0,
+      252,
+      0,
+      8
+     ]
+    },
+    {
+     "species": "Tapu Koko",
+     "item": "Choice Specs",
+     "ability": "Electric Surge",
+     "moves": [
+      "Dazzling Gleam",
+      "Grass Knot",
+      "Thunderbolt",
+      "Volt Switch"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      0,
+      252,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Urshifu-Rapid-Strike",
+     "item": "Choice Band",
+     "ability": "Unseen Fist",
+     "moves": [
+      "Aqua Jet",
+      "Close Combat",
+      "Surging Strikes",
+      "U-turn"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      4,
+      252
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Zapdos",
+     "item": "Heavy-Duty Boots",
+     "ability": "Pressure",
+     "moves": [
+      "Defog",
+      "Heat Wave",
+      "Roost",
+      "Thunderbolt"
+     ],
+     "nature": "Bold",
+     "evs": [
+      248,
+      0,
+      228,
+      0,
+      0,
+      32
+     ]
+    },
+    {
+     "species": "Blissey",
+     "item": "Heavy-Duty Boots",
+     "ability": "Natural Cure",
+     "moves": [
+      "Seismic Toss",
+      "Soft-Boiled",
+      "Stealth Rock",
+      "Toxic"
+     ],
+     "nature": "Bold",
+     "evs": [
+      252,
+      0,
+      252,
+      0,
+      4,
+      0
+     ]
+    },
+    {
+     "species": "Clefable",
+     "item": "Leftovers",
+     "ability": "Unaware",
+     "moves": [
+      "Calm Mind",
+      "Heal Bell",
+      "Moonblast",
+      "Soft-Boiled"
+     ],
+     "nature": "Bold",
+     "evs": [
+      252,
+      0,
+      248,
+      8,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Corviknight",
+     "item": "Leftovers",
+     "ability": "Pressure",
+     "moves": [
+      "Body Press",
+      "Defog",
+      "Iron Defense",
+      "Roost"
+     ],
+     "nature": "Bold",
+     "evs": [
+      252,
+      0,
+      176,
+      0,
+      80,
+      0
+     ]
+    },
+    {
+     "species": "Gastrodon",
+     "item": "Leftovers",
+     "ability": "Sticky Hold",
+     "moves": [
+      "Earthquake",
+      "Protect",
+      "Recover",
+      "Scald"
+     ],
+     "nature": "Sassy",
+     "evs": [
+      252,
+      0,
+      76,
+      0,
+      180,
+      0
+     ]
+    },
+    {
+     "species": "Toxapex",
+     "item": "Shed Shell",
+     "ability": "Regenerator",
+     "moves": [
+      "Knock Off",
+      "Light Screen",
+      "Recover",
+      "Toxic"
+     ],
+     "nature": "Impish",
+     "evs": [
+      248,
+      8,
+      252,
+      0,
+      0,
+      0
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Tornadus-Therian",
+     "item": "Heavy-Duty Boots",
+     "ability": "Regenerator",
+     "moves": [
+      "Focus Blast",
+      "Hurricane",
+      "Nasty Plot",
+      "Taunt"
+     ],
+     "nature": "Timid",
+     "evs": [
+      252,
+      0,
+      0,
+      88,
+      0,
+      168
+     ]
+    },
+    {
+     "species": "Blissey",
+     "item": "Heavy-Duty Boots",
+     "ability": "Natural Cure",
+     "moves": [
+      "Heal Bell",
+      "Seismic Toss",
+      "Soft-Boiled",
+      "Stealth Rock"
+     ],
+     "nature": "Bold",
+     "evs": [
+      252,
+      0,
+      252,
+      0,
+      4,
+      0
+     ]
+    },
+    {
+     "species": "Clefable",
+     "item": "Leftovers",
+     "ability": "Unaware",
+     "moves": [
+      "Calm Mind",
+      "Flamethrower",
+      "Moonblast",
+      "Soft-Boiled"
+     ],
+     "nature": "Bold",
+     "evs": [
+      252,
+      0,
+      196,
+      0,
+      56,
+      4
+     ]
+    },
+    {
+     "species": "Corviknight",
+     "item": "Shed Shell",
+     "ability": "Pressure",
+     "moves": [
+      "Body Press",
+      "Defog",
+      "Iron Defense",
+      "Roost"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      252,
+      0,
+      252,
+      0,
+      4,
+      0
+     ]
+    },
+    {
+     "species": "Gastrodon-East",
+     "item": "Heavy-Duty Boots",
+     "ability": "Sticky Hold",
+     "moves": [
+      "Earthquake",
+      "Recover",
+      "Scald",
+      "Toxic"
+     ],
+     "nature": "Sassy",
+     "evs": [
+      252,
+      0,
+      76,
+      0,
+      180,
+      0
+     ]
+    },
+    {
+     "species": "Toxapex",
+     "item": "Shed Shell",
+     "ability": "Regenerator",
+     "moves": [
+      "Knock Off",
+      "Light Screen",
+      "Recover",
+      "Toxic"
+     ],
+     "nature": "Bold",
+     "evs": [
+      248,
+      0,
+      252,
+      0,
+      8,
+      0
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Landorus-Therian",
+     "item": "Leftovers",
+     "ability": "Intimidate",
+     "moves": [
+      "Defog",
+      "Earthquake",
+      "Toxic",
+      "U-turn"
+     ],
+     "nature": "Careful",
+     "evs": [
+      252,
+      0,
+      4,
+      0,
+      252,
+      0
+     ]
+    },
+    {
      "species": "Clefable",
      "item": "Rocky Helmet",
      "ability": "Magic Guard",
      "moves": [
-      "Aromatherapy",
+      "Knock Off",
       "Moonblast",
       "Soft-Boiled",
       "Stealth Rock"
@@ -17249,41 +17757,41 @@
      "evs": [
       252,
       0,
-      200,
+      252,
       0,
-      56,
+      4,
       0
      ]
     },
     {
-     "species": "Gastrodon-East",
-     "item": "Leftovers",
-     "ability": "Storm Drain",
+     "species": "Dragapult",
+     "item": "Choice Specs",
+     "ability": "Infiltrator",
      "moves": [
-      "Earth Power",
-      "Recover",
-      "Scald",
-      "Toxic"
+      "Draco Meteor",
+      "Hex",
+      "Shadow Ball",
+      "U-turn"
      ],
-     "nature": "Calm",
+     "nature": "Timid",
      "evs": [
+      0,
+      0,
+      0,
       252,
-      0,
-      64,
-      0,
-      192,
-      0
+      4,
+      252
      ]
     },
     {
      "species": "Heatran",
-     "item": "Leftovers",
+     "item": "Air Balloon",
      "ability": "Flash Fire",
      "moves": [
       "Earth Power",
       "Magma Storm",
-      "Nature Power",
-      "Taunt"
+      "Taunt",
+      "Toxic"
      ],
      "nature": "Timid",
      "evs": [
@@ -17307,52 +17815,154 @@
      ],
      "nature": "Adamant",
      "evs": [
+      172,
+      32,
       0,
-      252,
       0,
-      0,
-      204,
-      52
+      244,
+      60
      ]
     },
     {
-     "species": "Rillaboom",
-     "item": "Leftovers",
-     "ability": "Grassy Surge",
-     "moves": [
-      "Grassy Glide",
-      "Knock Off",
-      "Superpower",
-      "Swords Dance"
-     ],
-     "nature": "Adamant",
-     "evs": [
-      248,
-      252,
-      0,
-      0,
-      8,
-      0
-     ]
-    },
-    {
-     "species": "Tornadus-Therian",
+     "species": "Zapdos",
      "item": "Heavy-Duty Boots",
-     "ability": "Regenerator",
+     "ability": "Static",
      "moves": [
-      "Defog",
       "Hurricane",
-      "Knock Off",
-      "U-turn"
+      "Roost",
+      "Thunderbolt",
+      "Volt Switch"
      ],
      "nature": "Timid",
      "evs": [
       248,
       0,
-      92,
+      0,
+      44,
+      0,
+      216
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Tapu Koko",
+     "item": "Heavy-Duty Boots",
+     "ability": "Electric Surge",
+     "moves": [
+      "Calm Mind",
+      "Dazzling Gleam",
+      "Roost",
+      "Thunderbolt"
+     ],
+     "nature": "Timid",
+     "evs": [
       0,
       0,
-      168
+      4,
+      252,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Clefable",
+     "item": "Sticky Barb",
+     "ability": "Magic Guard",
+     "moves": [
+      "Moonblast",
+      "Soft-Boiled",
+      "Thunder Wave",
+      "Trick"
+     ],
+     "nature": "Calm",
+     "evs": [
+      252,
+      0,
+      120,
+      0,
+      136,
+      0
+     ]
+    },
+    {
+     "species": "Dragonite",
+     "item": "Heavy-Duty Boots",
+     "ability": "Multiscale",
+     "moves": [
+      "Dragon Dance",
+      "Dual Wingbeat",
+      "Earthquake",
+      "Roost"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      184,
+      72,
+      0,
+      0,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Ferrothorn",
+     "item": "Rocky Helmet",
+     "ability": "Iron Barbs",
+     "moves": [
+      "Gyro Ball",
+      "Knock Off",
+      "Leech Seed",
+      "Spikes"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      248,
+      0,
+      248,
+      0,
+      12,
+      0
+     ]
+    },
+    {
+     "species": "Landorus-Therian",
+     "item": "Leftovers",
+     "ability": "Intimidate",
+     "moves": [
+      "Earthquake",
+      "Stealth Rock",
+      "Toxic",
+      "U-turn"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      252,
+      0,
+      56,
+      0,
+      200,
+      0
+     ]
+    },
+    {
+     "species": "Victini",
+     "item": "Heavy-Duty Boots",
+     "ability": "Victory Star",
+     "moves": [
+      "Bolt Strike",
+      "Encore",
+      "U-turn",
+      "V-create"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      252,
+      4,
+      0,
+      0,
+      252
      ]
     }
    ]
@@ -17479,126 +18089,6 @@
     ]
    },
    {
-    "species": "Mew",
-    "item": "Mental Herb",
-    "ability": "Synchronize",
-    "moves": [
-     "Spikes",
-     "Stealth Rock",
-     "Taunt",
-     "Thunder Wave"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     252,
-     4,
-     0,
-     0,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Blacephalon",
-    "item": "Choice Scarf",
-    "ability": "Beast Boost",
-    "moves": [
-     "Flamethrower",
-     "Shadow Ball",
-     "Taunt",
-     "Trick"
-    ],
-    "nature": "Modest",
-    "evs": [
-     0,
-     0,
-     0,
-     252,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Celesteela",
-    "item": "Power Herb",
-    "ability": "Beast Boost",
-    "moves": [
-     "Air Slash",
-     "Autotomize",
-     "Flamethrower",
-     "Meteor Beam"
-    ],
-    "nature": "Modest",
-    "evs": [
-     4,
-     0,
-     0,
-     252,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Crawdaunt",
-    "item": "Life Orb",
-    "ability": "Adaptability",
-    "moves": [
-     "Aqua Jet",
-     "Crabhammer",
-     "Knock Off",
-     "Swords Dance"
-    ],
-    "nature": "Adamant",
-    "evs": [
-     0,
-     252,
-     0,
-     0,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Garchomp",
-    "item": "Roseli Berry",
-    "ability": "Rough Skin",
-    "moves": [
-     "Earthquake",
-     "Fire Fang",
-     "Scale Shot",
-     "Swords Dance"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     0,
-     252,
-     0,
-     0,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Weavile",
-    "item": "Life Orb",
-    "ability": "Pressure",
-    "moves": [
-     "Ice Shard",
-     "Knock Off",
-     "Swords Dance",
-     "Triple Axel"
-    ],
-    "nature": "Adamant",
-    "evs": [
-     0,
-     252,
-     0,
-     0,
-     4,
-     252
-    ]
-   },
-   {
     "species": "Dragapult",
     "item": "Choice Specs",
     "ability": "Infiltrator",
@@ -17719,6 +18209,146 @@
     ]
    },
    {
+    "species": "Mew",
+    "item": "Mental Herb",
+    "ability": "Synchronize",
+    "moves": [
+     "Spikes",
+     "Stealth Rock",
+     "Taunt",
+     "Thunder Wave"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     252,
+     4,
+     0,
+     0,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Blacephalon",
+    "item": "Choice Scarf",
+    "ability": "Beast Boost",
+    "moves": [
+     "Flamethrower",
+     "Shadow Ball",
+     "Taunt",
+     "Trick"
+    ],
+    "nature": "Modest",
+    "evs": [
+     0,
+     0,
+     0,
+     252,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Celesteela",
+    "item": "Power Herb",
+    "ability": "Beast Boost",
+    "moves": [
+     "Air Slash",
+     "Autotomize",
+     "Flamethrower",
+     "Meteor Beam"
+    ],
+    "nature": "Modest",
+    "evs": [
+     4,
+     0,
+     0,
+     252,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Crawdaunt",
+    "item": "Life Orb",
+    "ability": "Adaptability",
+    "moves": [
+     "Aqua Jet",
+     "Crabhammer",
+     "Knock Off",
+     "Swords Dance"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Garchomp",
+    "item": "Roseli Berry",
+    "ability": "Rough Skin",
+    "moves": [
+     "Earthquake",
+     "Fire Fang",
+     "Scale Shot",
+     "Swords Dance"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Weavile",
+    "item": "Life Orb",
+    "ability": "Pressure",
+    "moves": [
+     "Ice Shard",
+     "Knock Off",
+     "Swords Dance",
+     "Triple Axel"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Volcarona",
+    "item": "Heavy-Duty Boots",
+    "ability": "Flame Body",
+    "moves": [
+     "Bug Buzz",
+     "Flamethrower",
+     "Psychic",
+     "Quiver Dance"
+    ],
+    "nature": "Timid",
+    "evs": [
+     0,
+     0,
+     4,
+     252,
+     0,
+     252
+    ]
+   },
+   {
     "species": "Dragapult",
     "item": "Choice Specs",
     "ability": "Infiltrator",
@@ -17734,6 +18364,86 @@
      0,
      0,
      252,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Ferrothorn",
+    "item": "Leftovers",
+    "ability": "Iron Barbs",
+    "moves": [
+     "Body Press",
+     "Knock Off",
+     "Leech Seed",
+     "Spikes"
+    ],
+    "nature": "Impish",
+    "evs": [
+     252,
+     0,
+     252,
+     0,
+     4,
+     0
+    ]
+   },
+   {
+    "species": "Landorus-Therian",
+    "item": "Leftovers",
+    "ability": "Intimidate",
+    "moves": [
+     "Earthquake",
+     "Stealth Rock",
+     "Toxic",
+     "U-turn"
+    ],
+    "nature": "Careful",
+    "evs": [
+     252,
+     0,
+     4,
+     0,
+     252,
+     0
+    ]
+   },
+   {
+    "species": "Tapu Lele",
+    "item": "Choice Specs",
+    "ability": "Psychic Surge",
+    "moves": [
+     "Focus Blast",
+     "Moonblast",
+     "Psychic",
+     "Psyshock"
+    ],
+    "nature": "Modest",
+    "evs": [
+     0,
+     0,
+     0,
+     252,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Weavile",
+    "item": "Heavy-Duty Boots",
+    "ability": "Pressure",
+    "moves": [
+     "Knock Off",
+     "Low Kick",
+     "Swords Dance",
+     "Triple Axel"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
      4,
      252
     ]
@@ -17959,23 +18669,103 @@
     ]
    },
    {
-    "species": "Tapu Lele",
-    "item": "Choice Specs",
-    "ability": "Psychic Surge",
+    "species": "Ninetales-Alola",
+    "item": "Light Clay",
+    "ability": "Snow Warning",
     "moves": [
-     "Focus Blast",
-     "Moonblast",
-     "Psychic",
-     "Psyshock"
+     "Aurora Veil",
+     "Encore",
+     "Freeze-Dry",
+     "Hypnosis"
     ],
     "nature": "Timid",
     "evs": [
+     248,
+     0,
+     8,
      0,
      0,
+     252
+    ]
+   },
+   {
+    "species": "Arctozolt",
+    "item": "Heavy-Duty Boots",
+    "ability": "Slush Rush",
+    "moves": [
+     "Blizzard",
+     "Bolt Beak",
+     "Low Kick",
+     "Substitute"
+    ],
+    "nature": "Naive",
+    "evs": [
      0,
+     224,
+     0,
+     48,
+     0,
+     236
+    ]
+   },
+   {
+    "species": "Dragapult",
+    "item": "Dragon Fang",
+    "ability": "Clear Body",
+    "moves": [
+     "Dragon Dance",
+     "Dragon Darts",
+     "Flamethrower",
+     "Phantom Force"
+    ],
+    "nature": "Naughty",
+    "evs": [
+     112,
+     252,
+     0,
+     12,
+     0,
+     132
+    ]
+   },
+   {
+    "species": "Heatran",
+    "item": "Air Balloon",
+    "ability": "Flame Body",
+    "moves": [
+     "Earth Power",
+     "Magma Storm",
+     "Stealth Rock",
+     "Taunt"
+    ],
+    "nature": "Timid",
+    "evs": [
+     184,
+     0,
+     0,
+     96,
+     4,
+     224
+    ]
+   },
+   {
+    "species": "Scizor",
+    "item": "Leftovers",
+    "ability": "Technician",
+    "moves": [
+     "Bullet Punch",
+     "Knock Off",
+     "Roost",
+     "Swords Dance"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     88,
      252,
      4,
-     252
+     0,
+     0,
+     164
     ]
    },
    {
@@ -17996,26 +18786,6 @@
      0,
      4,
      252
-    ]
-   },
-   {
-    "species": "Landorus-Therian",
-    "item": "Leftovers",
-    "ability": "Intimidate",
-    "moves": [
-     "Earthquake",
-     "Stealth Rock",
-     "Toxic",
-     "U-turn"
-    ],
-    "nature": "Careful",
-    "evs": [
-     252,
-     0,
-     0,
-     0,
-     240,
-     16
     ]
    },
    {
@@ -18079,14 +18849,134 @@
     ]
    },
    {
-    "species": "Tapu Koko",
-    "item": "Heavy-Duty Boots",
-    "ability": "Electric Surge",
+    "species": "Chansey",
+    "item": "Eviolite",
+    "ability": "Natural Cure",
+    "moves": [
+     "Aromatherapy",
+     "Seismic Toss",
+     "Soft-Boiled",
+     "Toxic"
+    ],
+    "nature": "Impish",
+    "evs": [
+     248,
+     0,
+     252,
+     0,
+     8,
+     0
+    ]
+   },
+   {
+    "species": "Clefable",
+    "item": "Leftovers",
+    "ability": "Unaware",
     "moves": [
      "Calm Mind",
-     "Dazzling Gleam",
+     "Flamethrower",
+     "Moonblast",
+     "Soft-Boiled"
+    ],
+    "nature": "Bold",
+    "evs": [
+     248,
+     0,
+     252,
+     0,
+     0,
+     8
+    ]
+   },
+   {
+    "species": "Corviknight",
+    "item": "Leftovers",
+    "ability": "Pressure",
+    "moves": [
+     "Body Press",
+     "Brave Bird",
+     "Defog",
+     "Roost"
+    ],
+    "nature": "Impish",
+    "evs": [
+     248,
+     0,
+     252,
+     0,
+     0,
+     8
+    ]
+   },
+   {
+    "species": "Hippowdon",
+    "item": "Leftovers",
+    "ability": "Sand Stream",
+    "moves": [
+     "Earthquake",
+     "Slack Off",
+     "Stealth Rock",
+     "Toxic"
+    ],
+    "nature": "Careful",
+    "evs": [
+     248,
+     8,
+     0,
+     0,
+     240,
+     12
+    ]
+   },
+   {
+    "species": "Toxapex",
+    "item": "Shed Shell",
+    "ability": "Regenerator",
+    "moves": [
+     "Knock Off",
+     "Light Screen",
+     "Recover",
+     "Toxic Spikes"
+    ],
+    "nature": "Bold",
+    "evs": [
+     248,
+     0,
+     252,
+     0,
+     8,
+     0
+    ]
+   },
+   {
+    "species": "Zapdos",
+    "item": "Heavy-Duty Boots",
+    "ability": "Pressure",
+    "moves": [
+     "Defog",
+     "Heat Wave",
      "Roost",
-     "Thunderbolt"
+     "Volt Switch"
+    ],
+    "nature": "Calm",
+    "evs": [
+     252,
+     0,
+     180,
+     0,
+     56,
+     20
+    ]
+   },
+   {
+    "species": "Volcanion",
+    "item": "Choice Specs",
+    "ability": "Water Absorb",
+    "moves": [
+     "Earth Power",
+     "Flamethrower",
+     "Sludge Bomb",
+     "Steam Eruption"
     ],
     "nature": "Timid",
     "evs": [
@@ -18099,74 +18989,34 @@
     ]
    },
    {
-    "species": "Clefable",
-    "item": "Sticky Barb",
-    "ability": "Magic Guard",
+    "species": "Bisharp",
+    "item": "Choice Band",
+    "ability": "Defiant",
     "moves": [
-     "Moonblast",
-     "Soft-Boiled",
-     "Thunder Wave",
-     "Trick"
+     "Beat Up",
+     "Iron Head",
+     "Knock Off",
+     "Sucker Punch"
     ],
-    "nature": "Calm",
+    "nature": "Adamant",
     "evs": [
+     232,
      252,
      0,
-     120,
      0,
-     136,
-     0
+     0,
+     24
     ]
    },
    {
-    "species": "Dragonite",
-    "item": "Heavy-Duty Boots",
-    "ability": "Multiscale",
+    "species": "Dragapult",
+    "item": "Choice Band",
+    "ability": "Clear Body",
     "moves": [
-     "Dragon Dance",
-     "Dual Wingbeat",
-     "Earthquake",
-     "Roost"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     184,
-     72,
-     0,
-     0,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Ferrothorn",
-    "item": "Rocky Helmet",
-    "ability": "Iron Barbs",
-    "moves": [
-     "Gyro Ball",
-     "Knock Off",
-     "Leech Seed",
-     "Spikes"
-    ],
-    "nature": "Relaxed",
-    "evs": [
-     248,
-     0,
-     248,
-     0,
-     12,
-     0
-    ]
-   },
-   {
-    "species": "Victini",
-    "item": "Heavy-Duty Boots",
-    "ability": "Victory Star",
-    "moves": [
-     "Bolt Strike",
-     "Encore",
-     "U-turn",
-     "V-create"
+     "Dragon Darts",
+     "Quick Attack",
+     "Steel Wing",
+     "U-turn"
     ],
     "nature": "Jolly",
     "evs": [
@@ -18176,6 +19026,26 @@
      0,
      0,
      252
+    ]
+   },
+   {
+    "species": "Ferrothorn",
+    "item": "Leftovers",
+    "ability": "Iron Barbs",
+    "moves": [
+     "Gyro Ball",
+     "Knock Off",
+     "Leech Seed",
+     "Stealth Rock"
+    ],
+    "nature": "Relaxed",
+    "evs": [
+     252,
+     0,
+     252,
+     0,
+     4,
+     0
     ]
    },
    {
@@ -18199,14 +19069,274 @@
     ]
    },
    {
-    "species": "Clefable",
-    "item": "Rocky Helmet",
-    "ability": "Magic Guard",
+    "species": "Zapdos",
+    "item": "Choice Specs",
+    "ability": "Static",
     "moves": [
+     "Heat Wave",
+     "Hurricane",
+     "Thunderbolt",
+     "Volt Switch"
+    ],
+    "nature": "Timid",
+    "evs": [
+     0,
+     0,
+     4,
+     252,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Slowbro",
+    "item": "Eject Button",
+    "ability": "Regenerator",
+    "moves": [
+     "Future Sight",
+     "Scald",
+     "Slack Off",
+     "Teleport"
+    ],
+    "nature": "Relaxed",
+    "evs": [
+     248,
+     0,
+     76,
+     0,
+     184,
+     0
+    ]
+   },
+   {
+    "species": "Blacephalon",
+    "item": "Choice Specs",
+    "ability": "Beast Boost",
+    "moves": [
+     "Flamethrower",
+     "Overheat",
+     "Shadow Ball",
+     "Trick"
+    ],
+    "nature": "Timid",
+    "evs": [
+     0,
+     0,
+     4,
+     252,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Corviknight",
+    "item": "Rocky Helmet",
+    "ability": "Pressure",
+    "moves": [
+     "Body Press",
+     "Defog",
+     "Roost",
+     "U-turn"
+    ],
+    "nature": "Relaxed",
+    "evs": [
+     252,
+     0,
+     252,
+     0,
+     4,
+     0
+    ]
+   },
+   {
+    "species": "Melmetal",
+    "item": "Leftovers",
+    "ability": "Iron Fist",
+    "moves": [
+     "Double Iron Bash",
+     "Superpower",
+     "Thunder Punch",
+     "Toxic"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     20,
+     252,
+     0,
+     0,
+     192,
+     44
+    ]
+   },
+   {
+    "species": "Weavile",
+    "item": "Choice Band",
+    "ability": "Pickpocket",
+    "moves": [
+     "Beat Up",
+     "Ice Shard",
      "Knock Off",
+     "Triple Axel"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Slowking",
+    "item": "Assault Vest",
+    "ability": "Regenerator",
+    "moves": [
+     "Dragon Tail",
+     "Future Sight",
+     "Scald",
+     "Zap Cannon"
+    ],
+    "nature": "Quiet",
+    "evs": [
+     252,
+     0,
+     0,
+     156,
+     100,
+     0
+    ]
+   },
+   {
+    "species": "Clefable",
+    "item": "Leftovers",
+    "ability": "Unaware",
+    "moves": [
+     "Aromatherapy",
+     "Calm Mind",
      "Moonblast",
-     "Soft-Boiled",
-     "Stealth Rock"
+     "Soft-Boiled"
+    ],
+    "nature": "Bold",
+    "evs": [
+     252,
+     0,
+     252,
+     0,
+     0,
+     4
+    ]
+   },
+   {
+    "species": "Corviknight",
+    "item": "Shed Shell",
+    "ability": "Pressure",
+    "moves": [
+     "Body Press",
+     "Defog",
+     "Iron Defense",
+     "Roost"
+    ],
+    "nature": "Bold",
+    "evs": [
+     248,
+     0,
+     252,
+     0,
+     8,
+     0
+    ]
+   },
+   {
+    "species": "Dragonite",
+    "item": "Heavy-Duty Boots",
+    "ability": "Multiscale",
+    "moves": [
+     "Defog",
+     "Flamethrower",
+     "Roost",
+     "Superpower"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     248,
+     0,
+     116,
+     0,
+     0,
+     144
+    ]
+   },
+   {
+    "species": "Gastrodon-East",
+    "item": "Heavy-Duty Boots",
+    "ability": "Storm Drain",
+    "moves": [
+     "Earthquake",
+     "Recover",
+     "Scald",
+     "Toxic"
+    ],
+    "nature": "Sassy",
+    "evs": [
+     252,
+     0,
+     4,
+     0,
+     252,
+     0
+    ]
+   },
+   {
+    "species": "Toxapex",
+    "item": "Black Sludge",
+    "ability": "Regenerator",
+    "moves": [
+     "Baneful Bunker",
+     "Knock Off",
+     "Light Screen",
+     "Recover"
+    ],
+    "nature": "Sassy",
+    "evs": [
+     248,
+     0,
+     20,
+     0,
+     240,
+     0
+    ]
+   },
+   {
+    "species": "Aegislash",
+    "item": "Leftovers",
+    "ability": "Stance Change",
+    "moves": [
+     "Flash Cannon",
+     "King's Shield",
+     "Shadow Ball",
+     "Substitute"
+    ],
+    "nature": "Modest",
+    "evs": [
+     252,
+     0,
+     0,
+     184,
+     56,
+     16
+    ]
+   },
+   {
+    "species": "Clefable",
+    "item": "Leftovers",
+    "ability": "Unaware",
+    "moves": [
+     "Heal Bell",
+     "Moonblast",
+     "Protect",
+     "Wish"
     ],
     "nature": "Bold",
     "evs": [
@@ -18219,63 +19349,63 @@
     ]
    },
    {
-    "species": "Dragapult",
-    "item": "Choice Specs",
-    "ability": "Infiltrator",
+    "species": "Suicune",
+    "item": "Leftovers",
+    "ability": "Pressure",
     "moves": [
-     "Draco Meteor",
-     "Hex",
-     "Shadow Ball",
-     "U-turn"
+     "Calm Mind",
+     "Rest",
+     "Scald",
+     "Substitute"
     ],
     "nature": "Timid",
     "evs": [
-     0,
-     0,
-     0,
      252,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Heatran",
-    "item": "Air Balloon",
-    "ability": "Flash Fire",
-    "moves": [
-     "Earth Power",
-     "Magma Storm",
-     "Taunt",
-     "Toxic"
-    ],
-    "nature": "Timid",
-    "evs": [
-     0,
      0,
      4,
-     252,
+     0,
      0,
      252
     ]
    },
    {
-    "species": "Zapdos",
+    "species": "Tornadus-Therian",
     "item": "Heavy-Duty Boots",
-    "ability": "Static",
+    "ability": "Regenerator",
     "moves": [
-     "Hurricane",
-     "Roost",
-     "Thunderbolt",
-     "Volt Switch"
+     "Defog",
+     "Heat Wave",
+     "Knock Off",
+     "U-turn"
     ],
     "nature": "Timid",
     "evs": [
      248,
      0,
+     52,
      0,
-     44,
+     36,
+     172
+    ]
+   },
+   {
+    "species": "Toxapex",
+    "item": "Shed Shell",
+    "ability": "Regenerator",
+    "moves": [
+     "Knock Off",
+     "Recover",
+     "Scald",
+     "Toxic Spikes"
+    ],
+    "nature": "Calm",
+    "evs": [
+     252,
      0,
-     216
+     4,
+     0,
+     252,
+     0
     ]
    },
    {
@@ -18399,76 +19529,16 @@
     ]
    },
    {
-    "species": "Volcanion",
-    "item": "Choice Specs",
-    "ability": "Water Absorb",
-    "moves": [
-     "Earth Power",
-     "Flamethrower",
-     "Sludge Bomb",
-     "Steam Eruption"
-    ],
-    "nature": "Timid",
-    "evs": [
-     0,
-     0,
-     4,
-     252,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Bisharp",
-    "item": "Choice Band",
-    "ability": "Defiant",
-    "moves": [
-     "Beat Up",
-     "Iron Head",
-     "Knock Off",
-     "Sucker Punch"
-    ],
-    "nature": "Adamant",
-    "evs": [
-     232,
-     252,
-     0,
-     0,
-     0,
-     24
-    ]
-   },
-   {
-    "species": "Dragapult",
-    "item": "Choice Band",
-    "ability": "Clear Body",
-    "moves": [
-     "Dragon Darts",
-     "Quick Attack",
-     "Steel Wing",
-     "U-turn"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     0,
-     252,
-     4,
-     0,
-     0,
-     252
-    ]
-   },
-   {
     "species": "Ferrothorn",
-    "item": "Leftovers",
+    "item": "Rocky Helmet",
     "ability": "Iron Barbs",
     "moves": [
-     "Gyro Ball",
+     "Body Press",
      "Knock Off",
      "Leech Seed",
      "Stealth Rock"
     ],
-    "nature": "Relaxed",
+    "nature": "Impish",
     "evs": [
      252,
      0,
@@ -18479,14 +19549,14 @@
     ]
    },
    {
-    "species": "Zapdos",
-    "item": "Choice Specs",
-    "ability": "Static",
+    "species": "Heatran",
+    "item": "Air Balloon",
+    "ability": "Flash Fire",
     "moves": [
-     "Heat Wave",
-     "Hurricane",
-     "Thunderbolt",
-     "Volt Switch"
+     "Earth Power",
+     "Eruption",
+     "Magma Storm",
+     "Taunt"
     ],
     "nature": "Timid",
     "evs": [
@@ -18494,208 +19564,28 @@
      0,
      4,
      252,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Ninetales-Alola",
-    "item": "Icy Rock",
-    "ability": "Snow Warning",
-    "moves": [
-     "Aurora Veil",
-     "Encore",
-     "Freeze-Dry",
-     "Heal Bell"
-    ],
-    "nature": "Timid",
-    "evs": [
-     248,
-     0,
-     0,
-     8,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Arctozolt",
-    "item": "Heavy-Duty Boots",
-    "ability": "Slush Rush",
-    "moves": [
-     "Blizzard",
-     "Bolt Beak",
-     "Freeze-Dry",
-     "Substitute"
-    ],
-    "nature": "Naive",
-    "evs": [
-     0,
-     236,
-     0,
-     48,
-     0,
-     224
-    ]
-   },
-   {
-    "species": "Corviknight",
-    "item": "Rocky Helmet",
-    "ability": "Pressure",
-    "moves": [
-     "Body Press",
-     "Defog",
-     "Roost",
-     "U-turn"
-    ],
-    "nature": "Relaxed",
-    "evs": [
-     252,
-     0,
-     200,
-     0,
-     56,
-     0
-    ]
-   },
-   {
-    "species": "Toxapex",
-    "item": "Eject Button",
-    "ability": "Regenerator",
-    "moves": [
-     "Knock Off",
-     "Poison Jab",
-     "Recover",
-     "Toxic Spikes"
-    ],
-    "nature": "Careful",
-    "evs": [
-     248,
-     0,
-     20,
-     0,
-     240,
-     0
-    ]
-   },
-   {
-    "species": "Hippowdon",
-    "item": "Leftovers",
-    "ability": "Sand Stream",
-    "moves": [
-     "Earthquake",
-     "Slack Off",
-     "Stealth Rock",
-     "Toxic"
-    ],
-    "nature": "Careful",
-    "evs": [
-     252,
-     8,
-     0,
-     0,
-     248,
-     0
-    ]
-   },
-   {
-    "species": "Aegislash",
-    "item": "Leftovers",
-    "ability": "Stance Change",
-    "moves": [
-     "Flash Cannon",
-     "King's Shield",
-     "Shadow Ball",
-     "Substitute"
-    ],
-    "nature": "Modest",
-    "evs": [
-     252,
-     0,
-     0,
-     184,
-     56,
-     16
-    ]
-   },
-   {
-    "species": "Clefable",
-    "item": "Leftovers",
-    "ability": "Unaware",
-    "moves": [
-     "Heal Bell",
-     "Moonblast",
-     "Protect",
-     "Wish"
-    ],
-    "nature": "Bold",
-    "evs": [
-     252,
-     0,
-     252,
-     0,
-     4,
-     0
-    ]
-   },
-   {
-    "species": "Suicune",
-    "item": "Leftovers",
-    "ability": "Pressure",
-    "moves": [
-     "Calm Mind",
-     "Rest",
-     "Scald",
-     "Substitute"
-    ],
-    "nature": "Timid",
-    "evs": [
-     252,
-     0,
-     4,
-     0,
      0,
      252
     ]
    },
    {
     "species": "Tornadus-Therian",
-    "item": "Heavy-Duty Boots",
+    "item": "Assault Vest",
     "ability": "Regenerator",
     "moves": [
-     "Defog",
      "Heat Wave",
+     "Hurricane",
      "Knock Off",
      "U-turn"
     ],
     "nature": "Timid",
     "evs": [
-     248,
-     0,
-     52,
-     0,
-     36,
-     172
-    ]
-   },
-   {
-    "species": "Toxapex",
-    "item": "Shed Shell",
-    "ability": "Regenerator",
-    "moves": [
-     "Knock Off",
-     "Recover",
-     "Scald",
-     "Toxic Spikes"
-    ],
-    "nature": "Calm",
-    "evs": [
      252,
      0,
-     4,
+     88,
      0,
-     252,
-     0
+     0,
+     168
     ]
    },
    {
@@ -18739,26 +19629,6 @@
     ]
    },
    {
-    "species": "Heatran",
-    "item": "Air Balloon",
-    "ability": "Flame Body",
-    "moves": [
-     "Earth Power",
-     "Magma Storm",
-     "Stealth Rock",
-     "Taunt"
-    ],
-    "nature": "Timid",
-    "evs": [
-     252,
-     0,
-     0,
-     0,
-     120,
-     136
-    ]
-   },
-   {
     "species": "Moltres-Galar",
     "item": "Heavy-Duty Boots",
     "ability": "Berserk",
@@ -18779,32 +19649,12 @@
     ]
    },
    {
-    "species": "Tornadus-Therian",
-    "item": "Heavy-Duty Boots",
-    "ability": "Regenerator",
+    "species": "Clefable",
+    "item": "Rocky Helmet",
+    "ability": "Magic Guard",
     "moves": [
-     "Focus Blast",
-     "Hurricane",
-     "Nasty Plot",
-     "Taunt"
-    ],
-    "nature": "Timid",
-    "evs": [
-     252,
-     0,
-     0,
-     88,
-     0,
-     168
-    ]
-   },
-   {
-    "species": "Blissey",
-    "item": "Heavy-Duty Boots",
-    "ability": "Natural Cure",
-    "moves": [
-     "Heal Bell",
-     "Seismic Toss",
+     "Aromatherapy",
+     "Moonblast",
      "Soft-Boiled",
      "Stealth Rock"
     ],
@@ -18812,429 +19662,69 @@
     "evs": [
      252,
      0,
-     252,
-     0,
-     4,
-     0
-    ]
-   },
-   {
-    "species": "Clefable",
-    "item": "Leftovers",
-    "ability": "Unaware",
-    "moves": [
-     "Calm Mind",
-     "Flamethrower",
-     "Moonblast",
-     "Soft-Boiled"
-    ],
-    "nature": "Bold",
-    "evs": [
-     252,
-     0,
-     196,
+     200,
      0,
      56,
-     4
-    ]
-   },
-   {
-    "species": "Corviknight",
-    "item": "Shed Shell",
-    "ability": "Pressure",
-    "moves": [
-     "Body Press",
-     "Defog",
-     "Iron Defense",
-     "Roost"
-    ],
-    "nature": "Relaxed",
-    "evs": [
-     252,
-     0,
-     252,
-     0,
-     4,
      0
     ]
    },
    {
     "species": "Gastrodon-East",
-    "item": "Heavy-Duty Boots",
-    "ability": "Sticky Hold",
+    "item": "Leftovers",
+    "ability": "Storm Drain",
     "moves": [
-     "Earthquake",
+     "Earth Power",
      "Recover",
      "Scald",
      "Toxic"
-    ],
-    "nature": "Sassy",
-    "evs": [
-     252,
-     0,
-     76,
-     0,
-     180,
-     0
-    ]
-   },
-   {
-    "species": "Toxapex",
-    "item": "Shed Shell",
-    "ability": "Regenerator",
-    "moves": [
-     "Knock Off",
-     "Light Screen",
-     "Recover",
-     "Toxic"
-    ],
-    "nature": "Bold",
-    "evs": [
-     248,
-     0,
-     252,
-     0,
-     8,
-     0
-    ]
-   },
-   {
-    "species": "Chansey",
-    "item": "Eviolite",
-    "ability": "Natural Cure",
-    "moves": [
-     "Aromatherapy",
-     "Seismic Toss",
-     "Soft-Boiled",
-     "Toxic"
-    ],
-    "nature": "Impish",
-    "evs": [
-     248,
-     0,
-     252,
-     0,
-     8,
-     0
-    ]
-   },
-   {
-    "species": "Corviknight",
-    "item": "Leftovers",
-    "ability": "Pressure",
-    "moves": [
-     "Body Press",
-     "Brave Bird",
-     "Defog",
-     "Roost"
-    ],
-    "nature": "Impish",
-    "evs": [
-     248,
-     0,
-     252,
-     0,
-     0,
-     8
-    ]
-   },
-   {
-    "species": "Toxapex",
-    "item": "Shed Shell",
-    "ability": "Regenerator",
-    "moves": [
-     "Knock Off",
-     "Light Screen",
-     "Recover",
-     "Toxic Spikes"
-    ],
-    "nature": "Bold",
-    "evs": [
-     248,
-     0,
-     252,
-     0,
-     8,
-     0
-    ]
-   },
-   {
-    "species": "Zapdos",
-    "item": "Heavy-Duty Boots",
-    "ability": "Pressure",
-    "moves": [
-     "Defog",
-     "Heat Wave",
-     "Roost",
-     "Volt Switch"
     ],
     "nature": "Calm",
     "evs": [
      252,
      0,
-     180,
+     64,
      0,
-     56,
-     20
-    ]
-   },
-   {
-    "species": "Landorus-Therian",
-    "item": "Leftovers",
-    "ability": "Intimidate",
-    "moves": [
-     "Earthquake",
-     "Knock Off",
-     "Stealth Rock",
-     "Stone Edge"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     0,
-     252,
-     0,
-     0,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Ferrothorn",
-    "item": "Leftovers",
-    "ability": "Iron Barbs",
-    "moves": [
-     "Gyro Ball",
-     "Knock Off",
-     "Leech Seed",
-     "Spikes"
-    ],
-    "nature": "Relaxed",
-    "evs": [
-     252,
-     0,
-     224,
-     0,
-     32,
+     192,
      0
     ]
    },
    {
-    "species": "Mandibuzz",
-    "item": "Heavy-Duty Boots",
-    "ability": "Overcoat",
+    "species": "Heatran",
+    "item": "Leftovers",
+    "ability": "Flash Fire",
     "moves": [
-     "Defog",
-     "Foul Play",
-     "Roost",
-     "U-turn"
-    ],
-    "nature": "Impish",
-    "evs": [
-     248,
-     0,
-     92,
-     0,
-     168,
-     0
-    ]
-   },
-   {
-    "species": "Tapu Koko",
-    "item": "Choice Specs",
-    "ability": "Electric Surge",
-    "moves": [
-     "Dazzling Gleam",
-     "Grass Knot",
-     "Thunderbolt",
-     "Volt Switch"
+     "Earth Power",
+     "Magma Storm",
+     "Nature Power",
+     "Taunt"
     ],
     "nature": "Timid",
     "evs": [
      0,
      0,
-     0,
-     252,
      4,
-     252
-    ]
-   },
-   {
-    "species": "Ninetales-Alola",
-    "item": "Light Clay",
-    "ability": "Snow Warning",
-    "moves": [
-     "Aurora Veil",
-     "Encore",
-     "Freeze-Dry",
-     "Hypnosis"
-    ],
-    "nature": "Timid",
-    "evs": [
-     248,
-     0,
-     8,
-     0,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Arctozolt",
-    "item": "Heavy-Duty Boots",
-    "ability": "Slush Rush",
-    "moves": [
-     "Blizzard",
-     "Bolt Beak",
-     "Low Kick",
-     "Substitute"
-    ],
-    "nature": "Naive",
-    "evs": [
-     0,
-     224,
-     0,
-     48,
-     0,
-     236
-    ]
-   },
-   {
-    "species": "Dragapult",
-    "item": "Dragon Fang",
-    "ability": "Clear Body",
-    "moves": [
-     "Dragon Dance",
-     "Dragon Darts",
-     "Flamethrower",
-     "Phantom Force"
-    ],
-    "nature": "Naughty",
-    "evs": [
-     112,
      252,
      0,
-     12,
-     0,
-     132
+     252
     ]
    },
    {
-    "species": "Scizor",
+    "species": "Rillaboom",
     "item": "Leftovers",
-    "ability": "Technician",
+    "ability": "Grassy Surge",
     "moves": [
-     "Bullet Punch",
+     "Grassy Glide",
      "Knock Off",
-     "Roost",
+     "Superpower",
      "Swords Dance"
     ],
     "nature": "Adamant",
     "evs": [
-     88,
-     252,
-     4,
-     0,
-     0,
-     164
-    ]
-   },
-   {
-    "species": "Zapdos",
-    "item": "Heavy-Duty Boots",
-    "ability": "Pressure",
-    "moves": [
-     "Defog",
-     "Heat Wave",
-     "Roost",
-     "Thunderbolt"
-    ],
-    "nature": "Bold",
-    "evs": [
      248,
-     0,
-     228,
-     0,
-     0,
-     32
-    ]
-   },
-   {
-    "species": "Blissey",
-    "item": "Heavy-Duty Boots",
-    "ability": "Natural Cure",
-    "moves": [
-     "Seismic Toss",
-     "Soft-Boiled",
-     "Stealth Rock",
-     "Toxic"
-    ],
-    "nature": "Bold",
-    "evs": [
      252,
      0,
-     252,
      0,
-     4,
-     0
-    ]
-   },
-   {
-    "species": "Clefable",
-    "item": "Leftovers",
-    "ability": "Unaware",
-    "moves": [
-     "Calm Mind",
-     "Heal Bell",
-     "Moonblast",
-     "Soft-Boiled"
-    ],
-    "nature": "Bold",
-    "evs": [
-     252,
-     0,
-     248,
      8,
-     0,
-     0
-    ]
-   },
-   {
-    "species": "Corviknight",
-    "item": "Leftovers",
-    "ability": "Pressure",
-    "moves": [
-     "Body Press",
-     "Defog",
-     "Iron Defense",
-     "Roost"
-    ],
-    "nature": "Bold",
-    "evs": [
-     252,
-     0,
-     176,
-     0,
-     80,
-     0
-    ]
-   },
-   {
-    "species": "Gastrodon",
-    "item": "Leftovers",
-    "ability": "Sticky Hold",
-    "moves": [
-     "Earthquake",
-     "Protect",
-     "Recover",
-     "Scald"
-    ],
-    "nature": "Sassy",
-    "evs": [
-     252,
-     0,
-     76,
-     0,
-     180,
      0
     ]
    },
@@ -19359,6 +19849,66 @@
     ]
    },
    {
+    "species": "Ninetales-Alola",
+    "item": "Icy Rock",
+    "ability": "Snow Warning",
+    "moves": [
+     "Aurora Veil",
+     "Encore",
+     "Freeze-Dry",
+     "Heal Bell"
+    ],
+    "nature": "Timid",
+    "evs": [
+     248,
+     0,
+     0,
+     8,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Arctozolt",
+    "item": "Heavy-Duty Boots",
+    "ability": "Slush Rush",
+    "moves": [
+     "Blizzard",
+     "Bolt Beak",
+     "Freeze-Dry",
+     "Substitute"
+    ],
+    "nature": "Naive",
+    "evs": [
+     0,
+     236,
+     0,
+     48,
+     0,
+     224
+    ]
+   },
+   {
+    "species": "Toxapex",
+    "item": "Eject Button",
+    "ability": "Regenerator",
+    "moves": [
+     "Knock Off",
+     "Poison Jab",
+     "Recover",
+     "Toxic Spikes"
+    ],
+    "nature": "Careful",
+    "evs": [
+     248,
+     0,
+     20,
+     0,
+     240,
+     0
+    ]
+   },
+   {
     "species": "Tornadus-Therian",
     "item": "Heavy-Duty Boots",
     "ability": "Regenerator",
@@ -19396,26 +19946,6 @@
      0,
      4,
      252
-    ]
-   },
-   {
-    "species": "Ferrothorn",
-    "item": "Rocky Helmet",
-    "ability": "Iron Barbs",
-    "moves": [
-     "Body Press",
-     "Knock Off",
-     "Leech Seed",
-     "Stealth Rock"
-    ],
-    "nature": "Impish",
-    "evs": [
-     248,
-     0,
-     252,
-     0,
-     4,
-     4
     ]
    },
    {
@@ -19479,11 +20009,371 @@
     ]
    },
    {
+    "species": "Torkoal",
+    "item": "Heat Rock",
+    "ability": "Drought",
+    "moves": [
+     "Body Press",
+     "Lava Plume",
+     "Rapid Spin",
+     "Stealth Rock"
+    ],
+    "nature": "Bold",
+    "evs": [
+     248,
+     0,
+     252,
+     0,
+     8,
+     0
+    ]
+   },
+   {
+    "species": "Blacephalon",
+    "item": "Choice Specs",
+    "ability": "Beast Boost",
+    "moves": [
+     "Flamethrower",
+     "Mind Blown",
+     "Shadow Ball",
+     "Trick"
+    ],
+    "nature": "Timid",
+    "evs": [
+     0,
+     0,
+     0,
+     252,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Heatran",
+    "item": "Choice Scarf",
+    "ability": "Flash Fire",
+    "moves": [
+     "Dragon Pulse",
+     "Earth Power",
+     "Flamethrower",
+     "Flash Cannon"
+    ],
+    "nature": "Timid",
+    "evs": [
+     0,
+     0,
+     0,
+     252,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Venusaur",
+    "item": "Life Orb",
+    "ability": "Chlorophyll",
+    "moves": [
+     "Earth Power",
+     "Giga Drain",
+     "Growth",
+     "Weather Ball"
+    ],
+    "nature": "Modest",
+    "evs": [
+     0,
+     0,
+     0,
+     252,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Weavile",
+    "item": "Heavy-Duty Boots",
+    "ability": "Pickpocket",
+    "moves": [
+     "Ice Shard",
+     "Knock Off",
+     "Swords Dance",
+     "Triple Axel"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Landorus-Therian",
+    "item": "Leftovers",
+    "ability": "Intimidate",
+    "moves": [
+     "Earthquake",
+     "Knock Off",
+     "Stealth Rock",
+     "Stone Edge"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Ferrothorn",
+    "item": "Leftovers",
+    "ability": "Iron Barbs",
+    "moves": [
+     "Gyro Ball",
+     "Knock Off",
+     "Leech Seed",
+     "Spikes"
+    ],
+    "nature": "Relaxed",
+    "evs": [
+     252,
+     0,
+     224,
+     0,
+     32,
+     0
+    ]
+   },
+   {
+    "species": "Mandibuzz",
+    "item": "Heavy-Duty Boots",
+    "ability": "Overcoat",
+    "moves": [
+     "Defog",
+     "Foul Play",
+     "Roost",
+     "U-turn"
+    ],
+    "nature": "Impish",
+    "evs": [
+     248,
+     0,
+     92,
+     0,
+     168,
+     0
+    ]
+   },
+   {
+    "species": "Tapu Koko",
+    "item": "Choice Specs",
+    "ability": "Electric Surge",
+    "moves": [
+     "Dazzling Gleam",
+     "Grass Knot",
+     "Thunderbolt",
+     "Volt Switch"
+    ],
+    "nature": "Timid",
+    "evs": [
+     0,
+     0,
+     0,
+     252,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Zapdos",
+    "item": "Heavy-Duty Boots",
+    "ability": "Pressure",
+    "moves": [
+     "Defog",
+     "Heat Wave",
+     "Roost",
+     "Thunderbolt"
+    ],
+    "nature": "Bold",
+    "evs": [
+     248,
+     0,
+     228,
+     0,
+     0,
+     32
+    ]
+   },
+   {
+    "species": "Blissey",
+    "item": "Heavy-Duty Boots",
+    "ability": "Natural Cure",
+    "moves": [
+     "Seismic Toss",
+     "Soft-Boiled",
+     "Stealth Rock",
+     "Toxic"
+    ],
+    "nature": "Bold",
+    "evs": [
+     252,
+     0,
+     252,
+     0,
+     4,
+     0
+    ]
+   },
+   {
+    "species": "Clefable",
+    "item": "Leftovers",
+    "ability": "Unaware",
+    "moves": [
+     "Calm Mind",
+     "Heal Bell",
+     "Moonblast",
+     "Soft-Boiled"
+    ],
+    "nature": "Bold",
+    "evs": [
+     252,
+     0,
+     248,
+     8,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Corviknight",
+    "item": "Leftovers",
+    "ability": "Pressure",
+    "moves": [
+     "Body Press",
+     "Defog",
+     "Iron Defense",
+     "Roost"
+    ],
+    "nature": "Bold",
+    "evs": [
+     252,
+     0,
+     176,
+     0,
+     80,
+     0
+    ]
+   },
+   {
+    "species": "Gastrodon",
+    "item": "Leftovers",
+    "ability": "Sticky Hold",
+    "moves": [
+     "Earthquake",
+     "Protect",
+     "Recover",
+     "Scald"
+    ],
+    "nature": "Sassy",
+    "evs": [
+     252,
+     0,
+     76,
+     0,
+     180,
+     0
+    ]
+   },
+   {
+    "species": "Toxapex",
+    "item": "Shed Shell",
+    "ability": "Regenerator",
+    "moves": [
+     "Knock Off",
+     "Light Screen",
+     "Recover",
+     "Toxic"
+    ],
+    "nature": "Impish",
+    "evs": [
+     248,
+     8,
+     252,
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Tornadus-Therian",
+    "item": "Heavy-Duty Boots",
+    "ability": "Regenerator",
+    "moves": [
+     "Focus Blast",
+     "Hurricane",
+     "Nasty Plot",
+     "Taunt"
+    ],
+    "nature": "Timid",
+    "evs": [
+     252,
+     0,
+     0,
+     88,
+     0,
+     168
+    ]
+   },
+   {
+    "species": "Blissey",
+    "item": "Heavy-Duty Boots",
+    "ability": "Natural Cure",
+    "moves": [
+     "Heal Bell",
+     "Seismic Toss",
+     "Soft-Boiled",
+     "Stealth Rock"
+    ],
+    "nature": "Bold",
+    "evs": [
+     252,
+     0,
+     252,
+     0,
+     4,
+     0
+    ]
+   },
+   {
+    "species": "Gastrodon-East",
+    "item": "Heavy-Duty Boots",
+    "ability": "Sticky Hold",
+    "moves": [
+     "Earthquake",
+     "Recover",
+     "Scald",
+     "Toxic"
+    ],
+    "nature": "Sassy",
+    "evs": [
+     252,
+     0,
+     76,
+     0,
+     180,
+     0
+    ]
+   },
+   {
     "species": "Clefable",
     "item": "Rocky Helmet",
     "ability": "Magic Guard",
     "moves": [
-     "Aromatherapy",
+     "Knock Off",
      "Moonblast",
      "Soft-Boiled",
      "Stealth Rock"
@@ -19492,41 +20382,41 @@
     "evs": [
      252,
      0,
-     200,
+     252,
      0,
-     56,
+     4,
      0
     ]
    },
    {
-    "species": "Gastrodon-East",
-    "item": "Leftovers",
-    "ability": "Storm Drain",
+    "species": "Dragapult",
+    "item": "Choice Specs",
+    "ability": "Infiltrator",
     "moves": [
-     "Earth Power",
-     "Recover",
-     "Scald",
-     "Toxic"
+     "Draco Meteor",
+     "Hex",
+     "Shadow Ball",
+     "U-turn"
     ],
-    "nature": "Calm",
+    "nature": "Timid",
     "evs": [
+     0,
+     0,
+     0,
      252,
-     0,
-     64,
-     0,
-     192,
-     0
+     4,
+     252
     ]
    },
    {
     "species": "Heatran",
-    "item": "Leftovers",
+    "item": "Air Balloon",
     "ability": "Flash Fire",
     "moves": [
      "Earth Power",
      "Magma Storm",
-     "Nature Power",
-     "Taunt"
+     "Taunt",
+     "Toxic"
     ],
     "nature": "Timid",
     "evs": [
@@ -19539,32 +20429,132 @@
     ]
    },
    {
-    "species": "Rillaboom",
-    "item": "Leftovers",
-    "ability": "Grassy Surge",
+    "species": "Zapdos",
+    "item": "Heavy-Duty Boots",
+    "ability": "Static",
     "moves": [
-     "Grassy Glide",
-     "Knock Off",
-     "Superpower",
-     "Swords Dance"
+     "Hurricane",
+     "Roost",
+     "Thunderbolt",
+     "Volt Switch"
     ],
-    "nature": "Adamant",
+    "nature": "Timid",
     "evs": [
      248,
+     0,
+     0,
+     44,
+     0,
+     216
+    ]
+   },
+   {
+    "species": "Tapu Koko",
+    "item": "Heavy-Duty Boots",
+    "ability": "Electric Surge",
+    "moves": [
+     "Calm Mind",
+     "Dazzling Gleam",
+     "Roost",
+     "Thunderbolt"
+    ],
+    "nature": "Timid",
+    "evs": [
+     0,
+     0,
+     4,
      252,
      0,
+     252
+    ]
+   },
+   {
+    "species": "Clefable",
+    "item": "Sticky Barb",
+    "ability": "Magic Guard",
+    "moves": [
+     "Moonblast",
+     "Soft-Boiled",
+     "Thunder Wave",
+     "Trick"
+    ],
+    "nature": "Calm",
+    "evs": [
+     252,
      0,
-     8,
+     120,
+     0,
+     136,
      0
+    ]
+   },
+   {
+    "species": "Dragonite",
+    "item": "Heavy-Duty Boots",
+    "ability": "Multiscale",
+    "moves": [
+     "Dragon Dance",
+     "Dual Wingbeat",
+     "Earthquake",
+     "Roost"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     184,
+     72,
+     0,
+     0,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Ferrothorn",
+    "item": "Rocky Helmet",
+    "ability": "Iron Barbs",
+    "moves": [
+     "Gyro Ball",
+     "Knock Off",
+     "Leech Seed",
+     "Spikes"
+    ],
+    "nature": "Relaxed",
+    "evs": [
+     248,
+     0,
+     248,
+     0,
+     12,
+     0
+    ]
+   },
+   {
+    "species": "Victini",
+    "item": "Heavy-Duty Boots",
+    "ability": "Victory Star",
+    "moves": [
+     "Bolt Strike",
+     "Encore",
+     "U-turn",
+     "V-create"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     252,
+     4,
+     0,
+     0,
+     252
     ]
    }
   ],
   "meta": {
    "source": "smogon sample+community via crob.at",
-   "n_teams": 21,
-   "n_mons": 110,
+   "n_teams": 26,
+   "n_mons": 129,
    "provenance": {
-    "sample": 21
+    "sample": 26
    },
    "team_provenance": [
     "sample",
@@ -19587,9 +20577,14 @@
     "sample",
     "sample",
     "sample",
+    "sample",
+    "sample",
+    "sample",
+    "sample",
+    "sample",
     "sample"
    ],
-   "built": "2026-10-29"
+   "built": "2026-11-20"
   }
  },
  "gen8uu": {
@@ -26019,372 +27014,6 @@
    ],
    [
     {
-     "species": "Dragapult",
-     "item": "Heavy-Duty Boots",
-     "ability": "Infiltrator",
-     "moves": [
-      "Dragon Darts",
-      "Hex",
-      "U-turn",
-      "Will-O-Wisp"
-     ],
-     "nature": "Naive",
-     "evs": [
-      0,
-      16,
-      0,
-      240,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Gliscor",
-     "item": "Toxic Orb",
-     "ability": "Poison Heal",
-     "moves": [
-      "Earthquake",
-      "Protect",
-      "Toxic",
-      "Toxic Spikes"
-     ],
-     "nature": "Careful",
-     "evs": [
-      244,
-      0,
-      0,
-      0,
-      168,
-      96
-     ]
-    },
-    {
-     "species": "Iron Crown",
-     "item": "Booster Energy",
-     "ability": "Quark Drive",
-     "moves": [
-      "Calm Mind",
-      "Focus Blast",
-      "Psychic",
-      "Tachyon Cutter"
-     ],
-     "nature": "Timid",
-     "evs": [
-      80,
-      0,
-      4,
-      172,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Kingambit",
-     "item": "Air Balloon",
-     "ability": "Supreme Overlord",
-     "moves": [
-      "Kowtow Cleave",
-      "Low Kick",
-      "Sucker Punch",
-      "Swords Dance"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      0,
-      252,
-      4,
-      0,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Ogerpon-Wellspring",
-     "item": "Wellspring Mask",
-     "ability": "Water Absorb",
-     "moves": [
-      "Ivy Cudgel",
-      "Knock Off",
-      "Taunt",
-      "U-turn"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      0,
-      244,
-      12,
-      0,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Ting-Lu",
-     "item": "Rocky Helmet",
-     "ability": "Vessel of Ruin",
-     "moves": [
-      "Heavy Slam",
-      "Ruination",
-      "Stealth Rock",
-      "Taunt"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      24,
-      4,
-      0,
-      0,
-      252,
-      228
-     ]
-    }
-   ],
-   [
-    {
-     "species": "Kingambit",
-     "item": "Leftovers",
-     "ability": "Supreme Overlord",
-     "moves": [
-      "Iron Head",
-      "Low Kick",
-      "Sucker Punch",
-      "Swords Dance"
-     ],
-     "nature": "Adamant",
-     "evs": [
-      4,
-      252,
-      0,
-      0,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Iron Crown",
-     "item": "Booster Energy",
-     "ability": "Quark Drive",
-     "moves": [
-      "Calm Mind",
-      "Focus Blast",
-      "Psychic Noise",
-      "Tachyon Cutter"
-     ],
-     "nature": "Timid",
-     "evs": [
-      84,
-      0,
-      0,
-      172,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Iron Treads",
-     "item": "Booster Energy",
-     "ability": "Quark Drive",
-     "moves": [
-      "Earthquake",
-      "Endeavor",
-      "Rapid Spin",
-      "Stealth Rock"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      240,
-      0,
-      52,
-      0,
-      24,
-      192
-     ]
-    },
-    {
-     "species": "Iron Valiant",
-     "item": "Booster Energy",
-     "ability": "Quark Drive",
-     "moves": [
-      "Calm Mind",
-      "Focus Blast",
-      "Moonblast",
-      "Shadow Ball"
-     ],
-     "nature": "Timid",
-     "evs": [
-      0,
-      0,
-      0,
-      252,
-      4,
-      252
-     ]
-    },
-    {
-     "species": "Kommo-o",
-     "item": "Leftovers",
-     "ability": "Soundproof",
-     "moves": [
-      "Clangorous Soul",
-      "Drain Punch",
-      "Shadow Claw",
-      "Substitute"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      244,
-      16,
-      0,
-      0,
-      0,
-      248
-     ]
-    },
-    {
-     "species": "Kyurem",
-     "item": "Loaded Dice",
-     "ability": "Pressure",
-     "moves": [
-      "Dragon Dance",
-      "Earth Power",
-      "Icicle Spear",
-      "Scale Shot"
-     ],
-     "nature": "Naive",
-     "evs": [
-      0,
-      220,
-      0,
-      36,
-      0,
-      252
-     ]
-    }
-   ],
-   [
-    {
-     "species": "Dragonite",
-     "item": "Life Orb",
-     "ability": "Multiscale",
-     "moves": [
-      "Dragon Dance",
-      "Extreme Speed",
-      "Fire Punch",
-      "Outrage"
-     ],
-     "nature": "Adamant",
-     "evs": [
-      0,
-      252,
-      4,
-      0,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Deoxys-Speed",
-     "item": "Focus Sash",
-     "ability": "Pressure",
-     "moves": [
-      "Skill Swap",
-      "Spikes",
-      "Stealth Rock",
-      "Taunt"
-     ],
-     "nature": "Timid",
-     "evs": [
-      248,
-      0,
-      8,
-      0,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Gholdengo",
-     "item": "Custap Berry",
-     "ability": "Good as Gold",
-     "moves": [
-      "Make It Rain",
-      "Nasty Plot",
-      "Recover",
-      "Shadow Ball"
-     ],
-     "nature": "Modest",
-     "evs": [
-      248,
-      0,
-      176,
-      72,
-      0,
-      12
-     ]
-    },
-    {
-     "species": "Great Tusk",
-     "item": "Booster Energy",
-     "ability": "Protosynthesis",
-     "moves": [
-      "Bulk Up",
-      "Headlong Rush",
-      "Ice Spinner",
-      "Taunt"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      248,
-      4,
-      4,
-      0,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Iron Valiant",
-     "item": "Booster Energy",
-     "ability": "Quark Drive",
-     "moves": [
-      "Destiny Bond",
-      "Knock Off",
-      "Moonblast",
-      "Taunt"
-     ],
-     "nature": "Naive",
-     "evs": [
-      0,
-      4,
-      0,
-      252,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Zamazenta",
-     "item": "Life Orb",
-     "ability": "Dauntless Shield",
-     "moves": [
-      "Close Combat",
-      "Crunch",
-      "Heavy Slam",
-      "Ice Fang"
-     ],
-     "nature": "Adamant",
-     "evs": [
-      0,
-      252,
-      0,
-      0,
-      4,
-      252
-     ]
-    }
-   ],
-   [
-    {
      "species": "Clodsire",
      "item": "Heavy-Duty Boots",
      "ability": "Unaware",
@@ -26629,128 +27258,6 @@
    ],
    [
     {
-     "species": "Walking Wake",
-     "item": "Wise Glasses",
-     "ability": "Protosynthesis",
-     "moves": [
-      "Draco Meteor",
-      "Dragon Tail",
-      "Hydro Steam",
-      "Weather Ball"
-     ],
-     "nature": "Timid",
-     "evs": [
-      12,
-      0,
-      0,
-      244,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Ceruledge",
-     "item": "Focus Sash",
-     "ability": "Weak Armor",
-     "moves": [
-      "Bitter Blade",
-      "Close Combat",
-      "Poltergeist",
-      "Swords Dance"
-     ],
-     "nature": "Adamant",
-     "evs": [
-      0,
-      252,
-      0,
-      0,
-      4,
-      252
-     ]
-    },
-    {
-     "species": "Cresselia",
-     "item": "Eject Button",
-     "ability": "Levitate",
-     "moves": [
-      "Lunar Dance",
-      "Moonlight",
-      "Psychic",
-      "Thunder Wave"
-     ],
-     "nature": "Calm",
-     "evs": [
-      252,
-      0,
-      180,
-      0,
-      56,
-      20
-     ]
-    },
-    {
-     "species": "Great Tusk",
-     "item": "Assault Vest",
-     "ability": "Protosynthesis",
-     "moves": [
-      "Close Combat",
-      "Headlong Rush",
-      "Ice Spinner",
-      "Rapid Spin"
-     ],
-     "nature": "Adamant",
-     "evs": [
-      52,
-      252,
-      0,
-      0,
-      0,
-      204
-     ]
-    },
-    {
-     "species": "Ninetales",
-     "item": "Heat Rock",
-     "ability": "Drought",
-     "moves": [
-      "Encore",
-      "Healing Wish",
-      "Overheat",
-      "Will-O-Wisp"
-     ],
-     "nature": "Timid",
-     "evs": [
-      192,
-      0,
-      0,
-      72,
-      0,
-      244
-     ]
-    },
-    {
-     "species": "Zarude",
-     "item": "Leftovers",
-     "ability": "Leaf Guard",
-     "moves": [
-      "Knock Off",
-      "Power Whip",
-      "Swords Dance",
-      "Synthesis"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      32,
-      252,
-      4,
-      0,
-      16,
-      204
-     ]
-    }
-   ],
-   [
-    {
      "species": "Zamazenta",
      "item": "Leftovers",
      "ability": "Dauntless Shield",
@@ -26873,128 +27380,6 @@
    ],
    [
     {
-     "species": "Kyurem",
-     "item": "Assault Vest",
-     "ability": "Pressure",
-     "moves": [
-      "Body Press",
-      "Earth Power",
-      "Freeze-Dry",
-      "Ice Beam"
-     ],
-     "nature": "Modest",
-     "evs": [
-      0,
-      0,
-      252,
-      144,
-      0,
-      112
-     ]
-    },
-    {
-     "species": "Darkrai",
-     "item": "Choice Scarf",
-     "ability": "Bad Dreams",
-     "moves": [
-      "Dark Pulse",
-      "Ice Beam",
-      "Trick",
-      "Will-O-Wisp"
-     ],
-     "nature": "Timid",
-     "evs": [
-      0,
-      0,
-      0,
-      252,
-      4,
-      252
-     ]
-    },
-    {
-     "species": "Dragonite",
-     "item": "Heavy-Duty Boots",
-     "ability": "Multiscale",
-     "moves": [
-      "Dragon Dance",
-      "Earthquake",
-      "Extreme Speed",
-      "Roost"
-     ],
-     "nature": "Adamant",
-     "evs": [
-      248,
-      108,
-      0,
-      0,
-      0,
-      152
-     ]
-    },
-    {
-     "species": "Gholdengo",
-     "item": "Shuca Berry",
-     "ability": "Good as Gold",
-     "moves": [
-      "Make It Rain",
-      "Nasty Plot",
-      "Psyshock",
-      "Thunderbolt"
-     ],
-     "nature": "Modest",
-     "evs": [
-      120,
-      0,
-      0,
-      192,
-      0,
-      196
-     ]
-    },
-    {
-     "species": "Great Tusk",
-     "item": "Leftovers",
-     "ability": "Protosynthesis",
-     "moves": [
-      "Headlong Rush",
-      "Ice Spinner",
-      "Rapid Spin",
-      "Stealth Rock"
-     ],
-     "nature": "Impish",
-     "evs": [
-      232,
-      0,
-      88,
-      0,
-      0,
-      188
-     ]
-    },
-    {
-     "species": "Hatterene",
-     "item": "Rocky Helmet",
-     "ability": "Magic Bounce",
-     "moves": [
-      "Draining Kiss",
-      "Nuzzle",
-      "Pain Split",
-      "Psychic Noise"
-     ],
-     "nature": "Bold",
-     "evs": [
-      248,
-      0,
-      204,
-      0,
-      0,
-      56
-     ]
-    }
-   ],
-   [
-    {
      "species": "Hawlucha",
      "item": "Grassy Seed",
      "ability": "Unburden",
@@ -27112,494 +27497,6 @@
       0,
       248,
       68
-     ]
-    }
-   ],
-   [
-    {
-     "species": "Slowking-Galar",
-     "item": "Colbur Berry",
-     "ability": "Regenerator",
-     "moves": [
-      "Chilly Reception",
-      "Future Sight",
-      "Sludge Bomb",
-      "Thunder Wave"
-     ],
-     "nature": "Sassy",
-     "evs": [
-      252,
-      0,
-      68,
-      0,
-      188,
-      0
-     ]
-    },
-    {
-     "species": "Cinderace",
-     "item": "Heavy-Duty Boots",
-     "ability": "Blaze",
-     "moves": [
-      "Court Change",
-      "Pyro Ball",
-      "U-turn",
-      "Will-O-Wisp"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      224,
-      32,
-      0,
-      0,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Great Tusk",
-     "item": "Leftovers",
-     "ability": "Protosynthesis",
-     "moves": [
-      "Close Combat",
-      "Headlong Rush",
-      "Ice Spinner",
-      "Rapid Spin"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      56,
-      200,
-      0,
-      0,
-      0,
-      252
-     ]
-    },
-    {
-     "species": "Kingambit",
-     "item": "Leftovers",
-     "ability": "Supreme Overlord",
-     "moves": [
-      "Iron Head",
-      "Low Kick",
-      "Sucker Punch",
-      "Swords Dance"
-     ],
-     "nature": "Adamant",
-     "evs": [
-      140,
-      252,
-      0,
-      0,
-      0,
-      116
-     ]
-    },
-    {
-     "species": "Kyurem",
-     "item": "Choice Specs",
-     "ability": "Pressure",
-     "moves": [
-      "Blizzard",
-      "Earth Power",
-      "Freeze-Dry",
-      "Ice Beam"
-     ],
-     "nature": "Timid",
-     "evs": [
-      0,
-      0,
-      0,
-      252,
-      4,
-      252
-     ]
-    },
-    {
-     "species": "Zapdos",
-     "item": "Heavy-Duty Boots",
-     "ability": "Static",
-     "moves": [
-      "Hurricane",
-      "Roost",
-      "Thunder Wave",
-      "Volt Switch"
-     ],
-     "nature": "Bold",
-     "evs": [
-      248,
-      0,
-      252,
-      8,
-      0,
-      0
-     ]
-    }
-   ],
-   [
-    {
-     "species": "Weezing-Galar",
-     "item": "Heavy-Duty Boots",
-     "ability": "Neutralizing Gas",
-     "moves": [
-      "Defog",
-      "Pain Split",
-      "Toxic Spikes",
-      "Will-O-Wisp"
-     ],
-     "nature": "Bold",
-     "evs": [
-      252,
-      0,
-      244,
-      0,
-      0,
-      12
-     ]
-    },
-    {
-     "species": "Blissey",
-     "item": "Leftovers",
-     "ability": "Natural Cure",
-     "moves": [
-      "Calm Mind",
-      "Seismic Toss",
-      "Soft-Boiled",
-      "Stealth Rock"
-     ],
-     "nature": "Calm",
-     "evs": [
-      20,
-      0,
-      252,
-      0,
-      236,
-      0
-     ]
-    },
-    {
-     "species": "Corviknight",
-     "item": "Leftovers",
-     "ability": "Pressure",
-     "moves": [
-      "Body Press",
-      "Defog",
-      "Iron Defense",
-      "Roost"
-     ],
-     "nature": "Bold",
-     "evs": [
-      136,
-      0,
-      252,
-      0,
-      0,
-      120
-     ]
-    },
-    {
-     "species": "Dondozo",
-     "item": "Leftovers",
-     "ability": "Unaware",
-     "moves": [
-      "Curse",
-      "Rest",
-      "Sleep Talk",
-      "Waterfall"
-     ],
-     "nature": "Impish",
-     "evs": [
-      248,
-      0,
-      252,
-      0,
-      0,
-      8
-     ]
-    },
-    {
-     "species": "Gliscor",
-     "item": "Toxic Orb",
-     "ability": "Poison Heal",
-     "moves": [
-      "Earthquake",
-      "Knock Off",
-      "Protect",
-      "Swords Dance"
-     ],
-     "nature": "Careful",
-     "evs": [
-      244,
-      0,
-      0,
-      0,
-      248,
-      16
-     ]
-    },
-    {
-     "species": "Toxapex",
-     "item": "Covert Cloak",
-     "ability": "Regenerator",
-     "moves": [
-      "Haze",
-      "Poison Jab",
-      "Recover",
-      "Toxic"
-     ],
-     "nature": "Impish",
-     "evs": [
-      248,
-      0,
-      136,
-      0,
-      124,
-      0
-     ]
-    }
-   ],
-   [
-    {
-     "species": "Dragonite",
-     "item": "Heavy-Duty Boots",
-     "ability": "Multiscale",
-     "moves": [
-      "Dragon Tail",
-      "Earthquake",
-      "Extreme Speed",
-      "Roost"
-     ],
-     "nature": "Adamant",
-     "evs": [
-      252,
-      236,
-      0,
-      0,
-      0,
-      20
-     ]
-    },
-    {
-     "species": "Clefable",
-     "item": "Leftovers",
-     "ability": "Magic Guard",
-     "moves": [
-      "Calm Mind",
-      "Knock Off",
-      "Moonblast",
-      "Moonlight"
-     ],
-     "nature": "Bold",
-     "evs": [
-      252,
-      0,
-      240,
-      0,
-      0,
-      16
-     ]
-    },
-    {
-     "species": "Heatran",
-     "item": "Leftovers",
-     "ability": "Flash Fire",
-     "moves": [
-      "Earth Power",
-      "Magma Storm",
-      "Stealth Rock",
-      "Will-O-Wisp"
-     ],
-     "nature": "Calm",
-     "evs": [
-      252,
-      0,
-      4,
-      0,
-      212,
-      40
-     ]
-    },
-    {
-     "species": "Pecharunt",
-     "item": "Heavy-Duty Boots",
-     "ability": "Poison Puppeteer",
-     "moves": [
-      "Parting Shot",
-      "Recover",
-      "Shadow Ball",
-      "Toxic"
-     ],
-     "nature": "Bold",
-     "evs": [
-      252,
-      0,
-      228,
-      0,
-      0,
-      28
-     ]
-    },
-    {
-     "species": "Ting-Lu",
-     "item": "Leftovers",
-     "ability": "Vessel of Ruin",
-     "moves": [
-      "Earthquake",
-      "Ruination",
-      "Spikes",
-      "Whirlwind"
-     ],
-     "nature": "Careful",
-     "evs": [
-      252,
-      0,
-      24,
-      0,
-      232,
-      0
-     ]
-    },
-    {
-     "species": "Zamazenta",
-     "item": "Heavy-Duty Boots",
-     "ability": "Dauntless Shield",
-     "moves": [
-      "Close Combat",
-      "Crunch",
-      "Ice Fang",
-      "Roar"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      0,
-      252,
-      4,
-      0,
-      0,
-      252
-     ]
-    }
-   ],
-   [
-    {
-     "species": "Raging Bolt",
-     "item": "Booster Energy",
-     "ability": "Protosynthesis",
-     "moves": [
-      "Calm Mind",
-      "Dragon Pulse",
-      "Thunderbolt",
-      "Thunderclap"
-     ],
-     "nature": "Modest",
-     "evs": [
-      248,
-      0,
-      8,
-      252,
-      0,
-      0
-     ]
-    },
-    {
-     "species": "Cresselia",
-     "item": "Leftovers",
-     "ability": "Levitate",
-     "moves": [
-      "Calm Mind",
-      "Lunar Blessing",
-      "Moonblast",
-      "Stored Power"
-     ],
-     "nature": "Modest",
-     "evs": [
-      172,
-      0,
-      0,
-      252,
-      0,
-      84
-     ]
-    },
-    {
-     "species": "Glimmora",
-     "item": "Red Card",
-     "ability": "Toxic Debris",
-     "moves": [
-      "Earth Power",
-      "Mortal Spin",
-      "Spikes",
-      "Stealth Rock"
-     ],
-     "nature": "Bold",
-     "evs": [
-      248,
-      0,
-      252,
-      0,
-      8,
-      0
-     ]
-    },
-    {
-     "species": "Kingambit",
-     "item": "Leftovers",
-     "ability": "Supreme Overlord",
-     "moves": [
-      "Iron Head",
-      "Low Kick",
-      "Sucker Punch",
-      "Swords Dance"
-     ],
-     "nature": "Adamant",
-     "evs": [
-      248,
-      252,
-      8,
-      0,
-      0,
-      0
-     ]
-    },
-    {
-     "species": "Ogerpon-Wellspring",
-     "item": "Wellspring Mask",
-     "ability": "Water Absorb",
-     "moves": [
-      "Ivy Cudgel",
-      "Knock Off",
-      "Power Whip",
-      "Taunt"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      0,
-      252,
-      0,
-      0,
-      4,
-      252
-     ]
-    },
-    {
-     "species": "Zamazenta",
-     "item": "Light Clay",
-     "ability": "Dauntless Shield",
-     "moves": [
-      "Body Press",
-      "Heavy Slam",
-      "Light Screen",
-      "Reflect"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      104,
-      0,
-      248,
-      0,
-      0,
-      156
      ]
     }
    ],
@@ -27849,103 +27746,83 @@
    ],
    [
     {
-     "species": "Hatterene",
-     "item": "Rocky Helmet",
-     "ability": "Magic Bounce",
+     "species": "Weezing-Galar",
+     "item": "Leftovers",
+     "ability": "Neutralizing Gas",
      "moves": [
-      "Draining Kiss",
-      "Nuzzle",
-      "Pain Split",
-      "Psychic Noise"
+      "Defog",
+      "Protect",
+      "Toxic",
+      "Will-O-Wisp"
      ],
      "nature": "Bold",
      "evs": [
       248,
       0,
-      204,
+      240,
       0,
       0,
-      56
+      20
      ]
     },
     {
-     "species": "Great Tusk",
+     "species": "Alomomola",
      "item": "Rocky Helmet",
-     "ability": "Protosynthesis",
+     "ability": "Regenerator",
      "moves": [
-      "Headlong Rush",
+      "Flip Turn",
+      "Protect",
+      "Tickle",
+      "Wish"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      12,
+      0,
+      244,
+      0,
+      252,
+      0
+     ]
+    },
+    {
+     "species": "Iron Treads",
+     "item": "Leftovers",
+     "ability": "Quark Drive",
+     "moves": [
+      "Earthquake",
       "Ice Spinner",
       "Rapid Spin",
       "Stealth Rock"
      ],
      "nature": "Jolly",
      "evs": [
+      156,
+      64,
       0,
-      252,
       0,
-      0,
-      4,
-      252
+      96,
+      192
      ]
     },
     {
-     "species": "Kingambit",
-     "item": "Leftovers",
-     "ability": "Supreme Overlord",
+     "species": "Lokix",
+     "item": "Choice Band",
+     "ability": "Tinted Lens",
      "moves": [
-      "Iron Head",
-      "Kowtow Cleave",
-      "Sucker Punch",
-      "Swords Dance"
+      "First Impression",
+      "Knock Off",
+      "Leech Life",
+      "U-turn"
      ],
      "nature": "Adamant",
      "evs": [
-      244,
+      0,
       252,
-      0,
-      0,
-      0,
-      12
-     ]
-    },
-    {
-     "species": "Kyurem",
-     "item": "Choice Specs",
-     "ability": "Pressure",
-     "moves": [
-      "Blizzard",
-      "Earth Power",
-      "Freeze-Dry",
-      "Ice Beam"
-     ],
-     "nature": "Timid",
-     "evs": [
       0,
       0,
       4,
-      252,
-      0,
       252
-     ]
-    },
-    {
-     "species": "Slowking-Galar",
-     "item": "Black Sludge",
-     "ability": "Regenerator",
-     "moves": [
-      "Chilly Reception",
-      "Future Sight",
-      "Sludge Bomb",
-      "Trick"
-     ],
-     "nature": "Relaxed",
-     "evs": [
-      248,
-      0,
-      252,
-      0,
-      8,
-      0
      ]
     },
     {
@@ -27960,54 +27837,114 @@
      ],
      "nature": "Timid",
      "evs": [
-      176,
+      248,
+      0,
+      20,
       0,
       0,
-      0,
-      92,
       240
+     ]
+    },
+    {
+     "species": "Zamazenta",
+     "item": "Choice Band",
+     "ability": "Dauntless Shield",
+     "moves": [
+      "Close Combat",
+      "Crunch",
+      "Heavy Slam",
+      "Stone Edge"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      4,
+      252
      ]
     }
    ],
    [
     {
-     "species": "Ogerpon",
+     "species": "Weezing-Galar",
      "item": "Heavy-Duty Boots",
-     "ability": "Defiant",
+     "ability": "Neutralizing Gas",
      "moves": [
-      "Encore",
-      "Ivy Cudgel",
-      "Knock Off",
-      "U-turn"
+      "Defog",
+      "Pain Split",
+      "Toxic Spikes",
+      "Will-O-Wisp"
      ],
-     "nature": "Adamant",
+     "nature": "Bold",
      "evs": [
-      4,
       252,
       0,
+      244,
       0,
       0,
-      252
+      12
      ]
     },
     {
      "species": "Blissey",
-     "item": "Heavy-Duty Boots",
+     "item": "Leftovers",
      "ability": "Natural Cure",
      "moves": [
       "Calm Mind",
       "Seismic Toss",
-      "Shadow Ball",
-      "Soft-Boiled"
+      "Soft-Boiled",
+      "Stealth Rock"
      ],
      "nature": "Calm",
      "evs": [
-      4,
+      20,
       0,
       252,
       0,
-      252,
+      236,
       0
+     ]
+    },
+    {
+     "species": "Corviknight",
+     "item": "Leftovers",
+     "ability": "Pressure",
+     "moves": [
+      "Body Press",
+      "Defog",
+      "Iron Defense",
+      "Roost"
+     ],
+     "nature": "Bold",
+     "evs": [
+      136,
+      0,
+      252,
+      0,
+      0,
+      120
+     ]
+    },
+    {
+     "species": "Dondozo",
+     "item": "Leftovers",
+     "ability": "Unaware",
+     "moves": [
+      "Curse",
+      "Rest",
+      "Sleep Talk",
+      "Waterfall"
+     ],
+     "nature": "Impish",
+     "evs": [
+      248,
+      0,
+      252,
+      0,
+      0,
+      8
      ]
     },
     {
@@ -28016,18 +27953,100 @@
      "ability": "Poison Heal",
      "moves": [
       "Earthquake",
-      "Facade",
+      "Knock Off",
       "Protect",
       "Swords Dance"
      ],
      "nature": "Careful",
      "evs": [
+      244,
+      0,
+      0,
+      0,
+      248,
+      16
+     ]
+    },
+    {
+     "species": "Toxapex",
+     "item": "Covert Cloak",
+     "ability": "Regenerator",
+     "moves": [
+      "Haze",
+      "Poison Jab",
+      "Recover",
+      "Toxic"
+     ],
+     "nature": "Impish",
+     "evs": [
+      248,
+      0,
+      136,
+      0,
+      124,
+      0
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Dragonite",
+     "item": "Heavy-Duty Boots",
+     "ability": "Multiscale",
+     "moves": [
+      "Dragon Tail",
+      "Earthquake",
+      "Extreme Speed",
+      "Roost"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      252,
+      236,
+      0,
+      0,
+      0,
+      20
+     ]
+    },
+    {
+     "species": "Clefable",
+     "item": "Leftovers",
+     "ability": "Magic Guard",
+     "moves": [
+      "Calm Mind",
+      "Knock Off",
+      "Moonblast",
+      "Moonlight"
+     ],
+     "nature": "Bold",
+     "evs": [
       252,
       0,
+      240,
       0,
       0,
+      16
+     ]
+    },
+    {
+     "species": "Heatran",
+     "item": "Leftovers",
+     "ability": "Flash Fire",
+     "moves": [
+      "Earth Power",
+      "Magma Storm",
+      "Stealth Rock",
+      "Will-O-Wisp"
+     ],
+     "nature": "Calm",
+     "evs": [
       252,
-      4
+      0,
+      4,
+      0,
+      212,
+      40
      ]
     },
     {
@@ -28042,52 +28061,52 @@
      ],
      "nature": "Bold",
      "evs": [
-      248,
-      0,
-      216,
-      0,
-      0,
-      44
-     ]
-    },
-    {
-     "species": "Samurott-Hisui",
-     "item": "Heavy-Duty Boots",
-     "ability": "Sharpness",
-     "moves": [
-      "Aqua Cutter",
-      "Ceaseless Edge",
-      "Encore",
-      "Knock Off"
-     ],
-     "nature": "Adamant",
-     "evs": [
-      0,
       252,
       0,
+      228,
       0,
-      4,
-      252
+      0,
+      28
      ]
     },
     {
-     "species": "Skarmory",
-     "item": "Heavy-Duty Boots",
-     "ability": "Sturdy",
+     "species": "Ting-Lu",
+     "item": "Leftovers",
+     "ability": "Vessel of Ruin",
      "moves": [
-      "Body Press",
-      "Roost",
-      "Stealth Rock",
+      "Earthquake",
+      "Ruination",
+      "Spikes",
       "Whirlwind"
      ],
-     "nature": "Bold",
+     "nature": "Careful",
      "evs": [
-      248,
-      0,
       252,
       0,
+      24,
       0,
-      8
+      232,
+      0
+     ]
+    },
+    {
+     "species": "Zamazenta",
+     "item": "Heavy-Duty Boots",
+     "ability": "Dauntless Shield",
+     "moves": [
+      "Close Combat",
+      "Crunch",
+      "Ice Fang",
+      "Roar"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      252,
+      4,
+      0,
+      0,
+      252
      ]
     }
    ],
@@ -28215,76 +28234,280 @@
    ],
    [
     {
-     "species": "Weezing-Galar",
-     "item": "Leftovers",
-     "ability": "Neutralizing Gas",
+     "species": "Slowking-Galar",
+     "item": "Colbur Berry",
+     "ability": "Regenerator",
      "moves": [
-      "Defog",
-      "Protect",
-      "Toxic",
+      "Chilly Reception",
+      "Future Sight",
+      "Sludge Bomb",
+      "Thunder Wave"
+     ],
+     "nature": "Sassy",
+     "evs": [
+      252,
+      0,
+      68,
+      0,
+      188,
+      0
+     ]
+    },
+    {
+     "species": "Cinderace",
+     "item": "Heavy-Duty Boots",
+     "ability": "Blaze",
+     "moves": [
+      "Court Change",
+      "Pyro Ball",
+      "U-turn",
       "Will-O-Wisp"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      224,
+      32,
+      0,
+      0,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Great Tusk",
+     "item": "Leftovers",
+     "ability": "Protosynthesis",
+     "moves": [
+      "Close Combat",
+      "Headlong Rush",
+      "Ice Spinner",
+      "Rapid Spin"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      56,
+      200,
+      0,
+      0,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Kingambit",
+     "item": "Leftovers",
+     "ability": "Supreme Overlord",
+     "moves": [
+      "Iron Head",
+      "Low Kick",
+      "Sucker Punch",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      140,
+      252,
+      0,
+      0,
+      0,
+      116
+     ]
+    },
+    {
+     "species": "Kyurem",
+     "item": "Choice Specs",
+     "ability": "Pressure",
+     "moves": [
+      "Blizzard",
+      "Earth Power",
+      "Freeze-Dry",
+      "Ice Beam"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      0,
+      252,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Zapdos",
+     "item": "Heavy-Duty Boots",
+     "ability": "Static",
+     "moves": [
+      "Hurricane",
+      "Roost",
+      "Thunder Wave",
+      "Volt Switch"
      ],
      "nature": "Bold",
      "evs": [
       248,
       0,
-      240,
-      0,
-      0,
-      20
-     ]
-    },
-    {
-     "species": "Alomomola",
-     "item": "Rocky Helmet",
-     "ability": "Regenerator",
-     "moves": [
-      "Flip Turn",
-      "Protect",
-      "Tickle",
-      "Wish"
-     ],
-     "nature": "Relaxed",
-     "evs": [
-      12,
-      0,
-      244,
-      0,
       252,
+      8,
+      0,
       0
      ]
+    }
+   ],
+   [
+    {
+     "species": "Dragapult",
+     "item": "Heavy-Duty Boots",
+     "ability": "Infiltrator",
+     "moves": [
+      "Dragon Darts",
+      "Hex",
+      "U-turn",
+      "Will-O-Wisp"
+     ],
+     "nature": "Naive",
+     "evs": [
+      0,
+      16,
+      0,
+      240,
+      0,
+      252
+     ]
     },
     {
-     "species": "Iron Treads",
-     "item": "Leftovers",
-     "ability": "Quark Drive",
+     "species": "Gliscor",
+     "item": "Toxic Orb",
+     "ability": "Poison Heal",
      "moves": [
       "Earthquake",
+      "Protect",
+      "Toxic",
+      "Toxic Spikes"
+     ],
+     "nature": "Careful",
+     "evs": [
+      244,
+      0,
+      0,
+      0,
+      168,
+      96
+     ]
+    },
+    {
+     "species": "Iron Crown",
+     "item": "Booster Energy",
+     "ability": "Quark Drive",
+     "moves": [
+      "Calm Mind",
+      "Focus Blast",
+      "Psychic",
+      "Tachyon Cutter"
+     ],
+     "nature": "Timid",
+     "evs": [
+      80,
+      0,
+      4,
+      172,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Kingambit",
+     "item": "Air Balloon",
+     "ability": "Supreme Overlord",
+     "moves": [
+      "Kowtow Cleave",
+      "Low Kick",
+      "Sucker Punch",
+      "Swords Dance"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      252,
+      4,
+      0,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Ogerpon-Wellspring",
+     "item": "Wellspring Mask",
+     "ability": "Water Absorb",
+     "moves": [
+      "Ivy Cudgel",
+      "Knock Off",
+      "Taunt",
+      "U-turn"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      244,
+      12,
+      0,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Ting-Lu",
+     "item": "Rocky Helmet",
+     "ability": "Vessel of Ruin",
+     "moves": [
+      "Heavy Slam",
+      "Ruination",
+      "Stealth Rock",
+      "Taunt"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      24,
+      4,
+      0,
+      0,
+      252,
+      228
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Hatterene",
+     "item": "Rocky Helmet",
+     "ability": "Magic Bounce",
+     "moves": [
+      "Draining Kiss",
+      "Nuzzle",
+      "Pain Split",
+      "Psychic Noise"
+     ],
+     "nature": "Bold",
+     "evs": [
+      248,
+      0,
+      204,
+      0,
+      0,
+      56
+     ]
+    },
+    {
+     "species": "Great Tusk",
+     "item": "Rocky Helmet",
+     "ability": "Protosynthesis",
+     "moves": [
+      "Headlong Rush",
       "Ice Spinner",
       "Rapid Spin",
       "Stealth Rock"
      ],
      "nature": "Jolly",
-     "evs": [
-      156,
-      64,
-      0,
-      0,
-      96,
-      192
-     ]
-    },
-    {
-     "species": "Lokix",
-     "item": "Choice Band",
-     "ability": "Tinted Lens",
-     "moves": [
-      "First Impression",
-      "Knock Off",
-      "Leech Life",
-      "U-turn"
-     ],
-     "nature": "Adamant",
      "evs": [
       0,
       252,
@@ -28292,6 +28515,66 @@
       0,
       4,
       252
+     ]
+    },
+    {
+     "species": "Kingambit",
+     "item": "Leftovers",
+     "ability": "Supreme Overlord",
+     "moves": [
+      "Iron Head",
+      "Kowtow Cleave",
+      "Sucker Punch",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      244,
+      252,
+      0,
+      0,
+      0,
+      12
+     ]
+    },
+    {
+     "species": "Kyurem",
+     "item": "Choice Specs",
+     "ability": "Pressure",
+     "moves": [
+      "Blizzard",
+      "Earth Power",
+      "Freeze-Dry",
+      "Ice Beam"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      4,
+      252,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Slowking-Galar",
+     "item": "Black Sludge",
+     "ability": "Regenerator",
+     "moves": [
+      "Chilly Reception",
+      "Future Sight",
+      "Sludge Bomb",
+      "Trick"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      248,
+      0,
+      252,
+      0,
+      8,
+      0
      ]
     },
     {
@@ -28306,23 +28589,369 @@
      ],
      "nature": "Timid",
      "evs": [
+      176,
+      0,
+      0,
+      0,
+      92,
+      240
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Kyurem",
+     "item": "Assault Vest",
+     "ability": "Pressure",
+     "moves": [
+      "Body Press",
+      "Earth Power",
+      "Freeze-Dry",
+      "Ice Beam"
+     ],
+     "nature": "Modest",
+     "evs": [
+      0,
+      0,
+      252,
+      144,
+      0,
+      112
+     ]
+    },
+    {
+     "species": "Darkrai",
+     "item": "Choice Scarf",
+     "ability": "Bad Dreams",
+     "moves": [
+      "Dark Pulse",
+      "Ice Beam",
+      "Trick",
+      "Will-O-Wisp"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      0,
+      252,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Dragonite",
+     "item": "Heavy-Duty Boots",
+     "ability": "Multiscale",
+     "moves": [
+      "Dragon Dance",
+      "Earthquake",
+      "Extreme Speed",
+      "Roost"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      248,
+      108,
+      0,
+      0,
+      0,
+      152
+     ]
+    },
+    {
+     "species": "Gholdengo",
+     "item": "Shuca Berry",
+     "ability": "Good as Gold",
+     "moves": [
+      "Make It Rain",
+      "Nasty Plot",
+      "Psyshock",
+      "Thunderbolt"
+     ],
+     "nature": "Modest",
+     "evs": [
+      120,
+      0,
+      0,
+      192,
+      0,
+      196
+     ]
+    },
+    {
+     "species": "Great Tusk",
+     "item": "Leftovers",
+     "ability": "Protosynthesis",
+     "moves": [
+      "Headlong Rush",
+      "Ice Spinner",
+      "Rapid Spin",
+      "Stealth Rock"
+     ],
+     "nature": "Impish",
+     "evs": [
+      232,
+      0,
+      88,
+      0,
+      0,
+      188
+     ]
+    },
+    {
+     "species": "Hatterene",
+     "item": "Rocky Helmet",
+     "ability": "Magic Bounce",
+     "moves": [
+      "Draining Kiss",
+      "Nuzzle",
+      "Pain Split",
+      "Psychic Noise"
+     ],
+     "nature": "Bold",
+     "evs": [
       248,
       0,
-      20,
+      204,
       0,
       0,
-      240
+      56
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Kingambit",
+     "item": "Leftovers",
+     "ability": "Supreme Overlord",
+     "moves": [
+      "Iron Head",
+      "Low Kick",
+      "Sucker Punch",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      4,
+      252,
+      0,
+      0,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Iron Crown",
+     "item": "Booster Energy",
+     "ability": "Quark Drive",
+     "moves": [
+      "Calm Mind",
+      "Focus Blast",
+      "Psychic Noise",
+      "Tachyon Cutter"
+     ],
+     "nature": "Timid",
+     "evs": [
+      84,
+      0,
+      0,
+      172,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Iron Treads",
+     "item": "Booster Energy",
+     "ability": "Quark Drive",
+     "moves": [
+      "Earthquake",
+      "Endeavor",
+      "Rapid Spin",
+      "Stealth Rock"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      240,
+      0,
+      52,
+      0,
+      24,
+      192
+     ]
+    },
+    {
+     "species": "Iron Valiant",
+     "item": "Booster Energy",
+     "ability": "Quark Drive",
+     "moves": [
+      "Calm Mind",
+      "Focus Blast",
+      "Moonblast",
+      "Shadow Ball"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      0,
+      252,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Kommo-o",
+     "item": "Leftovers",
+     "ability": "Soundproof",
+     "moves": [
+      "Clangorous Soul",
+      "Drain Punch",
+      "Shadow Claw",
+      "Substitute"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      244,
+      16,
+      0,
+      0,
+      0,
+      248
+     ]
+    },
+    {
+     "species": "Kyurem",
+     "item": "Loaded Dice",
+     "ability": "Pressure",
+     "moves": [
+      "Dragon Dance",
+      "Earth Power",
+      "Icicle Spear",
+      "Scale Shot"
+     ],
+     "nature": "Naive",
+     "evs": [
+      0,
+      220,
+      0,
+      36,
+      0,
+      252
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Dragonite",
+     "item": "Life Orb",
+     "ability": "Multiscale",
+     "moves": [
+      "Dragon Dance",
+      "Extreme Speed",
+      "Fire Punch",
+      "Outrage"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      0,
+      252,
+      4,
+      0,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Deoxys-Speed",
+     "item": "Focus Sash",
+     "ability": "Pressure",
+     "moves": [
+      "Skill Swap",
+      "Spikes",
+      "Stealth Rock",
+      "Taunt"
+     ],
+     "nature": "Timid",
+     "evs": [
+      248,
+      0,
+      8,
+      0,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Gholdengo",
+     "item": "Custap Berry",
+     "ability": "Good as Gold",
+     "moves": [
+      "Make It Rain",
+      "Nasty Plot",
+      "Recover",
+      "Shadow Ball"
+     ],
+     "nature": "Modest",
+     "evs": [
+      248,
+      0,
+      176,
+      72,
+      0,
+      12
+     ]
+    },
+    {
+     "species": "Great Tusk",
+     "item": "Booster Energy",
+     "ability": "Protosynthesis",
+     "moves": [
+      "Bulk Up",
+      "Headlong Rush",
+      "Ice Spinner",
+      "Taunt"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      248,
+      4,
+      4,
+      0,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Iron Valiant",
+     "item": "Booster Energy",
+     "ability": "Quark Drive",
+     "moves": [
+      "Destiny Bond",
+      "Knock Off",
+      "Moonblast",
+      "Taunt"
+     ],
+     "nature": "Naive",
+     "evs": [
+      0,
+      4,
+      0,
+      252,
+      0,
+      252
      ]
     },
     {
      "species": "Zamazenta",
-     "item": "Choice Band",
+     "item": "Life Orb",
      "ability": "Dauntless Shield",
      "moves": [
       "Close Combat",
       "Crunch",
       "Heavy Slam",
-      "Stone Edge"
+      "Ice Fang"
      ],
      "nature": "Adamant",
      "evs": [
@@ -28332,6 +28961,372 @@
       0,
       4,
       252
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Raging Bolt",
+     "item": "Booster Energy",
+     "ability": "Protosynthesis",
+     "moves": [
+      "Calm Mind",
+      "Dragon Pulse",
+      "Thunderbolt",
+      "Thunderclap"
+     ],
+     "nature": "Modest",
+     "evs": [
+      248,
+      0,
+      8,
+      252,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Cresselia",
+     "item": "Leftovers",
+     "ability": "Levitate",
+     "moves": [
+      "Calm Mind",
+      "Lunar Blessing",
+      "Moonblast",
+      "Stored Power"
+     ],
+     "nature": "Modest",
+     "evs": [
+      172,
+      0,
+      0,
+      252,
+      0,
+      84
+     ]
+    },
+    {
+     "species": "Glimmora",
+     "item": "Red Card",
+     "ability": "Toxic Debris",
+     "moves": [
+      "Earth Power",
+      "Mortal Spin",
+      "Spikes",
+      "Stealth Rock"
+     ],
+     "nature": "Bold",
+     "evs": [
+      248,
+      0,
+      252,
+      0,
+      8,
+      0
+     ]
+    },
+    {
+     "species": "Kingambit",
+     "item": "Leftovers",
+     "ability": "Supreme Overlord",
+     "moves": [
+      "Iron Head",
+      "Low Kick",
+      "Sucker Punch",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      248,
+      252,
+      8,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Ogerpon-Wellspring",
+     "item": "Wellspring Mask",
+     "ability": "Water Absorb",
+     "moves": [
+      "Ivy Cudgel",
+      "Knock Off",
+      "Power Whip",
+      "Taunt"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Zamazenta",
+     "item": "Light Clay",
+     "ability": "Dauntless Shield",
+     "moves": [
+      "Body Press",
+      "Heavy Slam",
+      "Light Screen",
+      "Reflect"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      104,
+      0,
+      248,
+      0,
+      0,
+      156
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Walking Wake",
+     "item": "Wise Glasses",
+     "ability": "Protosynthesis",
+     "moves": [
+      "Draco Meteor",
+      "Dragon Tail",
+      "Hydro Steam",
+      "Weather Ball"
+     ],
+     "nature": "Timid",
+     "evs": [
+      12,
+      0,
+      0,
+      244,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Ceruledge",
+     "item": "Focus Sash",
+     "ability": "Weak Armor",
+     "moves": [
+      "Bitter Blade",
+      "Close Combat",
+      "Poltergeist",
+      "Swords Dance"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Cresselia",
+     "item": "Eject Button",
+     "ability": "Levitate",
+     "moves": [
+      "Lunar Dance",
+      "Moonlight",
+      "Psychic",
+      "Thunder Wave"
+     ],
+     "nature": "Calm",
+     "evs": [
+      252,
+      0,
+      180,
+      0,
+      56,
+      20
+     ]
+    },
+    {
+     "species": "Great Tusk",
+     "item": "Assault Vest",
+     "ability": "Protosynthesis",
+     "moves": [
+      "Close Combat",
+      "Headlong Rush",
+      "Ice Spinner",
+      "Rapid Spin"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      52,
+      252,
+      0,
+      0,
+      0,
+      204
+     ]
+    },
+    {
+     "species": "Ninetales",
+     "item": "Heat Rock",
+     "ability": "Drought",
+     "moves": [
+      "Encore",
+      "Healing Wish",
+      "Overheat",
+      "Will-O-Wisp"
+     ],
+     "nature": "Timid",
+     "evs": [
+      192,
+      0,
+      0,
+      72,
+      0,
+      244
+     ]
+    },
+    {
+     "species": "Zarude",
+     "item": "Leftovers",
+     "ability": "Leaf Guard",
+     "moves": [
+      "Knock Off",
+      "Power Whip",
+      "Swords Dance",
+      "Synthesis"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      32,
+      252,
+      4,
+      0,
+      16,
+      204
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Ogerpon",
+     "item": "Heavy-Duty Boots",
+     "ability": "Defiant",
+     "moves": [
+      "Encore",
+      "Ivy Cudgel",
+      "Knock Off",
+      "U-turn"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      4,
+      252,
+      0,
+      0,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Blissey",
+     "item": "Heavy-Duty Boots",
+     "ability": "Natural Cure",
+     "moves": [
+      "Calm Mind",
+      "Seismic Toss",
+      "Shadow Ball",
+      "Soft-Boiled"
+     ],
+     "nature": "Calm",
+     "evs": [
+      4,
+      0,
+      252,
+      0,
+      252,
+      0
+     ]
+    },
+    {
+     "species": "Gliscor",
+     "item": "Toxic Orb",
+     "ability": "Poison Heal",
+     "moves": [
+      "Earthquake",
+      "Facade",
+      "Protect",
+      "Swords Dance"
+     ],
+     "nature": "Careful",
+     "evs": [
+      252,
+      0,
+      0,
+      0,
+      252,
+      4
+     ]
+    },
+    {
+     "species": "Pecharunt",
+     "item": "Heavy-Duty Boots",
+     "ability": "Poison Puppeteer",
+     "moves": [
+      "Parting Shot",
+      "Recover",
+      "Shadow Ball",
+      "Toxic"
+     ],
+     "nature": "Bold",
+     "evs": [
+      248,
+      0,
+      216,
+      0,
+      0,
+      44
+     ]
+    },
+    {
+     "species": "Samurott-Hisui",
+     "item": "Heavy-Duty Boots",
+     "ability": "Sharpness",
+     "moves": [
+      "Aqua Cutter",
+      "Ceaseless Edge",
+      "Encore",
+      "Knock Off"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Skarmory",
+     "item": "Heavy-Duty Boots",
+     "ability": "Sturdy",
+     "moves": [
+      "Body Press",
+      "Roost",
+      "Stealth Rock",
+      "Whirlwind"
+     ],
+     "nature": "Bold",
+     "evs": [
+      248,
+      0,
+      252,
+      0,
+      0,
+      8
      ]
     }
    ],
@@ -28581,6 +29576,250 @@
    ],
    [
     {
+     "species": "Great Tusk",
+     "item": "Leftovers",
+     "ability": "Protosynthesis",
+     "moves": [
+      "Headlong Rush",
+      "Ice Spinner",
+      "Rapid Spin",
+      "Stealth Rock"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      252,
+      4,
+      0,
+      0,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Raging Bolt",
+     "item": "Booster Energy",
+     "ability": "Protosynthesis",
+     "moves": [
+      "Calm Mind",
+      "Thunderclap",
+      "Thunderbolt",
+      "Dragon Pulse"
+     ],
+     "nature": "Modest",
+     "evs": [
+      64,
+      0,
+      28,
+      252,
+      0,
+      164
+     ]
+    },
+    {
+     "species": "Corviknight",
+     "item": "Rocky Helmet",
+     "ability": "Pressure",
+     "moves": [
+      "Brave Bird",
+      "Roost",
+      "U-turn",
+      "Iron Defense"
+     ],
+     "nature": "Impish",
+     "evs": [
+      252,
+      0,
+      252,
+      0,
+      4,
+      0
+     ]
+    },
+    {
+     "species": "Kingambit",
+     "item": "Black Glasses",
+     "ability": "Supreme Overlord",
+     "moves": [
+      "Swords Dance",
+      "Kowtow Cleave",
+      "Sucker Punch",
+      "Iron Head"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      204,
+      252,
+      0,
+      0,
+      0,
+      52
+     ]
+    },
+    {
+     "species": "Samurott-Hisui",
+     "item": "Assault Vest",
+     "ability": "Sharpness",
+     "moves": [
+      "Ceaseless Edge",
+      "Aqua Cutter",
+      "Knock Off",
+      "Sucker Punch"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      248,
+      84,
+      0,
+      0,
+      124,
+      52
+     ]
+    },
+    {
+     "species": "Gholdengo",
+     "item": "Air Balloon",
+     "ability": "Good as Gold",
+     "moves": [
+      "Make It Rain",
+      "Shadow Ball",
+      "Recover",
+      "Nasty Plot"
+     ],
+     "nature": "Bold",
+     "evs": [
+      252,
+      0,
+      196,
+      0,
+      0,
+      60
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Samurott-Hisui",
+     "item": "Focus Sash",
+     "ability": "Sharpness",
+     "moves": [
+      "Ceaseless Edge",
+      "Razor Shell",
+      "Aqua Jet",
+      "Knock Off"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Landorus-Therian",
+     "item": "Rocky Helmet",
+     "ability": "Intimidate",
+     "moves": [
+      "Stealth Rock",
+      "Earth Power",
+      "U-turn",
+      "Taunt"
+     ],
+     "nature": "Timid",
+     "evs": [
+      252,
+      0,
+      4,
+      0,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Heatran",
+     "item": "Leftovers",
+     "ability": "Flash Fire",
+     "moves": [
+      "Magma Storm",
+      "Earth Power",
+      "Iron Head",
+      "Protect"
+     ],
+     "nature": "Calm",
+     "evs": [
+      252,
+      0,
+      0,
+      0,
+      180,
+      76
+     ]
+    },
+    {
+     "species": "Sinistcha",
+     "item": "Leftovers",
+     "ability": "Heatproof",
+     "moves": [
+      "Calm Mind",
+      "Hex",
+      "Stun Spore",
+      "Strength Sap"
+     ],
+     "nature": "Bold",
+     "evs": [
+      252,
+      0,
+      160,
+      0,
+      0,
+      96
+     ]
+    },
+    {
+     "species": "Zapdos",
+     "item": "Heavy-Duty Boots",
+     "ability": "Static",
+     "moves": [
+      "Hurricane",
+      "Volt Switch",
+      "Heat Wave",
+      "Roost"
+     ],
+     "nature": "Timid",
+     "evs": [
+      0,
+      0,
+      4,
+      252,
+      0,
+      252
+     ]
+    },
+    {
+     "species": "Toxapex",
+     "item": "Black Sludge",
+     "ability": "Regenerator",
+     "moves": [
+      "Liquidation",
+      "Baneful Bunker",
+      "Toxic",
+      "Recover"
+     ],
+     "nature": "Calm",
+     "evs": [
+      252,
+      0,
+      36,
+      0,
+      220,
+      0
+     ]
+    }
+   ],
+   [
+    {
      "species": "Tyranitar",
      "item": "Smooth Rock",
      "ability": "Sand Stream",
@@ -28697,6 +29936,128 @@
       0,
       0,
       4,
+      252
+     ]
+    }
+   ],
+   [
+    {
+     "species": "Conkeldurr",
+     "item": "Flame Orb",
+     "ability": "Guts",
+     "moves": [
+      "Facade",
+      "Thunder Punch",
+      "Knock Off",
+      "Mach Punch"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      252,
+      252,
+      0,
+      0,
+      4,
+      0
+     ]
+    },
+    {
+     "species": "Alomomola",
+     "item": "Lagging Tail",
+     "ability": "Regenerator",
+     "moves": [
+      "Flip Turn",
+      "Surf",
+      "Protect",
+      "Wish"
+     ],
+     "nature": "Relaxed",
+     "evs": [
+      252,
+      0,
+      252,
+      4,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Corviknight",
+     "item": "Rocky Helmet",
+     "ability": "Pressure",
+     "moves": [
+      "Iron Defense",
+      "Body Press",
+      "U-turn",
+      "Defog"
+     ],
+     "nature": "Careful",
+     "evs": [
+      248,
+      0,
+      8,
+      0,
+      252,
+      0
+     ]
+    },
+    {
+     "species": "Lokix",
+     "item": "Choice Band",
+     "ability": "Tinted Lens",
+     "moves": [
+      "First Impression",
+      "U-turn",
+      "Knock Off",
+      "Leech Life"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      0,
+      252,
+      0,
+      0,
+      4,
+      252
+     ]
+    },
+    {
+     "species": "Slowking-Galar",
+     "item": "Assault Vest",
+     "ability": "Regenerator",
+     "moves": [
+      "Ice Beam",
+      "Sludge Wave",
+      "Psychic",
+      "Flamethrower"
+     ],
+     "nature": "Quiet",
+     "evs": [
+      252,
+      4,
+      0,
+      252,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Iron Treads",
+     "item": "Heavy-Duty Boots",
+     "ability": "Quark Drive",
+     "moves": [
+      "Volt Switch",
+      "Rapid Spin",
+      "Earthquake",
+      "Stealth Rock"
+     ],
+     "nature": "Jolly",
+     "evs": [
+      4,
+      252,
+      0,
+      0,
+      0,
       252
      ]
     }
@@ -28825,122 +30186,122 @@
    ],
    [
     {
-     "species": "Samurott-Hisui",
-     "item": "Focus Sash",
-     "ability": "Sharpness",
-     "moves": [
-      "Ceaseless Edge",
-      "Razor Shell",
-      "Aqua Jet",
-      "Knock Off"
-     ],
-     "nature": "Jolly",
-     "evs": [
-      0,
-      252,
-      0,
-      0,
-      4,
-      252
-     ]
-    },
-    {
-     "species": "Landorus-Therian",
+     "species": "Incineroar",
      "item": "Rocky Helmet",
      "ability": "Intimidate",
      "moves": [
-      "Stealth Rock",
-      "Earth Power",
-      "U-turn",
-      "Taunt"
+      "Parting Shot",
+      "Flare Blitz",
+      "Knock Off",
+      "Fake Out"
      ],
-     "nature": "Timid",
+     "nature": "Impish",
      "evs": [
       252,
       0,
-      4,
+      156,
       0,
-      0,
-      252
+      100,
+      0
      ]
     },
     {
-     "species": "Heatran",
-     "item": "Leftovers",
-     "ability": "Flash Fire",
+     "species": "Kingambit",
+     "item": "Assault Vest",
+     "ability": "Defiant",
      "moves": [
-      "Magma Storm",
-      "Earth Power",
+      "Sucker Punch",
       "Iron Head",
+      "Kowtow Cleave",
+      "Brick Break"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      148,
+      252,
+      0,
+      0,
+      0,
+      108
+     ]
+    },
+    {
+     "species": "Farigiraf",
+     "item": "Sitrus Berry",
+     "ability": "Armor Tail",
+     "moves": [
+      "Psychic",
+      "Hyper Voice",
+      "Trick Room",
       "Protect"
      ],
-     "nature": "Calm",
+     "nature": "Modest",
      "evs": [
       252,
       0,
+      128,
       0,
-      0,
-      180,
-      76
+      128,
+      0
      ]
     },
     {
-     "species": "Sinistcha",
-     "item": "Leftovers",
-     "ability": "Heatproof",
+     "species": "Tornadus",
+     "item": "Covert Cloak",
+     "ability": "Prankster",
      "moves": [
-      "Calm Mind",
-      "Hex",
-      "Stun Spore",
-      "Strength Sap"
-     ],
-     "nature": "Bold",
-     "evs": [
-      252,
-      0,
-      160,
-      0,
-      0,
-      96
-     ]
-    },
-    {
-     "species": "Zapdos",
-     "item": "Heavy-Duty Boots",
-     "ability": "Static",
-     "moves": [
-      "Hurricane",
-      "Volt Switch",
-      "Heat Wave",
-      "Roost"
+      "Bleakwind Storm",
+      "Taunt",
+      "Tailwind",
+      "Chilling Water"
      ],
      "nature": "Timid",
      "evs": [
-      0,
-      0,
       4,
+      0,
+      0,
       252,
       0,
       252
      ]
     },
     {
-     "species": "Toxapex",
-     "item": "Black Sludge",
-     "ability": "Regenerator",
+     "species": "Raging Bolt",
+     "item": "Leftovers",
+     "ability": "Protosynthesis",
      "moves": [
-      "Liquidation",
-      "Baneful Bunker",
-      "Toxic",
-      "Recover"
+      "Thunderclap",
+      "Dragon Pulse",
+      "Calm Mind",
+      "Protect"
      ],
-     "nature": "Calm",
+     "nature": "Modest",
      "evs": [
       252,
       0,
-      36,
       0,
-      220,
+      252,
+      0,
+      0
+     ]
+    },
+    {
+     "species": "Rillaboom",
+     "item": "Eject Button",
+     "ability": "Grassy Surge",
+     "moves": [
+      "Fake Out",
+      "U-turn",
+      "Grassy Glide",
+      "Wood Hammer"
+     ],
+     "nature": "Adamant",
+     "evs": [
+      252,
+      252,
+      0,
+      0,
+      4,
       0
      ]
     }
@@ -29058,366 +30419,6 @@
      "Stone Edge"
     ],
     "nature": "Jolly",
-    "evs": [
-     0,
-     252,
-     0,
-     0,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Dragapult",
-    "item": "Heavy-Duty Boots",
-    "ability": "Infiltrator",
-    "moves": [
-     "Dragon Darts",
-     "Hex",
-     "U-turn",
-     "Will-O-Wisp"
-    ],
-    "nature": "Naive",
-    "evs": [
-     0,
-     16,
-     0,
-     240,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Gliscor",
-    "item": "Toxic Orb",
-    "ability": "Poison Heal",
-    "moves": [
-     "Earthquake",
-     "Protect",
-     "Toxic",
-     "Toxic Spikes"
-    ],
-    "nature": "Careful",
-    "evs": [
-     244,
-     0,
-     0,
-     0,
-     168,
-     96
-    ]
-   },
-   {
-    "species": "Iron Crown",
-    "item": "Booster Energy",
-    "ability": "Quark Drive",
-    "moves": [
-     "Calm Mind",
-     "Focus Blast",
-     "Psychic",
-     "Tachyon Cutter"
-    ],
-    "nature": "Timid",
-    "evs": [
-     80,
-     0,
-     4,
-     172,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Kingambit",
-    "item": "Air Balloon",
-    "ability": "Supreme Overlord",
-    "moves": [
-     "Kowtow Cleave",
-     "Low Kick",
-     "Sucker Punch",
-     "Swords Dance"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     0,
-     252,
-     4,
-     0,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Ogerpon-Wellspring",
-    "item": "Wellspring Mask",
-    "ability": "Water Absorb",
-    "moves": [
-     "Ivy Cudgel",
-     "Knock Off",
-     "Taunt",
-     "U-turn"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     0,
-     244,
-     12,
-     0,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Ting-Lu",
-    "item": "Rocky Helmet",
-    "ability": "Vessel of Ruin",
-    "moves": [
-     "Heavy Slam",
-     "Ruination",
-     "Stealth Rock",
-     "Taunt"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     24,
-     4,
-     0,
-     0,
-     252,
-     228
-    ]
-   },
-   {
-    "species": "Kingambit",
-    "item": "Leftovers",
-    "ability": "Supreme Overlord",
-    "moves": [
-     "Iron Head",
-     "Low Kick",
-     "Sucker Punch",
-     "Swords Dance"
-    ],
-    "nature": "Adamant",
-    "evs": [
-     4,
-     252,
-     0,
-     0,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Iron Crown",
-    "item": "Booster Energy",
-    "ability": "Quark Drive",
-    "moves": [
-     "Calm Mind",
-     "Focus Blast",
-     "Psychic Noise",
-     "Tachyon Cutter"
-    ],
-    "nature": "Timid",
-    "evs": [
-     84,
-     0,
-     0,
-     172,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Iron Treads",
-    "item": "Booster Energy",
-    "ability": "Quark Drive",
-    "moves": [
-     "Earthquake",
-     "Endeavor",
-     "Rapid Spin",
-     "Stealth Rock"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     240,
-     0,
-     52,
-     0,
-     24,
-     192
-    ]
-   },
-   {
-    "species": "Iron Valiant",
-    "item": "Booster Energy",
-    "ability": "Quark Drive",
-    "moves": [
-     "Calm Mind",
-     "Focus Blast",
-     "Moonblast",
-     "Shadow Ball"
-    ],
-    "nature": "Timid",
-    "evs": [
-     0,
-     0,
-     0,
-     252,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Kommo-o",
-    "item": "Leftovers",
-    "ability": "Soundproof",
-    "moves": [
-     "Clangorous Soul",
-     "Drain Punch",
-     "Shadow Claw",
-     "Substitute"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     244,
-     16,
-     0,
-     0,
-     0,
-     248
-    ]
-   },
-   {
-    "species": "Kyurem",
-    "item": "Loaded Dice",
-    "ability": "Pressure",
-    "moves": [
-     "Dragon Dance",
-     "Earth Power",
-     "Icicle Spear",
-     "Scale Shot"
-    ],
-    "nature": "Naive",
-    "evs": [
-     0,
-     220,
-     0,
-     36,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Dragonite",
-    "item": "Life Orb",
-    "ability": "Multiscale",
-    "moves": [
-     "Dragon Dance",
-     "Extreme Speed",
-     "Fire Punch",
-     "Outrage"
-    ],
-    "nature": "Adamant",
-    "evs": [
-     0,
-     252,
-     4,
-     0,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Deoxys-Speed",
-    "item": "Focus Sash",
-    "ability": "Pressure",
-    "moves": [
-     "Skill Swap",
-     "Spikes",
-     "Stealth Rock",
-     "Taunt"
-    ],
-    "nature": "Timid",
-    "evs": [
-     248,
-     0,
-     8,
-     0,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Gholdengo",
-    "item": "Custap Berry",
-    "ability": "Good as Gold",
-    "moves": [
-     "Make It Rain",
-     "Nasty Plot",
-     "Recover",
-     "Shadow Ball"
-    ],
-    "nature": "Modest",
-    "evs": [
-     248,
-     0,
-     176,
-     72,
-     0,
-     12
-    ]
-   },
-   {
-    "species": "Great Tusk",
-    "item": "Booster Energy",
-    "ability": "Protosynthesis",
-    "moves": [
-     "Bulk Up",
-     "Headlong Rush",
-     "Ice Spinner",
-     "Taunt"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     248,
-     4,
-     4,
-     0,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Iron Valiant",
-    "item": "Booster Energy",
-    "ability": "Quark Drive",
-    "moves": [
-     "Destiny Bond",
-     "Knock Off",
-     "Moonblast",
-     "Taunt"
-    ],
-    "nature": "Naive",
-    "evs": [
-     0,
-     4,
-     0,
-     252,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Zamazenta",
-    "item": "Life Orb",
-    "ability": "Dauntless Shield",
-    "moves": [
-     "Close Combat",
-     "Crunch",
-     "Heavy Slam",
-     "Ice Fang"
-    ],
-    "nature": "Adamant",
     "evs": [
      0,
      252,
@@ -29628,126 +30629,6 @@
     ]
    },
    {
-    "species": "Walking Wake",
-    "item": "Wise Glasses",
-    "ability": "Protosynthesis",
-    "moves": [
-     "Draco Meteor",
-     "Dragon Tail",
-     "Hydro Steam",
-     "Weather Ball"
-    ],
-    "nature": "Timid",
-    "evs": [
-     12,
-     0,
-     0,
-     244,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Ceruledge",
-    "item": "Focus Sash",
-    "ability": "Weak Armor",
-    "moves": [
-     "Bitter Blade",
-     "Close Combat",
-     "Poltergeist",
-     "Swords Dance"
-    ],
-    "nature": "Adamant",
-    "evs": [
-     0,
-     252,
-     0,
-     0,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Cresselia",
-    "item": "Eject Button",
-    "ability": "Levitate",
-    "moves": [
-     "Lunar Dance",
-     "Moonlight",
-     "Psychic",
-     "Thunder Wave"
-    ],
-    "nature": "Calm",
-    "evs": [
-     252,
-     0,
-     180,
-     0,
-     56,
-     20
-    ]
-   },
-   {
-    "species": "Great Tusk",
-    "item": "Assault Vest",
-    "ability": "Protosynthesis",
-    "moves": [
-     "Close Combat",
-     "Headlong Rush",
-     "Ice Spinner",
-     "Rapid Spin"
-    ],
-    "nature": "Adamant",
-    "evs": [
-     52,
-     252,
-     0,
-     0,
-     0,
-     204
-    ]
-   },
-   {
-    "species": "Ninetales",
-    "item": "Heat Rock",
-    "ability": "Drought",
-    "moves": [
-     "Encore",
-     "Healing Wish",
-     "Overheat",
-     "Will-O-Wisp"
-    ],
-    "nature": "Timid",
-    "evs": [
-     192,
-     0,
-     0,
-     72,
-     0,
-     244
-    ]
-   },
-   {
-    "species": "Zarude",
-    "item": "Leftovers",
-    "ability": "Leaf Guard",
-    "moves": [
-     "Knock Off",
-     "Power Whip",
-     "Swords Dance",
-     "Synthesis"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     32,
-     252,
-     4,
-     0,
-     16,
-     204
-    ]
-   },
-   {
     "species": "Zamazenta",
     "item": "Leftovers",
     "ability": "Dauntless Shield",
@@ -29868,106 +30749,6 @@
     ]
    },
    {
-    "species": "Kyurem",
-    "item": "Assault Vest",
-    "ability": "Pressure",
-    "moves": [
-     "Body Press",
-     "Earth Power",
-     "Freeze-Dry",
-     "Ice Beam"
-    ],
-    "nature": "Modest",
-    "evs": [
-     0,
-     0,
-     252,
-     144,
-     0,
-     112
-    ]
-   },
-   {
-    "species": "Darkrai",
-    "item": "Choice Scarf",
-    "ability": "Bad Dreams",
-    "moves": [
-     "Dark Pulse",
-     "Ice Beam",
-     "Trick",
-     "Will-O-Wisp"
-    ],
-    "nature": "Timid",
-    "evs": [
-     0,
-     0,
-     0,
-     252,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Gholdengo",
-    "item": "Shuca Berry",
-    "ability": "Good as Gold",
-    "moves": [
-     "Make It Rain",
-     "Nasty Plot",
-     "Psyshock",
-     "Thunderbolt"
-    ],
-    "nature": "Modest",
-    "evs": [
-     120,
-     0,
-     0,
-     192,
-     0,
-     196
-    ]
-   },
-   {
-    "species": "Great Tusk",
-    "item": "Leftovers",
-    "ability": "Protosynthesis",
-    "moves": [
-     "Headlong Rush",
-     "Ice Spinner",
-     "Rapid Spin",
-     "Stealth Rock"
-    ],
-    "nature": "Impish",
-    "evs": [
-     232,
-     0,
-     88,
-     0,
-     0,
-     188
-    ]
-   },
-   {
-    "species": "Hatterene",
-    "item": "Rocky Helmet",
-    "ability": "Magic Bounce",
-    "moves": [
-     "Draining Kiss",
-     "Nuzzle",
-     "Pain Split",
-     "Psychic Noise"
-    ],
-    "nature": "Bold",
-    "evs": [
-     248,
-     0,
-     204,
-     0,
-     0,
-     56
-    ]
-   },
-   {
     "species": "Hawlucha",
     "item": "Grassy Seed",
     "ability": "Unburden",
@@ -30048,23 +30829,143 @@
     ]
    },
    {
-    "species": "Slowking-Galar",
-    "item": "Colbur Berry",
-    "ability": "Regenerator",
+    "species": "Gholdengo",
+    "item": "Air Balloon",
+    "ability": "Good as Gold",
     "moves": [
-     "Chilly Reception",
-     "Future Sight",
-     "Sludge Bomb",
-     "Thunder Wave"
+     "Make It Rain",
+     "Nasty Plot",
+     "Recover",
+     "Thunderbolt"
     ],
-    "nature": "Sassy",
+    "nature": "Modest",
+    "evs": [
+     120,
+     0,
+     0,
+     192,
+     0,
+     196
+    ]
+   },
+   {
+    "species": "Garganacl",
+    "item": "Leftovers",
+    "ability": "Purifying Salt",
+    "moves": [
+     "Curse",
+     "Ice Punch",
+     "Recover",
+     "Salt Cure"
+    ],
+    "nature": "Careful",
     "evs": [
      252,
      0,
-     68,
+     4,
      0,
-     188,
+     252,
      0
+    ]
+   },
+   {
+    "species": "Iron Treads",
+    "item": "Clear Amulet",
+    "ability": "Quark Drive",
+    "moves": [
+     "Earthquake",
+     "Knock Off",
+     "Rapid Spin",
+     "Stealth Rock"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     80,
+     120,
+     0,
+     0,
+     116,
+     192
+    ]
+   },
+   {
+    "species": "Moltres",
+    "item": "Heavy-Duty Boots",
+    "ability": "Flame Body",
+    "moves": [
+     "Flamethrower",
+     "Roar",
+     "Roost",
+     "U-turn"
+    ],
+    "nature": "Bold",
+    "evs": [
+     248,
+     0,
+     252,
+     0,
+     8,
+     0
+    ]
+   },
+   {
+    "species": "Samurott-Hisui",
+    "item": "Choice Scarf",
+    "ability": "Sharpness",
+    "moves": [
+     "Ceaseless Edge",
+     "Flip Turn",
+     "Razor Shell",
+     "Sacred Sword"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     252,
+     4,
+     0,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Zamazenta",
+    "item": "Expert Belt",
+    "ability": "Dauntless Shield",
+    "moves": [
+     "Close Combat",
+     "Crunch",
+     "Ice Fang",
+     "Stone Edge"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Kyurem",
+    "item": "Leftovers",
+    "ability": "Pressure",
+    "moves": [
+     "Earth Power",
+     "Freeze-Dry",
+     "Protect",
+     "Substitute"
+    ],
+    "nature": "Timid",
+    "evs": [
+     52,
+     0,
+     0,
+     204,
+     0,
+     252
     ]
    },
    {
@@ -30079,8 +30980,8 @@
     ],
     "nature": "Jolly",
     "evs": [
-     224,
-     32,
+     232,
+     24,
      0,
      0,
      0,
@@ -30088,63 +30989,203 @@
     ]
    },
    {
-    "species": "Great Tusk",
-    "item": "Leftovers",
-    "ability": "Protosynthesis",
-    "moves": [
-     "Close Combat",
-     "Headlong Rush",
-     "Ice Spinner",
-     "Rapid Spin"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     56,
-     200,
-     0,
-     0,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Kyurem",
-    "item": "Choice Specs",
+    "species": "Corviknight",
+    "item": "Rocky Helmet",
     "ability": "Pressure",
     "moves": [
-     "Blizzard",
-     "Earth Power",
-     "Freeze-Dry",
-     "Ice Beam"
+     "Brave Bird",
+     "Defog",
+     "Roost",
+     "U-turn"
     ],
-    "nature": "Timid",
+    "nature": "Impish",
     "evs": [
-     0,
-     0,
+     248,
      0,
      252,
-     4,
-     252
+     0,
+     8,
+     0
     ]
    },
    {
-    "species": "Zapdos",
-    "item": "Heavy-Duty Boots",
-    "ability": "Static",
+    "species": "Dondozo",
+    "item": "Leftovers",
+    "ability": "Unaware",
     "moves": [
-     "Hurricane",
-     "Roost",
-     "Thunder Wave",
-     "Volt Switch"
+     "Body Press",
+     "Curse",
+     "Rest",
+     "Waterfall"
+    ],
+    "nature": "Impish",
+    "evs": [
+     248,
+     0,
+     252,
+     0,
+     8,
+     0
+    ]
+   },
+   {
+    "species": "Slowking-Galar",
+    "item": "Heavy-Duty Boots",
+    "ability": "Regenerator",
+    "moves": [
+     "Chilly Reception",
+     "Future Sight",
+     "Sludge Bomb",
+     "Toxic"
+    ],
+    "nature": "Sassy",
+    "evs": [
+     252,
+     0,
+     16,
+     0,
+     240,
+     0
+    ]
+   },
+   {
+    "species": "Ting-Lu",
+    "item": "Leftovers",
+    "ability": "Vessel of Ruin",
+    "moves": [
+     "Earthquake",
+     "Payback",
+     "Rest",
+     "Sleep Talk"
+    ],
+    "nature": "Careful",
+    "evs": [
+     252,
+     0,
+     4,
+     0,
+     252,
+     0
+    ]
+   },
+   {
+    "species": "Weezing-Galar",
+    "item": "Leftovers",
+    "ability": "Neutralizing Gas",
+    "moves": [
+     "Defog",
+     "Protect",
+     "Toxic",
+     "Will-O-Wisp"
     ],
     "nature": "Bold",
     "evs": [
      248,
      0,
-     252,
-     8,
+     240,
      0,
+     0,
+     20
+    ]
+   },
+   {
+    "species": "Alomomola",
+    "item": "Rocky Helmet",
+    "ability": "Regenerator",
+    "moves": [
+     "Flip Turn",
+     "Protect",
+     "Tickle",
+     "Wish"
+    ],
+    "nature": "Relaxed",
+    "evs": [
+     12,
+     0,
+     244,
+     0,
+     252,
      0
+    ]
+   },
+   {
+    "species": "Iron Treads",
+    "item": "Leftovers",
+    "ability": "Quark Drive",
+    "moves": [
+     "Earthquake",
+     "Ice Spinner",
+     "Rapid Spin",
+     "Stealth Rock"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     156,
+     64,
+     0,
+     0,
+     96,
+     192
+    ]
+   },
+   {
+    "species": "Lokix",
+    "item": "Choice Band",
+    "ability": "Tinted Lens",
+    "moves": [
+     "First Impression",
+     "Knock Off",
+     "Leech Life",
+     "U-turn"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Tornadus-Therian",
+    "item": "Assault Vest",
+    "ability": "Regenerator",
+    "moves": [
+     "Bleakwind Storm",
+     "Heat Wave",
+     "Knock Off",
+     "U-turn"
+    ],
+    "nature": "Timid",
+    "evs": [
+     248,
+     0,
+     20,
+     0,
+     0,
+     240
+    ]
+   },
+   {
+    "species": "Zamazenta",
+    "item": "Choice Band",
+    "ability": "Dauntless Shield",
+    "moves": [
+     "Close Combat",
+     "Crunch",
+     "Heavy Slam",
+     "Stone Edge"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
+     4,
+     252
     ]
    },
    {
@@ -30388,486 +31429,6 @@
     ]
    },
    {
-    "species": "Raging Bolt",
-    "item": "Booster Energy",
-    "ability": "Protosynthesis",
-    "moves": [
-     "Calm Mind",
-     "Dragon Pulse",
-     "Thunderbolt",
-     "Thunderclap"
-    ],
-    "nature": "Modest",
-    "evs": [
-     248,
-     0,
-     8,
-     252,
-     0,
-     0
-    ]
-   },
-   {
-    "species": "Cresselia",
-    "item": "Leftovers",
-    "ability": "Levitate",
-    "moves": [
-     "Calm Mind",
-     "Lunar Blessing",
-     "Moonblast",
-     "Stored Power"
-    ],
-    "nature": "Modest",
-    "evs": [
-     172,
-     0,
-     0,
-     252,
-     0,
-     84
-    ]
-   },
-   {
-    "species": "Ogerpon-Wellspring",
-    "item": "Wellspring Mask",
-    "ability": "Water Absorb",
-    "moves": [
-     "Ivy Cudgel",
-     "Knock Off",
-     "Power Whip",
-     "Taunt"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     0,
-     252,
-     0,
-     0,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Zamazenta",
-    "item": "Light Clay",
-    "ability": "Dauntless Shield",
-    "moves": [
-     "Body Press",
-     "Heavy Slam",
-     "Light Screen",
-     "Reflect"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     104,
-     0,
-     248,
-     0,
-     0,
-     156
-    ]
-   },
-   {
-    "species": "Gholdengo",
-    "item": "Air Balloon",
-    "ability": "Good as Gold",
-    "moves": [
-     "Make It Rain",
-     "Nasty Plot",
-     "Recover",
-     "Thunderbolt"
-    ],
-    "nature": "Modest",
-    "evs": [
-     120,
-     0,
-     0,
-     192,
-     0,
-     196
-    ]
-   },
-   {
-    "species": "Garganacl",
-    "item": "Leftovers",
-    "ability": "Purifying Salt",
-    "moves": [
-     "Curse",
-     "Ice Punch",
-     "Recover",
-     "Salt Cure"
-    ],
-    "nature": "Careful",
-    "evs": [
-     252,
-     0,
-     4,
-     0,
-     252,
-     0
-    ]
-   },
-   {
-    "species": "Iron Treads",
-    "item": "Clear Amulet",
-    "ability": "Quark Drive",
-    "moves": [
-     "Earthquake",
-     "Knock Off",
-     "Rapid Spin",
-     "Stealth Rock"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     80,
-     120,
-     0,
-     0,
-     116,
-     192
-    ]
-   },
-   {
-    "species": "Moltres",
-    "item": "Heavy-Duty Boots",
-    "ability": "Flame Body",
-    "moves": [
-     "Flamethrower",
-     "Roar",
-     "Roost",
-     "U-turn"
-    ],
-    "nature": "Bold",
-    "evs": [
-     248,
-     0,
-     252,
-     0,
-     8,
-     0
-    ]
-   },
-   {
-    "species": "Samurott-Hisui",
-    "item": "Choice Scarf",
-    "ability": "Sharpness",
-    "moves": [
-     "Ceaseless Edge",
-     "Flip Turn",
-     "Razor Shell",
-     "Sacred Sword"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     0,
-     252,
-     4,
-     0,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Zamazenta",
-    "item": "Expert Belt",
-    "ability": "Dauntless Shield",
-    "moves": [
-     "Close Combat",
-     "Crunch",
-     "Ice Fang",
-     "Stone Edge"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     0,
-     252,
-     0,
-     0,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Kyurem",
-    "item": "Leftovers",
-    "ability": "Pressure",
-    "moves": [
-     "Earth Power",
-     "Freeze-Dry",
-     "Protect",
-     "Substitute"
-    ],
-    "nature": "Timid",
-    "evs": [
-     52,
-     0,
-     0,
-     204,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Corviknight",
-    "item": "Rocky Helmet",
-    "ability": "Pressure",
-    "moves": [
-     "Brave Bird",
-     "Defog",
-     "Roost",
-     "U-turn"
-    ],
-    "nature": "Impish",
-    "evs": [
-     248,
-     0,
-     252,
-     0,
-     8,
-     0
-    ]
-   },
-   {
-    "species": "Dondozo",
-    "item": "Leftovers",
-    "ability": "Unaware",
-    "moves": [
-     "Body Press",
-     "Curse",
-     "Rest",
-     "Waterfall"
-    ],
-    "nature": "Impish",
-    "evs": [
-     248,
-     0,
-     252,
-     0,
-     8,
-     0
-    ]
-   },
-   {
-    "species": "Slowking-Galar",
-    "item": "Heavy-Duty Boots",
-    "ability": "Regenerator",
-    "moves": [
-     "Chilly Reception",
-     "Future Sight",
-     "Sludge Bomb",
-     "Toxic"
-    ],
-    "nature": "Sassy",
-    "evs": [
-     252,
-     0,
-     16,
-     0,
-     240,
-     0
-    ]
-   },
-   {
-    "species": "Ting-Lu",
-    "item": "Leftovers",
-    "ability": "Vessel of Ruin",
-    "moves": [
-     "Earthquake",
-     "Payback",
-     "Rest",
-     "Sleep Talk"
-    ],
-    "nature": "Careful",
-    "evs": [
-     252,
-     0,
-     4,
-     0,
-     252,
-     0
-    ]
-   },
-   {
-    "species": "Great Tusk",
-    "item": "Rocky Helmet",
-    "ability": "Protosynthesis",
-    "moves": [
-     "Headlong Rush",
-     "Ice Spinner",
-     "Rapid Spin",
-     "Stealth Rock"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     0,
-     252,
-     0,
-     0,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Kingambit",
-    "item": "Leftovers",
-    "ability": "Supreme Overlord",
-    "moves": [
-     "Iron Head",
-     "Kowtow Cleave",
-     "Sucker Punch",
-     "Swords Dance"
-    ],
-    "nature": "Adamant",
-    "evs": [
-     244,
-     252,
-     0,
-     0,
-     0,
-     12
-    ]
-   },
-   {
-    "species": "Slowking-Galar",
-    "item": "Black Sludge",
-    "ability": "Regenerator",
-    "moves": [
-     "Chilly Reception",
-     "Future Sight",
-     "Sludge Bomb",
-     "Trick"
-    ],
-    "nature": "Relaxed",
-    "evs": [
-     248,
-     0,
-     252,
-     0,
-     8,
-     0
-    ]
-   },
-   {
-    "species": "Tornadus-Therian",
-    "item": "Assault Vest",
-    "ability": "Regenerator",
-    "moves": [
-     "Bleakwind Storm",
-     "Heat Wave",
-     "Knock Off",
-     "U-turn"
-    ],
-    "nature": "Timid",
-    "evs": [
-     176,
-     0,
-     0,
-     0,
-     92,
-     240
-    ]
-   },
-   {
-    "species": "Ogerpon",
-    "item": "Heavy-Duty Boots",
-    "ability": "Defiant",
-    "moves": [
-     "Encore",
-     "Ivy Cudgel",
-     "Knock Off",
-     "U-turn"
-    ],
-    "nature": "Adamant",
-    "evs": [
-     4,
-     252,
-     0,
-     0,
-     0,
-     252
-    ]
-   },
-   {
-    "species": "Blissey",
-    "item": "Heavy-Duty Boots",
-    "ability": "Natural Cure",
-    "moves": [
-     "Calm Mind",
-     "Seismic Toss",
-     "Shadow Ball",
-     "Soft-Boiled"
-    ],
-    "nature": "Calm",
-    "evs": [
-     4,
-     0,
-     252,
-     0,
-     252,
-     0
-    ]
-   },
-   {
-    "species": "Gliscor",
-    "item": "Toxic Orb",
-    "ability": "Poison Heal",
-    "moves": [
-     "Earthquake",
-     "Facade",
-     "Protect",
-     "Swords Dance"
-    ],
-    "nature": "Careful",
-    "evs": [
-     252,
-     0,
-     0,
-     0,
-     252,
-     4
-    ]
-   },
-   {
-    "species": "Samurott-Hisui",
-    "item": "Heavy-Duty Boots",
-    "ability": "Sharpness",
-    "moves": [
-     "Aqua Cutter",
-     "Ceaseless Edge",
-     "Encore",
-     "Knock Off"
-    ],
-    "nature": "Adamant",
-    "evs": [
-     0,
-     252,
-     0,
-     0,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Skarmory",
-    "item": "Heavy-Duty Boots",
-    "ability": "Sturdy",
-    "moves": [
-     "Body Press",
-     "Roost",
-     "Stealth Rock",
-     "Whirlwind"
-    ],
-    "nature": "Bold",
-    "evs": [
-     248,
-     0,
-     252,
-     0,
-     0,
-     8
-    ]
-   },
-   {
     "species": "Dondozo",
     "item": "Leftovers",
     "ability": "Unaware",
@@ -30968,76 +31529,656 @@
     ]
    },
    {
-    "species": "Weezing-Galar",
-    "item": "Leftovers",
-    "ability": "Neutralizing Gas",
+    "species": "Slowking-Galar",
+    "item": "Colbur Berry",
+    "ability": "Regenerator",
     "moves": [
-     "Defog",
-     "Protect",
-     "Toxic",
-     "Will-O-Wisp"
+     "Chilly Reception",
+     "Future Sight",
+     "Sludge Bomb",
+     "Thunder Wave"
+    ],
+    "nature": "Sassy",
+    "evs": [
+     252,
+     0,
+     68,
+     0,
+     188,
+     0
+    ]
+   },
+   {
+    "species": "Great Tusk",
+    "item": "Leftovers",
+    "ability": "Protosynthesis",
+    "moves": [
+     "Close Combat",
+     "Headlong Rush",
+     "Ice Spinner",
+     "Rapid Spin"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     56,
+     200,
+     0,
+     0,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Kingambit",
+    "item": "Leftovers",
+    "ability": "Supreme Overlord",
+    "moves": [
+     "Iron Head",
+     "Low Kick",
+     "Sucker Punch",
+     "Swords Dance"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     140,
+     252,
+     0,
+     0,
+     0,
+     116
+    ]
+   },
+   {
+    "species": "Kyurem",
+    "item": "Choice Specs",
+    "ability": "Pressure",
+    "moves": [
+     "Blizzard",
+     "Earth Power",
+     "Freeze-Dry",
+     "Ice Beam"
+    ],
+    "nature": "Timid",
+    "evs": [
+     0,
+     0,
+     0,
+     252,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Zapdos",
+    "item": "Heavy-Duty Boots",
+    "ability": "Static",
+    "moves": [
+     "Hurricane",
+     "Roost",
+     "Thunder Wave",
+     "Volt Switch"
     ],
     "nature": "Bold",
     "evs": [
      248,
      0,
-     240,
-     0,
-     0,
-     20
-    ]
-   },
-   {
-    "species": "Alomomola",
-    "item": "Rocky Helmet",
-    "ability": "Regenerator",
-    "moves": [
-     "Flip Turn",
-     "Protect",
-     "Tickle",
-     "Wish"
-    ],
-    "nature": "Relaxed",
-    "evs": [
-     12,
-     0,
-     244,
-     0,
      252,
+     8,
+     0,
      0
     ]
    },
    {
-    "species": "Iron Treads",
-    "item": "Leftovers",
-    "ability": "Quark Drive",
+    "species": "Dragapult",
+    "item": "Heavy-Duty Boots",
+    "ability": "Infiltrator",
+    "moves": [
+     "Dragon Darts",
+     "Hex",
+     "U-turn",
+     "Will-O-Wisp"
+    ],
+    "nature": "Naive",
+    "evs": [
+     0,
+     16,
+     0,
+     240,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Gliscor",
+    "item": "Toxic Orb",
+    "ability": "Poison Heal",
     "moves": [
      "Earthquake",
+     "Protect",
+     "Toxic",
+     "Toxic Spikes"
+    ],
+    "nature": "Careful",
+    "evs": [
+     244,
+     0,
+     0,
+     0,
+     168,
+     96
+    ]
+   },
+   {
+    "species": "Iron Crown",
+    "item": "Booster Energy",
+    "ability": "Quark Drive",
+    "moves": [
+     "Calm Mind",
+     "Focus Blast",
+     "Psychic",
+     "Tachyon Cutter"
+    ],
+    "nature": "Timid",
+    "evs": [
+     80,
+     0,
+     4,
+     172,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Kingambit",
+    "item": "Air Balloon",
+    "ability": "Supreme Overlord",
+    "moves": [
+     "Kowtow Cleave",
+     "Low Kick",
+     "Sucker Punch",
+     "Swords Dance"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     252,
+     4,
+     0,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Ogerpon-Wellspring",
+    "item": "Wellspring Mask",
+    "ability": "Water Absorb",
+    "moves": [
+     "Ivy Cudgel",
+     "Knock Off",
+     "Taunt",
+     "U-turn"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     244,
+     12,
+     0,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Ting-Lu",
+    "item": "Rocky Helmet",
+    "ability": "Vessel of Ruin",
+    "moves": [
+     "Heavy Slam",
+     "Ruination",
+     "Stealth Rock",
+     "Taunt"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     24,
+     4,
+     0,
+     0,
+     252,
+     228
+    ]
+   },
+   {
+    "species": "Hatterene",
+    "item": "Rocky Helmet",
+    "ability": "Magic Bounce",
+    "moves": [
+     "Draining Kiss",
+     "Nuzzle",
+     "Pain Split",
+     "Psychic Noise"
+    ],
+    "nature": "Bold",
+    "evs": [
+     248,
+     0,
+     204,
+     0,
+     0,
+     56
+    ]
+   },
+   {
+    "species": "Great Tusk",
+    "item": "Rocky Helmet",
+    "ability": "Protosynthesis",
+    "moves": [
+     "Headlong Rush",
      "Ice Spinner",
      "Rapid Spin",
      "Stealth Rock"
     ],
     "nature": "Jolly",
     "evs": [
-     156,
-     64,
+     0,
+     252,
      0,
      0,
-     96,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Kingambit",
+    "item": "Leftovers",
+    "ability": "Supreme Overlord",
+    "moves": [
+     "Iron Head",
+     "Kowtow Cleave",
+     "Sucker Punch",
+     "Swords Dance"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     244,
+     252,
+     0,
+     0,
+     0,
+     12
+    ]
+   },
+   {
+    "species": "Slowking-Galar",
+    "item": "Black Sludge",
+    "ability": "Regenerator",
+    "moves": [
+     "Chilly Reception",
+     "Future Sight",
+     "Sludge Bomb",
+     "Trick"
+    ],
+    "nature": "Relaxed",
+    "evs": [
+     248,
+     0,
+     252,
+     0,
+     8,
+     0
+    ]
+   },
+   {
+    "species": "Kyurem",
+    "item": "Assault Vest",
+    "ability": "Pressure",
+    "moves": [
+     "Body Press",
+     "Earth Power",
+     "Freeze-Dry",
+     "Ice Beam"
+    ],
+    "nature": "Modest",
+    "evs": [
+     0,
+     0,
+     252,
+     144,
+     0,
+     112
+    ]
+   },
+   {
+    "species": "Darkrai",
+    "item": "Choice Scarf",
+    "ability": "Bad Dreams",
+    "moves": [
+     "Dark Pulse",
+     "Ice Beam",
+     "Trick",
+     "Will-O-Wisp"
+    ],
+    "nature": "Timid",
+    "evs": [
+     0,
+     0,
+     0,
+     252,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Gholdengo",
+    "item": "Shuca Berry",
+    "ability": "Good as Gold",
+    "moves": [
+     "Make It Rain",
+     "Nasty Plot",
+     "Psyshock",
+     "Thunderbolt"
+    ],
+    "nature": "Modest",
+    "evs": [
+     120,
+     0,
+     0,
+     192,
+     0,
+     196
+    ]
+   },
+   {
+    "species": "Great Tusk",
+    "item": "Leftovers",
+    "ability": "Protosynthesis",
+    "moves": [
+     "Headlong Rush",
+     "Ice Spinner",
+     "Rapid Spin",
+     "Stealth Rock"
+    ],
+    "nature": "Impish",
+    "evs": [
+     232,
+     0,
+     88,
+     0,
+     0,
+     188
+    ]
+   },
+   {
+    "species": "Iron Crown",
+    "item": "Booster Energy",
+    "ability": "Quark Drive",
+    "moves": [
+     "Calm Mind",
+     "Focus Blast",
+     "Psychic Noise",
+     "Tachyon Cutter"
+    ],
+    "nature": "Timid",
+    "evs": [
+     84,
+     0,
+     0,
+     172,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Iron Treads",
+    "item": "Booster Energy",
+    "ability": "Quark Drive",
+    "moves": [
+     "Earthquake",
+     "Endeavor",
+     "Rapid Spin",
+     "Stealth Rock"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     240,
+     0,
+     52,
+     0,
+     24,
      192
     ]
    },
    {
-    "species": "Lokix",
-    "item": "Choice Band",
-    "ability": "Tinted Lens",
+    "species": "Iron Valiant",
+    "item": "Booster Energy",
+    "ability": "Quark Drive",
     "moves": [
-     "First Impression",
-     "Knock Off",
-     "Leech Life",
-     "U-turn"
+     "Calm Mind",
+     "Focus Blast",
+     "Moonblast",
+     "Shadow Ball"
+    ],
+    "nature": "Timid",
+    "evs": [
+     0,
+     0,
+     0,
+     252,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Kommo-o",
+    "item": "Leftovers",
+    "ability": "Soundproof",
+    "moves": [
+     "Clangorous Soul",
+     "Drain Punch",
+     "Shadow Claw",
+     "Substitute"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     244,
+     16,
+     0,
+     0,
+     0,
+     248
+    ]
+   },
+   {
+    "species": "Kyurem",
+    "item": "Loaded Dice",
+    "ability": "Pressure",
+    "moves": [
+     "Dragon Dance",
+     "Earth Power",
+     "Icicle Spear",
+     "Scale Shot"
+    ],
+    "nature": "Naive",
+    "evs": [
+     0,
+     220,
+     0,
+     36,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Dragonite",
+    "item": "Life Orb",
+    "ability": "Multiscale",
+    "moves": [
+     "Dragon Dance",
+     "Extreme Speed",
+     "Fire Punch",
+     "Outrage"
     ],
     "nature": "Adamant",
+    "evs": [
+     0,
+     252,
+     4,
+     0,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Deoxys-Speed",
+    "item": "Focus Sash",
+    "ability": "Pressure",
+    "moves": [
+     "Skill Swap",
+     "Spikes",
+     "Stealth Rock",
+     "Taunt"
+    ],
+    "nature": "Timid",
+    "evs": [
+     248,
+     0,
+     8,
+     0,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Gholdengo",
+    "item": "Custap Berry",
+    "ability": "Good as Gold",
+    "moves": [
+     "Make It Rain",
+     "Nasty Plot",
+     "Recover",
+     "Shadow Ball"
+    ],
+    "nature": "Modest",
+    "evs": [
+     248,
+     0,
+     176,
+     72,
+     0,
+     12
+    ]
+   },
+   {
+    "species": "Great Tusk",
+    "item": "Booster Energy",
+    "ability": "Protosynthesis",
+    "moves": [
+     "Bulk Up",
+     "Headlong Rush",
+     "Ice Spinner",
+     "Taunt"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     248,
+     4,
+     4,
+     0,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Iron Valiant",
+    "item": "Booster Energy",
+    "ability": "Quark Drive",
+    "moves": [
+     "Destiny Bond",
+     "Knock Off",
+     "Moonblast",
+     "Taunt"
+    ],
+    "nature": "Naive",
+    "evs": [
+     0,
+     4,
+     0,
+     252,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Zamazenta",
+    "item": "Life Orb",
+    "ability": "Dauntless Shield",
+    "moves": [
+     "Close Combat",
+     "Crunch",
+     "Heavy Slam",
+     "Ice Fang"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Raging Bolt",
+    "item": "Booster Energy",
+    "ability": "Protosynthesis",
+    "moves": [
+     "Calm Mind",
+     "Dragon Pulse",
+     "Thunderbolt",
+     "Thunderclap"
+    ],
+    "nature": "Modest",
+    "evs": [
+     248,
+     0,
+     8,
+     252,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Cresselia",
+    "item": "Leftovers",
+    "ability": "Levitate",
+    "moves": [
+     "Calm Mind",
+     "Lunar Blessing",
+     "Moonblast",
+     "Stored Power"
+    ],
+    "nature": "Modest",
+    "evs": [
+     172,
+     0,
+     0,
+     252,
+     0,
+     84
+    ]
+   },
+   {
+    "species": "Ogerpon-Wellspring",
+    "item": "Wellspring Mask",
+    "ability": "Water Absorb",
+    "moves": [
+     "Ivy Cudgel",
+     "Knock Off",
+     "Power Whip",
+     "Taunt"
+    ],
+    "nature": "Jolly",
     "evs": [
      0,
      252,
@@ -31049,13 +32190,53 @@
    },
    {
     "species": "Zamazenta",
-    "item": "Choice Band",
+    "item": "Light Clay",
     "ability": "Dauntless Shield",
     "moves": [
-     "Close Combat",
-     "Crunch",
+     "Body Press",
      "Heavy Slam",
-     "Stone Edge"
+     "Light Screen",
+     "Reflect"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     104,
+     0,
+     248,
+     0,
+     0,
+     156
+    ]
+   },
+   {
+    "species": "Walking Wake",
+    "item": "Wise Glasses",
+    "ability": "Protosynthesis",
+    "moves": [
+     "Draco Meteor",
+     "Dragon Tail",
+     "Hydro Steam",
+     "Weather Ball"
+    ],
+    "nature": "Timid",
+    "evs": [
+     12,
+     0,
+     0,
+     244,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Ceruledge",
+    "item": "Focus Sash",
+    "ability": "Weak Armor",
+    "moves": [
+     "Bitter Blade",
+     "Close Combat",
+     "Poltergeist",
+     "Swords Dance"
     ],
     "nature": "Adamant",
     "evs": [
@@ -31065,6 +32246,186 @@
      0,
      4,
      252
+    ]
+   },
+   {
+    "species": "Cresselia",
+    "item": "Eject Button",
+    "ability": "Levitate",
+    "moves": [
+     "Lunar Dance",
+     "Moonlight",
+     "Psychic",
+     "Thunder Wave"
+    ],
+    "nature": "Calm",
+    "evs": [
+     252,
+     0,
+     180,
+     0,
+     56,
+     20
+    ]
+   },
+   {
+    "species": "Great Tusk",
+    "item": "Assault Vest",
+    "ability": "Protosynthesis",
+    "moves": [
+     "Close Combat",
+     "Headlong Rush",
+     "Ice Spinner",
+     "Rapid Spin"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     52,
+     252,
+     0,
+     0,
+     0,
+     204
+    ]
+   },
+   {
+    "species": "Ninetales",
+    "item": "Heat Rock",
+    "ability": "Drought",
+    "moves": [
+     "Encore",
+     "Healing Wish",
+     "Overheat",
+     "Will-O-Wisp"
+    ],
+    "nature": "Timid",
+    "evs": [
+     192,
+     0,
+     0,
+     72,
+     0,
+     244
+    ]
+   },
+   {
+    "species": "Zarude",
+    "item": "Leftovers",
+    "ability": "Leaf Guard",
+    "moves": [
+     "Knock Off",
+     "Power Whip",
+     "Swords Dance",
+     "Synthesis"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     32,
+     252,
+     4,
+     0,
+     16,
+     204
+    ]
+   },
+   {
+    "species": "Ogerpon",
+    "item": "Heavy-Duty Boots",
+    "ability": "Defiant",
+    "moves": [
+     "Encore",
+     "Ivy Cudgel",
+     "Knock Off",
+     "U-turn"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     4,
+     252,
+     0,
+     0,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Blissey",
+    "item": "Heavy-Duty Boots",
+    "ability": "Natural Cure",
+    "moves": [
+     "Calm Mind",
+     "Seismic Toss",
+     "Shadow Ball",
+     "Soft-Boiled"
+    ],
+    "nature": "Calm",
+    "evs": [
+     4,
+     0,
+     252,
+     0,
+     252,
+     0
+    ]
+   },
+   {
+    "species": "Gliscor",
+    "item": "Toxic Orb",
+    "ability": "Poison Heal",
+    "moves": [
+     "Earthquake",
+     "Facade",
+     "Protect",
+     "Swords Dance"
+    ],
+    "nature": "Careful",
+    "evs": [
+     252,
+     0,
+     0,
+     0,
+     252,
+     4
+    ]
+   },
+   {
+    "species": "Samurott-Hisui",
+    "item": "Heavy-Duty Boots",
+    "ability": "Sharpness",
+    "moves": [
+     "Aqua Cutter",
+     "Ceaseless Edge",
+     "Encore",
+     "Knock Off"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Skarmory",
+    "item": "Heavy-Duty Boots",
+    "ability": "Sturdy",
+    "moves": [
+     "Body Press",
+     "Roost",
+     "Stealth Rock",
+     "Whirlwind"
+    ],
+    "nature": "Bold",
+    "evs": [
+     248,
+     0,
+     252,
+     0,
+     0,
+     8
     ]
    },
    {
@@ -31308,6 +32669,226 @@
     ]
    },
    {
+    "species": "Raging Bolt",
+    "item": "Booster Energy",
+    "ability": "Protosynthesis",
+    "moves": [
+     "Calm Mind",
+     "Thunderclap",
+     "Thunderbolt",
+     "Dragon Pulse"
+    ],
+    "nature": "Modest",
+    "evs": [
+     64,
+     0,
+     28,
+     252,
+     0,
+     164
+    ]
+   },
+   {
+    "species": "Corviknight",
+    "item": "Rocky Helmet",
+    "ability": "Pressure",
+    "moves": [
+     "Brave Bird",
+     "Roost",
+     "U-turn",
+     "Iron Defense"
+    ],
+    "nature": "Impish",
+    "evs": [
+     252,
+     0,
+     252,
+     0,
+     4,
+     0
+    ]
+   },
+   {
+    "species": "Kingambit",
+    "item": "Black Glasses",
+    "ability": "Supreme Overlord",
+    "moves": [
+     "Swords Dance",
+     "Kowtow Cleave",
+     "Sucker Punch",
+     "Iron Head"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     204,
+     252,
+     0,
+     0,
+     0,
+     52
+    ]
+   },
+   {
+    "species": "Samurott-Hisui",
+    "item": "Assault Vest",
+    "ability": "Sharpness",
+    "moves": [
+     "Ceaseless Edge",
+     "Aqua Cutter",
+     "Knock Off",
+     "Sucker Punch"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     248,
+     84,
+     0,
+     0,
+     124,
+     52
+    ]
+   },
+   {
+    "species": "Gholdengo",
+    "item": "Air Balloon",
+    "ability": "Good as Gold",
+    "moves": [
+     "Make It Rain",
+     "Shadow Ball",
+     "Recover",
+     "Nasty Plot"
+    ],
+    "nature": "Bold",
+    "evs": [
+     252,
+     0,
+     196,
+     0,
+     0,
+     60
+    ]
+   },
+   {
+    "species": "Samurott-Hisui",
+    "item": "Focus Sash",
+    "ability": "Sharpness",
+    "moves": [
+     "Ceaseless Edge",
+     "Razor Shell",
+     "Aqua Jet",
+     "Knock Off"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Landorus-Therian",
+    "item": "Rocky Helmet",
+    "ability": "Intimidate",
+    "moves": [
+     "Stealth Rock",
+     "Earth Power",
+     "U-turn",
+     "Taunt"
+    ],
+    "nature": "Timid",
+    "evs": [
+     252,
+     0,
+     4,
+     0,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Heatran",
+    "item": "Leftovers",
+    "ability": "Flash Fire",
+    "moves": [
+     "Magma Storm",
+     "Earth Power",
+     "Iron Head",
+     "Protect"
+    ],
+    "nature": "Calm",
+    "evs": [
+     252,
+     0,
+     0,
+     0,
+     180,
+     76
+    ]
+   },
+   {
+    "species": "Sinistcha",
+    "item": "Leftovers",
+    "ability": "Heatproof",
+    "moves": [
+     "Calm Mind",
+     "Hex",
+     "Stun Spore",
+     "Strength Sap"
+    ],
+    "nature": "Bold",
+    "evs": [
+     252,
+     0,
+     160,
+     0,
+     0,
+     96
+    ]
+   },
+   {
+    "species": "Zapdos",
+    "item": "Heavy-Duty Boots",
+    "ability": "Static",
+    "moves": [
+     "Hurricane",
+     "Volt Switch",
+     "Heat Wave",
+     "Roost"
+    ],
+    "nature": "Timid",
+    "evs": [
+     0,
+     0,
+     4,
+     252,
+     0,
+     252
+    ]
+   },
+   {
+    "species": "Toxapex",
+    "item": "Black Sludge",
+    "ability": "Regenerator",
+    "moves": [
+     "Liquidation",
+     "Baneful Bunker",
+     "Toxic",
+     "Recover"
+    ],
+    "nature": "Calm",
+    "evs": [
+     252,
+     0,
+     36,
+     0,
+     220,
+     0
+    ]
+   },
+   {
     "species": "Tyranitar",
     "item": "Smooth Rock",
     "ability": "Sand Stream",
@@ -31424,6 +33005,126 @@
      0,
      0,
      4,
+     252
+    ]
+   },
+   {
+    "species": "Conkeldurr",
+    "item": "Flame Orb",
+    "ability": "Guts",
+    "moves": [
+     "Facade",
+     "Thunder Punch",
+     "Knock Off",
+     "Mach Punch"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     252,
+     252,
+     0,
+     0,
+     4,
+     0
+    ]
+   },
+   {
+    "species": "Alomomola",
+    "item": "Lagging Tail",
+    "ability": "Regenerator",
+    "moves": [
+     "Flip Turn",
+     "Surf",
+     "Protect",
+     "Wish"
+    ],
+    "nature": "Relaxed",
+    "evs": [
+     252,
+     0,
+     252,
+     4,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Corviknight",
+    "item": "Rocky Helmet",
+    "ability": "Pressure",
+    "moves": [
+     "Iron Defense",
+     "Body Press",
+     "U-turn",
+     "Defog"
+    ],
+    "nature": "Careful",
+    "evs": [
+     248,
+     0,
+     8,
+     0,
+     252,
+     0
+    ]
+   },
+   {
+    "species": "Lokix",
+    "item": "Choice Band",
+    "ability": "Tinted Lens",
+    "moves": [
+     "First Impression",
+     "U-turn",
+     "Knock Off",
+     "Leech Life"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     0,
+     252,
+     0,
+     0,
+     4,
+     252
+    ]
+   },
+   {
+    "species": "Slowking-Galar",
+    "item": "Assault Vest",
+    "ability": "Regenerator",
+    "moves": [
+     "Ice Beam",
+     "Sludge Wave",
+     "Psychic",
+     "Flamethrower"
+    ],
+    "nature": "Quiet",
+    "evs": [
+     252,
+     4,
+     0,
+     252,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Iron Treads",
+    "item": "Heavy-Duty Boots",
+    "ability": "Quark Drive",
+    "moves": [
+     "Volt Switch",
+     "Rapid Spin",
+     "Earthquake",
+     "Stealth Rock"
+    ],
+    "nature": "Jolly",
+    "evs": [
+     4,
+     252,
+     0,
+     0,
+     0,
      252
     ]
    },
@@ -31548,133 +33249,133 @@
     ]
    },
    {
-    "species": "Samurott-Hisui",
-    "item": "Focus Sash",
-    "ability": "Sharpness",
-    "moves": [
-     "Ceaseless Edge",
-     "Razor Shell",
-     "Aqua Jet",
-     "Knock Off"
-    ],
-    "nature": "Jolly",
-    "evs": [
-     0,
-     252,
-     0,
-     0,
-     4,
-     252
-    ]
-   },
-   {
-    "species": "Landorus-Therian",
+    "species": "Incineroar",
     "item": "Rocky Helmet",
     "ability": "Intimidate",
     "moves": [
-     "Stealth Rock",
-     "Earth Power",
-     "U-turn",
-     "Taunt"
+     "Parting Shot",
+     "Flare Blitz",
+     "Knock Off",
+     "Fake Out"
     ],
-    "nature": "Timid",
+    "nature": "Impish",
     "evs": [
      252,
      0,
-     4,
+     156,
      0,
-     0,
-     252
+     100,
+     0
     ]
    },
    {
-    "species": "Heatran",
-    "item": "Leftovers",
-    "ability": "Flash Fire",
+    "species": "Kingambit",
+    "item": "Assault Vest",
+    "ability": "Defiant",
     "moves": [
-     "Magma Storm",
-     "Earth Power",
+     "Sucker Punch",
      "Iron Head",
+     "Kowtow Cleave",
+     "Brick Break"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     148,
+     252,
+     0,
+     0,
+     0,
+     108
+    ]
+   },
+   {
+    "species": "Farigiraf",
+    "item": "Sitrus Berry",
+    "ability": "Armor Tail",
+    "moves": [
+     "Psychic",
+     "Hyper Voice",
+     "Trick Room",
      "Protect"
     ],
-    "nature": "Calm",
+    "nature": "Modest",
     "evs": [
      252,
      0,
+     128,
      0,
-     0,
-     180,
-     76
+     128,
+     0
     ]
    },
    {
-    "species": "Sinistcha",
-    "item": "Leftovers",
-    "ability": "Heatproof",
+    "species": "Tornadus",
+    "item": "Covert Cloak",
+    "ability": "Prankster",
     "moves": [
-     "Calm Mind",
-     "Hex",
-     "Stun Spore",
-     "Strength Sap"
-    ],
-    "nature": "Bold",
-    "evs": [
-     252,
-     0,
-     160,
-     0,
-     0,
-     96
-    ]
-   },
-   {
-    "species": "Zapdos",
-    "item": "Heavy-Duty Boots",
-    "ability": "Static",
-    "moves": [
-     "Hurricane",
-     "Volt Switch",
-     "Heat Wave",
-     "Roost"
+     "Bleakwind Storm",
+     "Taunt",
+     "Tailwind",
+     "Chilling Water"
     ],
     "nature": "Timid",
     "evs": [
-     0,
-     0,
      4,
+     0,
+     0,
      252,
      0,
      252
     ]
    },
    {
-    "species": "Toxapex",
-    "item": "Black Sludge",
-    "ability": "Regenerator",
+    "species": "Raging Bolt",
+    "item": "Leftovers",
+    "ability": "Protosynthesis",
     "moves": [
-     "Liquidation",
-     "Baneful Bunker",
-     "Toxic",
-     "Recover"
+     "Thunderclap",
+     "Dragon Pulse",
+     "Calm Mind",
+     "Protect"
     ],
-    "nature": "Calm",
+    "nature": "Modest",
     "evs": [
      252,
      0,
-     36,
      0,
-     220,
+     252,
+     0,
+     0
+    ]
+   },
+   {
+    "species": "Rillaboom",
+    "item": "Eject Button",
+    "ability": "Grassy Surge",
+    "moves": [
+     "Fake Out",
+     "U-turn",
+     "Grassy Glide",
+     "Wood Hammer"
+    ],
+    "nature": "Adamant",
+    "evs": [
+     252,
+     252,
+     0,
+     0,
+     4,
      0
     ]
    }
   ],
   "meta": {
    "source": "smogon sample+community via crob.at",
-   "n_teams": 25,
-   "n_mons": 136,
+   "n_teams": 28,
+   "n_mons": 153,
    "provenance": {
     "sample": 21,
-    "community": 4
+    "community": 7
    },
    "team_provenance": [
     "sample",
@@ -31701,9 +33402,12 @@
     "community",
     "community",
     "community",
+    "community",
+    "community",
+    "community",
     "community"
    ],
-   "built": "2026-10-29"
+   "built": "2026-11-20"
   }
  },
  "gen9uu": {
