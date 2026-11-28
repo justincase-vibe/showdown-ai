@@ -324,6 +324,19 @@ def main(argv: Optional[list] = None) -> int:
     return 0
 
 
+_MOVES_LK_CACHE: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+def _moves_lookup() -> Dict[str, Dict[str, Any]]:
+    """Cached move-DB lookup for the S3.4 action-mix metric (one read per
+    process; the classifier reads only category/side_condition/boosts)."""
+    global _MOVES_LK_CACHE
+    if _MOVES_LK_CACHE is None:
+        from net.action_mix import build_moves_lookup
+        _MOVES_LK_CACHE = build_moves_lookup()
+    return _MOVES_LK_CACHE
+
+
 def _train_round_m1(trainer, pool, fmt, vocabs, device,
                     n_battles, max_steps, n_servers, per_server, port_base,
                     battle_hook, stop_check) -> Dict[str, Any]:
@@ -357,7 +370,8 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
     srv_pool.start(wait_healthy=True)
 
     all_steps: list = []
-    records: list = []      # one per battle: {a1_won, a2_won, crashed}
+    all_actions: list = []  # S3.4: executed learner actions (action-mix metric)
+    records: list = []      # one per battle: {a1_won, a2_won, crashed, ...}
     lock = threading.Lock()
     next_idx = {"i": 0}
     stop_evt = threading.Event()
@@ -394,11 +408,13 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
             crashed = False
             crash_reason = None
             traj: list = []
+            actions_log: list = []
             try:
                 with srv_pool.battle_slot() as server_cfg:
                     traj, a1_won, a2_won, _n = _play_one_battle(
                         my_agent, opp_agent, fmt, vocabs, device,
-                        server_cfg, trainer.round * 1000 + i, max_steps)
+                        server_cfg, trainer.round * 1000 + i, max_steps,
+                        action_log=actions_log)
             except Exception as exc:
                 crashed = True
                 crash_reason = f"{type(exc).__name__}: {exc}"
@@ -419,11 +435,13 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
 
             with lock:
                 records.append({"a1_won": a1_won, "a2_won": a2_won,
+                                "opp": opp_ref.name,
                                 "crashed": crashed,
                                 "steps": (0 if crashed else len(traj)),
                                 "crash_reason": crash_reason})
                 if not crashed:
                     all_steps.extend(traj)
+                    all_actions.extend(actions_log)
 
     n_workers = max(1, min(n_battles, n_servers * per_server))
     print(f"[m1gate] {n_battles} battles x {n_workers} workers "
@@ -454,12 +472,41 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
                      and r["steps"] >= max_steps)
     maxsteps_share = (n_maxsteps / n_played) if n_played else float("nan")
 
+    # S3.4: W/L/D PER OPPONENT + realised opponent mix (crashes are in
+    # "n" but in no W/L/D bucket — the draw rule above already excludes them).
+    opp_wld: Dict[str, Dict[str, int]] = {}
+    for r in records:
+        slot = opp_wld.setdefault(r.get("opp") or "?",
+                                  {"w": 0, "l": 0, "d": 0, "n": 0})
+        slot["n"] += 1
+        if r["a1_won"] and not r["a2_won"]:
+            slot["w"] += 1
+        elif r["a2_won"] and not r["a1_won"]:
+            slot["l"] += 1
+        elif not r["crashed"]:
+            slot["d"] += 1
+    n_rec = len(records)
+    opp_mix = {k: (v["n"] / n_rec if n_rec else 0.0) for k, v in opp_wld.items()}
+    crash_reasons = [r["crash_reason"] for r in records
+                     if r.get("crash_reason")]
+
     # PPO update
     metrics = {"battles": n_battles, "transitions": len(all_steps),
                "a1_wins": n_wins, "a1_losses": n_losses, "draws": n_draws,
                "crashed": n_crashed, "loss": float("nan"),
                "max_steps_terminations": n_maxsteps,
                "max_steps_share": maxsteps_share}
+    metrics["opp_wld"] = opp_wld
+    metrics["opp_mix"] = {k: round(v, 4) for k, v in opp_mix.items()}
+    metrics["crash_reasons"] = crash_reasons[:5]
+    # S3.4: sampled action mix (attack/switch/hazard/setup/status/other)
+    if all_actions:
+        from net.action_mix import action_mix
+        metrics["action_mix"] = {k: round(v, 4)
+                                 for k, v in action_mix(
+                                     all_actions, _moves_lookup()).items()}
+    else:
+        metrics["action_mix"] = None
     if len(all_steps) >= 2:
         batch = steps_to_batch(all_steps, device=device)
         n = len(batch["action_index"])
@@ -491,6 +538,19 @@ def _train_round_m1(trainer, pool, fmt, vocabs, device,
         metrics["max_steps_terminations"] = n_maxsteps
         metrics["max_steps_share"] = maxsteps_share
         metrics["value_std"] = round(value_std, 5)
+        # S3.4: value explained variance (1 - Var(ret - V) / Var(ret))
+        rets_f = rets.astype(np.float64)
+        vals_f = batch["old_value"].detach().cpu().numpy().astype(np.float64)
+        var_ret = float(rets_f.var())
+        if var_ret > 1e-12:
+            explained_var = 1.0 - float((rets_f - vals_f).var()) / var_ret
+        else:
+            explained_var = float("nan")
+        metrics["value_explained_var"] = round(explained_var, 5)
+        # S3.4: log(n_legal) — mean log of the legal-action set size
+        n_legal = np.clip(batch["action_mask"].detach().cpu().numpy()
+                          .sum(-1), 1, None)
+        metrics["log_n_legal"] = round(float(np.log(n_legal).mean()), 5)
 
     # Checkpoint — the standard self-play format (net.trainer.save_checkpoint):
     # {"net": state_for_save(), "round": int} — resume (main) and load_file
@@ -715,8 +775,14 @@ def _eval_round_m1(trainer, full_pool, fmt, vocabs, device,
 
 
 def _play_one_battle(agent, opp_agent, fmt, vocabs, device,
-                     server_cfg, seed, max_steps):
-    """Play one battle: agent (p1) vs opp_agent (p2). Returns (traj, a1_won, a2_won, steps)."""
+                     server_cfg, seed, max_steps,
+                     action_log: Optional[list] = None):
+    """Play one battle: agent (p1) vs opp_agent (p2). Returns (traj, a1_won, a2_won, steps).
+
+    ``action_log`` (optional): when given, each EXECUTED learner action dict
+    is appended (S3.4 action-mix metric). Default None = no logging, so
+    existing call sites are unchanged.
+    """
     import numpy as np
     import logging
     from net.env import (ShowdownEnv, StrongTeamBuilder, build_action_list,
@@ -752,6 +818,8 @@ def _play_one_battle(agent, opp_agent, fmt, vocabs, device,
                     pe = action_to_pe(d.action, env.battle1)
                     if pe >= 0:
                         actions[a1] = np.int64(pe)
+                        if action_log is not None:
+                            action_log.append(d.action)
                         pending = (obs_dict, d.action_index,
                                    float(d.logprob), float(d.value))
                 else:
