@@ -6,6 +6,10 @@ parts: the Wilson lower-CI math, the decision-rule verdict, and the
 per-opponent pooling. The reference Wilson values were verified by hand
 against the closed-form formula (z=1.959963984540054).
 
+NOTE (2026-11-28): the pins below were RE-COMPUTED after the z^2/(4n^2) fix
+in tools/gate_eval.py — the original pins had been derived with the wrong
+term z^2/(4n), which inflated every half-width ~2.2x (plan §1.2, resolved).
+
 Run:  python -m pytest tools/tests/test_gate_eval.py -q
 """
 from __future__ import annotations
@@ -36,25 +40,27 @@ def test_wilson_zero_wins_is_zero():
 
 
 def test_wilson_extreme_small_n():
-    # 1/10 falls below zero before clipping -> 0.0 (Wilson is conservative)
-    assert wilson_lower(1, 10) == 0.0
-    # verified closed-form values (z = 1.959963984540054)
-    assert abs(wilson_lower(5, 10) - 0.007366) < 1e-4
-    assert abs(wilson_lower(9, 10) - 0.330068) < 1e-4
-    assert abs(wilson_lower(10, 10) - 0.422416) < 1e-4
+    # verified closed-form values (z = 1.959963984540054), recomputed 2026-11-28
+    # after the z^2/(4n^2) fix (the old pins used the wrong term z^2/(4n))
+    assert abs(wilson_lower(1, 10) - 0.017876) < 1e-4
+    assert abs(wilson_lower(5, 10) - 0.236593) < 1e-4
+    assert abs(wilson_lower(9, 10) - 0.595850) < 1e-4
+    assert abs(wilson_lower(10, 10) - 0.722467) < 1e-4
 
 
 def test_wilson_gate_scale_values():
-    # the values the gate verdict actually lives on (n ~ 400)
-    assert abs(wilson_lower(200, 400) - 0.393211) < 1e-4
-    assert abs(wilson_lower(280, 400) - 0.593088) < 1e-4
+    # the values the gate verdict actually lives on (n ~ 400); recomputed
+    # 2026-11-28 after the z^2/(4n^2) fix
+    assert abs(wilson_lower(200, 400) - 0.451235) < 1e-4
+    assert abs(wilson_lower(280, 400) - 0.653363) < 1e-4
     # monotonic in wins
     assert wilson_lower(150, 407) < wilson_lower(200, 407) < wilson_lower(280, 407)
 
 
 def test_wilson_upper_symmetric():
-    assert abs(wilson_upper(200, 400) - (1.0 - 0.393211)) < 1e-4
-    assert wilson_upper(10, 10) == 1.0
+    assert abs(wilson_upper(200, 400) - (1.0 - 0.451235)) < 1e-4
+    # 10/10: the clamp may not fire (float sum lands 1 ulp below 1.0)
+    assert abs(wilson_upper(10, 10) - 1.0) < 1e-9
     # 0/10: the upper bound is POSITIVE (true p could be > 0) — the classic
     # reason Wilson beats the naive interval
     assert 0.0 < wilson_upper(0, 10) < 1.0
@@ -181,13 +187,39 @@ def test_validity_clean_when_floor_is_weak():
 
 
 def test_apply_validity_caps_pass_when_intervals_overlap():
-    # C1 floor at 20% (n=400, upper ~0.27); net at 32.5% (n=400, lower ~0.22):
-    # margin 12.5 pts >= 10 BUT the 95% intervals overlap -> cap at CONTINUE
+    # C1 floor at 20% (n=400, upper 0.242); net at 32% (n=100, lower 0.227):
+    # margin 12 pts >= 10 BUT the 95% intervals OVERLAP -> cap at CONTINUE.
+    # 2026-11-28: re-pinned on the CORRECT Wilson widths — the old case
+    # (130/400 vs 80/400, margin 12.5 pts) only overlapped because of the
+    # inflated CIs; with correct widths it is a clean non-overlap (PASS).
     v = build_validity(_entries_with_c1((80, 400), (80, 400)))
-    net = {"win_rate": 130 / 400, "lower_ci_95": wilson_lower(130, 400),
-           "upper_ci_95": wilson_upper(130, 400)}
+    net = {"win_rate": 32 / 100, "lower_ci_95": wilson_lower(32, 100),
+           "upper_ci_95": wilson_upper(32, 100)}
+    # the cap must come from the OVERLAP branch (margin is fine)
+    assert 32 / 100 - 80 / 400 >= 0.10
     out = apply_validity("PASS", net, v)
     assert out.startswith("CONTINUE (capped")
+
+
+def test_apply_validity_margin_ok_but_overlapping_is_capped_explicitly():
+    # guards the two conditions of the cap rule separately (correct CIs):
+    # (a) margin ok + overlap -> cap;  (b) margin ok + no overlap -> PASS.
+    # net margin is 12 pts (float-safe above the 10-pt bar).
+    v = build_validity(_entries_with_c1((80, 400), (80, 400)))
+    c1_upper = v["c1"]["upper_ci_95"]
+    net_overlapping = {"win_rate": 32 / 100,
+                       "lower_ci_95": wilson_lower(32, 100),
+                       "upper_ci_95": wilson_upper(32, 100)}
+    net_clear = {"win_rate": 0.50,
+                 "lower_ci_95": wilson_lower(200, 400),
+                 "upper_ci_95": wilson_upper(200, 400)}
+    # sanity: the fixtures actually exercise the two branches
+    assert 32 / 100 - 80 / 400 >= 0.10 \
+        and c1_upper >= net_overlapping["lower_ci_95"]
+    assert 0.50 - 0.20 >= 0.10 and c1_upper < net_clear["lower_ci_95"]
+    assert apply_validity("PASS", net_overlapping, v).startswith(
+        "CONTINUE (capped")
+    assert apply_validity("PASS", net_clear, v) == "PASS"
 
 
 def test_apply_validity_pass_survives_with_clear_margin():

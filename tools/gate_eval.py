@@ -107,26 +107,34 @@ def wilson_lower(wins: int, n: int,
     Wilson (not the naive normal approx) because it stays in [0,1] and is
     well-behaved at extreme proportions. Pure function -> unit-testable.
     ``n == 0`` -> nan (no data).
+
+    FORMULA (2026-11-28 fix): the term inside the sqrt is z^2/(4n^2) —
+    ``z2_over_n / (4.0 * n)``. The previous ``z2_over_n / 4.0`` (= z^2/(4n))
+    inflated every half-width by ~2.2x at n=400-800; the old "verified" test
+    pins had been computed with the same wrong term (plan §1.2, resolved).
     """
     if n <= 0:
         return float("nan")
     p = wins / n
     z2_over_n = z * z / n
     centre = (p + z2_over_n / 2.0) / (1.0 + z2_over_n)
-    half = (z * math.sqrt(p * (1.0 - p) / n + z2_over_n / 4.0)) \
+    half = (z * math.sqrt(p * (1.0 - p) / n + z2_over_n / (4.0 * n))) \
         / (1.0 + z2_over_n)
     return max(0.0, centre - half)
 
 
 def wilson_upper(wins: int, n: int,
                  z: float = 1.959963984540054) -> float:
-    """Upper bound of the Wilson 95% score interval (symmetric form)."""
+    """Upper bound of the Wilson 95% score interval (symmetric form).
+
+    Same z^2/(4n^2) fix as :func:`wilson_lower` (see its docstring).
+    """
     if n <= 0:
         return float("nan")
     p = wins / n
     z2_over_n = z * z / n
     centre = (p + z2_over_n / 2.0) / (1.0 + z2_over_n)
-    half = (z * math.sqrt(p * (1.0 - p) / n + z2_over_n / 4.0)) \
+    half = (z * math.sqrt(p * (1.0 - p) / n + z2_over_n / (4.0 * n))) \
         / (1.0 + z2_over_n)
     return min(1.0, centre + half)
 
